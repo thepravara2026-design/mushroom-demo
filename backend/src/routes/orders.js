@@ -207,11 +207,11 @@ router.get('/:id/invoice', authMiddleware, async (req, res) => {
       invoiceNumber: `INV-${order.id.substring(0, 8).toUpperCase()}-${new Date(order.created_at).getFullYear()}`,
       invoiceDate: order.created_at,
       seller: {
-        name: "MycoFlora Bio-Farms Private Limited",
-        address: "7th Spawn Laboratory, Bioscience Park, Phase 1, Bangalore, Karnataka, 560100",
-        gstin: "29AABCX1234F1Z9",
-        email: "support@mycoflorafarms.com",
-        phone: "+91 80 4991 3822"
+        name: "Sporekart Store Private Limited",
+        address: "4th Genetic Floor, Agritech Park, Phase 2, Bangalore, Karnataka, 560064",
+        gstin: "29SPKRT9876A1Z0",
+        email: "support@sporekart.com",
+        phone: "+91 80 4991 3800"
       },
       buyer: {
         name: user ? user.full_name : "Valued Cultivator",

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MycoFlora | Premium Mushroom Cultivation & Spawn Store</title>
+  <title>Sporekart | Premium Mushroom Genetics & Spawn Store</title>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,6 +14,8 @@
   <link rel="stylesheet" href="/style.css">
   <!-- Razorpay SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <!-- Three.js CDN for 3D graphics -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
@@ -30,12 +32,13 @@
     <div class="header-container">
       <a href="#" class="logo" id="nav-logo">
         <i class="fa-solid fa-mushroom logo-icon"></i>
-        <span>Myco<span>Flora</span></span>
+        <span>Spore<span>kart</span></span>
       </a>
 
       <nav class="main-nav">
-        <a href="#shop" class="nav-link active" id="btn-nav-shop"><i class="fa-solid fa-seedling"></i> Laboratory Shop</a>
-        <a href="#track" class="nav-link" id="btn-nav-track"><i class="fa-solid fa-truck-ramp-box"></i> Cultivation Tracker</a>
+        <a href="#shop" class="nav-link active" id="btn-nav-shop"><i class="fa-solid fa-basket-shopping"></i> Shop</a>
+        <a href="#track" class="nav-link" id="btn-nav-track" style="display:none;"><i class="fa-solid fa-seedling"></i> Cultivation Support</a>
+        <a href="#admin" class="nav-link" id="btn-nav-admin" style="display:none;"><i class="fa-solid fa-screwdriver-wrench"></i> Admin Panel</a>
       </nav>
 
       <div class="header-actions">
@@ -56,8 +59,8 @@
   <section class="hero" id="hero-section">
     <div class="hero-content">
       <div class="hero-tag">BIO-REVOLUTION AT HOME</div>
-      <h1>Cultivate Gourmet & <br>Medicinal Mushrooms</h1>
-      <p>Source high-viability liquid cultures, ready-to-fruit mycelium blocks, sterilization gear, and follow real-time growth incubation tracking.</p>
+      <h1>Premium Spawn Seeds & <br>Organic Mushrooms</h1>
+      <p>Source high-viability liquid cultures, ready-to-fruit mycelium block spawns, organic culinary mushrooms, and follow real-time growth incubation tracking.</p>
       <div class="hero-actions-row">
         <a href="#shop" class="btn btn-primary" id="hero-shop-btn">Explore Spawn Catalog</a>
         <a href="#calculator-anchor" class="btn btn-secondary">Substrate Calculator</a>
@@ -65,7 +68,7 @@
     </div>
     <div class="hero-visual">
       <div class="glowing-orb"></div>
-      <img src="https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600" alt="Mycelium Colonization" class="hero-image">
+      <canvas id="hero-three-canvas" class="hero-canvas"></canvas>
     </div>
   </section>
 
@@ -76,13 +79,13 @@
     <section id="shop-page" class="page-section active">
       <div class="section-header">
         <div>
-          <h2>Sterile Laboratory Inventory</h2>
-          <p class="subtitle">Filter and select active genetics, cultivation gear, and fresh harvests.</p>
+          <h2>Active Inventory Storefront</h2>
+          <p class="subtitle">Filter and select high-viability genetics, grains spawn, and fresh mushroom harvests.</p>
         </div>
         <div class="filter-controls">
           <div class="search-bar">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" id="shop-search" placeholder="Search cultures, spore syringes...">
+            <input type="text" id="shop-search" placeholder="Search cultures, spawns, mushrooms...">
           </div>
         </div>
       </div>
@@ -90,10 +93,8 @@
       <!-- Categories Navigation -->
       <div class="category-filters-row">
         <button class="cat-btn active" data-category="all">All Items</button>
-        <button class="cat-btn" data-category="spawn"><i class="fa-solid fa-dna"></i> Grain Spawn & Spores (5% GST)</button>
-        <button class="cat-btn" data-category="kits"><i class="fa-solid fa-box-archive"></i> Fruiting Kits (12% GST)</button>
-        <button class="cat-btn" data-category="mushrooms"><i class="fa-solid fa-utensils"></i> Fresh Harvests (5% GST)</button>
-        <button class="cat-btn" data-category="tools"><i class="fa-solid fa-flask"></i> Cultivation Tools (18% GST)</button>
+        <button class="cat-btn" data-category="spawn"><i class="fa-solid fa-dna"></i> Spawn & Seeds</button>
+        <button class="cat-btn" data-category="mushrooms"><i class="fa-solid fa-mushroom"></i> Fresh & Dried Mushrooms</button>
       </div>
 
       <!-- Catalog Grid -->
@@ -101,7 +102,7 @@
         <!-- Products will be injected dynamically -->
         <div class="grid-skeleton">
           <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
-          <p>Connecting to MycoFlora Genetics Database...</p>
+          <p>Connecting to Sporekart Genetics Database...</p>
         </div>
       </div>
 
@@ -153,22 +154,22 @@
       </div>
     </section>
 
-    <!-- CULTIVATION TRACKER PAGE -->
+    <!-- CULTIVATION TRACKER PAGE (GROWER SUPPORT) -->
     <section id="tracker-page" class="page-section">
       <div class="section-header">
         <div>
-          <h2>Order & Cultivation Progress Tracker</h2>
-          <p class="subtitle">Monitor your mycelium colonization, fruiting timelines, and shipping updates in real-time.</p>
+          <h2>Cultivation Incubator & Guidelines</h2>
+          <p class="subtitle">Monitor your spawn run colonization, fruiting timelines, and access growth parameters.</p>
         </div>
       </div>
 
       <div class="tracker-layout">
         <!-- Active Orders List Sidebar -->
         <div class="orders-sidebar">
-          <h3>Your Inoculations</h3>
+          <h3>Your Active Runs</h3>
           <div class="orders-list" id="orders-list">
             <!-- Orders injected here -->
-            <p class="no-orders">No active inoculations. Visit the Laboratory Shop to purchase cultures!</p>
+            <p class="no-orders">No active runs found. Purchase cultures or spawn to activate incubator tracking!</p>
           </div>
         </div>
 
@@ -176,10 +177,85 @@
         <div class="tracking-details-panel empty" id="tracking-details-panel">
           <div class="tracker-empty-state">
             <i class="fa-solid fa-microscope"></i>
-            <p>Select an order from the list to pull up its live mycelium incubator metrics and delivery status.</p>
+            <p>Select a spawn run from the list to synchronize metrics and growth logs.</p>
           </div>
           <div class="tracker-active-state hidden" id="tracker-active-view">
             <!-- Active order details injected here -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ADMIN PRODUCT CONTROL PANEL -->
+    <section id="admin-page" class="page-section">
+      <div class="section-header">
+        <div>
+          <h2>Sporekart Administration Console</h2>
+          <p class="subtitle">Update product pricing, add new spawn strains, or remove listings from the directory.</p>
+        </div>
+      </div>
+
+      <div class="admin-layout">
+        <!-- Add New Product Form -->
+        <div class="admin-form-card">
+          <h3>Add New Inventory Item</h3>
+          <form id="form-admin-add-product">
+            <div class="input-group-row">
+              <div class="input-field">
+                <label>Product Name</label>
+                <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Spore print">
+              </div>
+              <div class="input-field">
+                <label>Category</label>
+                <select id="admin-prod-category">
+                  <option value="spawn">Spawn & Seeds</option>
+                  <option value="mushrooms">Mushrooms</option>
+                </select>
+              </div>
+            </div>
+            <div class="input-field">
+              <label>Description</label>
+              <textarea id="admin-prod-desc" required placeholder="Product specifications, growth guidelines, dimensions..." style="background:rgba(0,0,0,0.3); border:1px solid var(--color-border); color:var(--color-text-light); padding:0.75rem 1rem; border-radius:8px; height:80px; font-family:var(--font-body); resize:none;"></textarea>
+            </div>
+            <div class="input-group-row">
+              <div class="input-field">
+                <label>Price (INR)</label>
+                <input type="number" id="admin-prod-price" required step="0.01" placeholder="380.00">
+              </div>
+              <div class="input-field">
+                <label>GST Rate (%)</label>
+                <input type="number" id="admin-prod-gst" required value="5">
+              </div>
+            </div>
+            <div class="input-group-row">
+              <div class="input-field">
+                <label>Difficulty</label>
+                <select id="admin-prod-difficulty">
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </div>
+              <div class="input-field">
+                <label>Initial Stock</label>
+                <input type="number" id="admin-prod-stock" required value="100">
+              </div>
+            </div>
+            <div class="input-field">
+              <label>Image URL</label>
+              <input type="text" id="admin-prod-image" placeholder="https://images.unsplash.com/...">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Publish Listing</button>
+          </form>
+          <div id="admin-add-feedback" class="auth-error-msg hidden" style="margin-top:1rem;"></div>
+        </div>
+
+        <!-- Inventory List (For editing prices and deleting) -->
+        <div class="admin-inventory-list-card">
+          <h3>Catalog Directory</h3>
+          <div class="admin-inventory-grid" id="admin-inventory-grid">
+            <!-- Dynamic inventory listing with pricing inputs and delete buttons -->
+            <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
           </div>
         </div>
       </div>
@@ -204,27 +280,27 @@
       <div class="auth-container">
         <!-- LOGIN STATE -->
         <div id="auth-login-view" class="auth-form-panel">
-          <h3>Welcome Back, Cultivator</h3>
-          <p class="auth-subtitle">Log in to manage spawn tracking and checkouts.</p>
+          <h3>Establish Connection</h3>
+          <p class="auth-subtitle">Log in to process checkouts or sync cultivation support logs.</p>
           <form id="form-login">
             <div class="input-field">
               <label><i class="fa-solid fa-envelope"></i> Email Address</label>
-              <input type="email" id="login-email" required placeholder="grower@shroom.com">
+              <input type="email" id="login-email" required placeholder="grower@sporekart.com">
             </div>
             <div class="input-field">
               <label><i class="fa-solid fa-lock"></i> Password</label>
               <input type="password" id="login-password" required placeholder="••••••••">
             </div>
             <div class="auth-error-msg hidden" id="login-error"></div>
-            <button type="submit" class="btn btn-primary btn-block">Establish Connection</button>
+            <button type="submit" class="btn btn-primary btn-block">Secure Login</button>
           </form>
-          <p class="auth-toggle-link">New grower? <a href="#" id="link-to-signup">Create a Lab Account</a></p>
+          <p class="auth-toggle-link">New grower? <a href="#" id="link-to-signup">Register Lab Account</a></p>
         </div>
 
         <!-- SIGNUP STATE -->
         <div id="auth-signup-view" class="auth-form-panel hidden">
-          <h3>Create Lab Credentials</h3>
-          <p class="auth-subtitle">Sign up to buy professional genetics and trace shipments.</p>
+          <h3>Register Lab Account</h3>
+          <p class="auth-subtitle">Sign up to buy professional genetics or view tracking logs.</p>
           <form id="form-signup">
             <div class="input-field">
               <label><i class="fa-solid fa-id-card"></i> Full Name / Farm Name</label>
@@ -232,18 +308,25 @@
             </div>
             <div class="input-field">
               <label><i class="fa-solid fa-envelope"></i> Email Address</label>
-              <input type="email" id="signup-email" required placeholder="shroomer@myco.com">
+              <input type="email" id="signup-email" required placeholder="grower@sporekart.com">
             </div>
             <div class="input-field">
-              <label><i class="fa-solid fa-whatsapp"></i> WhatsApp Number (for notifications)</label>
+              <label><i class="fa-solid fa-whatsapp"></i> WhatsApp Number</label>
               <input type="tel" id="signup-whatsapp" placeholder="9876543210" pattern="[0-9]{10}" title="Ten digit mobile number">
+            </div>
+            <div class="input-field">
+              <label><i class="fa-solid fa-circle-question"></i> Account Intent / Account Type</label>
+              <select id="signup-role" required style="background: rgba(0, 0, 0, 0.3); border: 1px solid var(--color-border); color: var(--color-text-light); padding: 0.75rem 1rem; border-radius: 8px; font-family: var(--font-body); width: 100%;">
+                <option value="buyer">Commercial / Retail Buyer (Product Purchase)</option>
+                <option value="grower">Home / Hobby Cultivator (Cultivation Tracker Support)</option>
+              </select>
             </div>
             <div class="input-field">
               <label><i class="fa-solid fa-lock"></i> Create Password</label>
               <input type="password" id="signup-password" required placeholder="••••••••">
             </div>
             <div class="auth-error-msg hidden" id="signup-error"></div>
-            <button type="submit" class="btn btn-primary btn-block">Register Lab Profile</button>
+            <button type="submit" class="btn btn-primary btn-block">Register Credentials</button>
           </form>
           <p class="auth-toggle-link">Already registered? <a href="#" id="link-to-login">Log In</a></p>
         </div>
@@ -260,7 +343,7 @@
         <button class="btn btn-whatsapp-action" id="btn-whatsapp-invoice"><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
       </div>
       <div class="invoice-container-paper" id="invoice-paper">
-        <!-- Dynamic invoice content generated by app.js -->
+        <!-- Dynamic invoice content -->
         <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
       </div>
     </div>
@@ -279,7 +362,7 @@
       <!-- Injected items -->
       <div class="cart-empty-message">
         <i class="fa-solid fa-basket-shopping"></i>
-        <p>Your basket is barren. Select some genetics or kits to get growing!</p>
+        <p>Your basket is barren. Select some genetics or spawn to get growing!</p>
       </div>
     </div>
 
@@ -314,13 +397,13 @@
         <button class="btn btn-primary btn-block" id="btn-checkout">
           <i class="fa-solid fa-circle-nodes"></i> Initiate Payment (Razorpay)
         </button>
-        <p class="auth-warning-label hidden" id="cart-auth-warning">⚠️ Please log in to complete checkout.</p>
+        <p class="auth-warning-label hidden" id="cart-auth-warning">⚠️ Please register / log in as a Buyer to complete checkout.</p>
       </div>
     </div>
   </div>
 
   <footer class="app-footer-bar">
-    <p>&copy; 2026 MycoFlora Bio-Farms. Full-Stack Agentic Vibe-Coding Platform Demonstration.</p>
+    <p>&copy; 2026 Sporekart Store. Full-Stack Agentic Vibe-Coding Platform Demonstration.</p>
   </footer>
 
   <!-- Core App Logic -->

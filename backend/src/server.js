@@ -39,7 +39,7 @@ app.get('/api/health', (req, res) => {
 // Start Server
 app.listen(PORT, () => {
   console.log(`==================================================`);
-  console.log(`🍄 MycoFlora Backend running on port ${PORT}`);
+  console.log(`🍄 Sporekart Backend running on port ${PORT}`);
   console.log(`🗄️  Database Mode: ${db.isMock ? '⚠️  MOCK (In-Memory)' : '✅ Supabase'}`);
   console.log(`💳 Payment Mode:  ${razorpay.isMock ? '⚠️  MOCK (Simulator)' : '✅ Razorpay'}`);
   console.log(`==================================================`);

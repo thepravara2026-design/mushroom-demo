@@ -10,11 +10,15 @@ const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
 // POST /api/auth/signup
 router.post('/signup', async (req, res) => {
   try {
-    const { email, password, fullName, whatsappNumber } = req.body;
+    const { email, password, fullName, whatsappNumber, role } = req.body;
 
     if (!email || !password || !fullName) {
       return res.status(400).json({ error: 'Please provide email, password, and fullName.' });
     }
+
+    // Restrict role selection to client roles ('buyer' or 'grower')
+    let userRole = 'buyer';
+    if (role === 'grower') userRole = 'grower';
 
     // Check if user exists
     const { data: existingUser } = await db.from('users').select('*').eq('email', email.toLowerCase()).single();
@@ -31,7 +35,8 @@ router.post('/signup', async (req, res) => {
       email: email.toLowerCase(),
       password_hash: passwordHash,
       full_name: fullName,
-      whatsapp_number: whatsappNumber || ''
+      whatsapp_number: whatsappNumber || '',
+      role: userRole
     }).single();
 
     if (error) {
@@ -39,7 +44,7 @@ router.post('/signup', async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign({ userId: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: newUser.id, email: newUser.email, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({
       token,
@@ -47,7 +52,8 @@ router.post('/signup', async (req, res) => {
         id: newUser.id,
         email: newUser.email,
         fullName: newUser.full_name,
-        whatsappNumber: newUser.whatsapp_number
+        whatsappNumber: newUser.whatsapp_number,
+        role: newUser.role
       }
     });
   } catch (error) {
@@ -77,7 +83,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       token,
@@ -85,7 +91,8 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         fullName: user.full_name,
-        whatsappNumber: user.whatsapp_number
+        whatsappNumber: user.whatsapp_number,
+        role: user.role
       }
     });
   } catch (error) {
@@ -105,7 +112,8 @@ router.get('/me', authMiddleware, async (req, res) => {
       id: user.id,
       email: user.email,
       fullName: user.full_name,
-      whatsappNumber: user.whatsapp_number
+      whatsappNumber: user.whatsapp_number,
+      role: user.role
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

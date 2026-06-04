@@ -18,103 +18,129 @@ const mockStore = {
     {
       id: "prod-1",
       name: "Pink Oyster Spore Syringe (10ml)",
-      description: "High-viability Pleurotus djamor spores. Fast-colonizing, heat-tolerant, and perfect for beginners who want to see beautiful pink blooms in just 2 weeks.",
+      description: "High-viability Pleurotus djamor spores. Perfect for growers who want fast colonizing spawn and beautiful pink mushroom clusters.",
       price: 350.00,
       image_url: "https://images.unsplash.com/photo-1628352081506-83c43123ed6d?auto=format&fit=crop&q=80&w=600",
-      category: "spawn",
+      category: "spawn", // Spawn & Seeds
       difficulty: "beginner",
       gst_rate: 5,
       stock: 120
     },
     {
       id: "prod-2",
-      name: "Lion's Mane Fruiting Block Kit",
-      description: "An all-in-one ready-to-fruit block. Just mist with water and watch the shaggy, brain-boosting Hericium erinaceus teeth grow.",
-      price: 750.00,
+      name: "Lion's Mane Spore Culture (10ml)",
+      description: "Hericium erinaceus liquid culture. High-viability mycelium growth with exceptional yield records.",
+      price: 400.00,
       image_url: "https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600",
-      category: "kits",
+      category: "spawn", // Spawn & Seeds
       difficulty: "beginner",
-      gst_rate: 12,
+      gst_rate: 5,
       stock: 85
     },
     {
       id: "prod-3",
       name: "Shiitake Grain Spawn (1kg)",
-      description: "Sterilized organic rye grains fully colonized with premium Lentinula edodes mycelium. Ideal for inoculating sawdust substrates or logs.",
+      description: "Sterilized organic rye grains fully colonized with premium Lentinula edodes mycelium. Ideal for inoculating sawdust blocks.",
       price: 450.00,
       image_url: "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=600",
-      category: "spawn",
+      category: "spawn", // Spawn & Seeds
       difficulty: "intermediate",
       gst_rate: 5,
       stock: 50
     },
     {
       id: "prod-4",
-      name: "Reishi Medicinal Grow Kit",
-      description: "Cultivate the 'Mushroom of Immortality' (Ganoderma lucidum). Produces beautiful varnished red-orange antlers. Requires patience and humidity control.",
-      price: 950.00,
+      name: "Reishi Spore Print",
+      description: "Dark purple spore print of Ganoderma lucidum collected on sterile foil. Perfect for agar transfers.",
+      price: 300.00,
       image_url: "https://images.unsplash.com/photo-1601004890684-d8cbf643f5f2?auto=format&fit=crop&q=80&w=600",
-      category: "kits",
+      category: "spawn", // Spawn & Seeds
       difficulty: "advanced",
-      gst_rate: 12,
-      stock: 30
+      gst_rate: 5,
+      stock: 60
     },
     {
       id: "prod-5",
-      name: "Premium Fresh King Oyster (500g)",
-      description: "Thick, meaty stems with a savory, umami flavor. Harvested fresh daily. Kept chilled during delivery.",
-      price: 400.00,
-      image_url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
-      category: "mushrooms",
+      name: "Fresh Pink Oyster Mushrooms (500g)",
+      description: "Freshly harvested organic Pink Oyster mushrooms. Beautiful color with a savory, bacon-like aroma when cooked.",
+      price: 500.00,
+      image_url: "https://images.unsplash.com/photo-1628352081506-83c43123ed6d?auto=format&fit=crop&q=80&w=600",
+      category: "mushrooms", // Mushrooms
       difficulty: "beginner",
       gst_rate: 5,
       stock: 40
     },
     {
       id: "prod-6",
-      name: "Dried Cordyceps Militaris (50g)",
-      description: "Premium lab-grown Cordyceps, dehydrated to preserve active cordycepin content. Used commonly in teas and wellness soups.",
-      price: 1800.00,
-      image_url: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600",
-      category: "mushrooms",
-      difficulty: "intermediate",
+      name: "Fresh King Oyster Mushrooms (500g)",
+      description: "Thick, meaty stems with a savory, umami flavor. Harvested fresh daily. Kept chilled during delivery.",
+      price: 400.00,
+      image_url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+      category: "mushrooms", // Mushrooms
+      difficulty: "beginner",
       gst_rate: 5,
-      stock: 75
+      stock: 45
     },
     {
       id: "prod-7",
-      name: "Mycology Scalpel & Dissection Set",
-      description: "Stainless steel surgical scalpel with 10 replaceable blades, tweezers, and inoculation loops. Perfect for sterile agar work and transfers.",
-      price: 650.00,
-      image_url: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=600",
-      category: "tools",
-      difficulty: "intermediate",
-      gst_rate: 18,
+      name: "Dried Reishi Mushrooms (100g)",
+      description: "Premium sun-dried Ganoderma lucidum slices. Used commonly for making herbal teas and immunity decoctions.",
+      price: 700.00,
+      image_url: "https://images.unsplash.com/photo-1601004890684-d8cbf643f5f2?auto=format&fit=crop&q=80&w=600",
+      category: "mushrooms", // Mushrooms
+      difficulty: "advanced",
+      gst_rate: 5,
       stock: 100
     },
     {
       id: "prod-8",
-      name: "HEPA Flow Hood Fan & Filter",
-      description: "A compact laminar flow hood unit. Provides a sterile stream of HEPA-filtered air to perform agar and spawn work without contamination.",
-      price: 14500.00,
-      image_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=600",
-      category: "tools",
-      difficulty: "advanced",
-      gst_rate: 18,
-      stock: 10
+      name: "Dried Cordyceps Militaris (50g)",
+      description: "Premium lab-grown Cordyceps, dehydrated to preserve active cordycepin content. Excellent for wellness soups.",
+      price: 1800.00,
+      image_url: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600",
+      category: "mushrooms", // Mushrooms
+      difficulty: "intermediate",
+      gst_rate: 5,
+      stock: 75
     }
   ],
   orders: []
 };
 
-// Seed an admin/test user in mock store
+// Seed Users for Sporekart
 const defaultPasswordHash = bcrypt.hashSync("password123", 10);
+const adminPasswordHash = bcrypt.hashSync("admin123", 10);
+
+// Seed Buyer User
 mockStore.users.push({
-  id: "user-1",
-  email: "grower@shroom.com",
+  id: "user-buyer",
+  email: "buyer@sporekart.com",
   password_hash: defaultPasswordHash,
-  full_name: "Shroom Grower",
+  full_name: "John Buyer",
+  whatsapp_number: "9876543211",
+  role: "buyer", // Customer type: Buyer
+  created_at: new Date().toISOString()
+});
+
+// Seed Cultivator User
+mockStore.users.push({
+  id: "user-grower",
+  email: "grower@sporekart.com",
+  password_hash: defaultPasswordHash,
+  full_name: "Sam Grower",
+  whatsapp_number: "9876543212",
+  role: "grower", // Customer type: Cultivator/Grower
+  created_at: new Date().toISOString()
+});
+
+// Seed Admin User
+mockStore.users.push({
+  id: "user-admin",
+  email: "admin@sporekart.com",
+  password_hash: adminPasswordHash,
+  full_name: "Sporekart Admin",
   whatsapp_number: "9876543210",
+  role: "admin", // Administrator
   created_at: new Date().toISOString()
 });
 
@@ -129,7 +155,6 @@ class MockQueryBuilder {
   }
 
   select(fields = '*') {
-    // Basic select, does not filter columns for simplicity, just returns whole objects
     return this;
   }
 
@@ -164,17 +189,24 @@ class MockQueryBuilder {
   }
 
   update(updates) {
-    // Apply updates to filtered items
     mockStore[this.table] = mockStore[this.table].map(item => {
       const matches = this.data.some(d => d.id === item.id);
       if (matches) {
         const updatedItem = { ...item, ...updates };
-        // Update our local query array as well
         this.data = this.data.map(d => d.id === item.id ? updatedItem : d);
         return updatedItem;
       }
       return item;
     });
+    return this;
+  }
+
+  delete() {
+    mockStore[this.table] = mockStore[this.table].filter(item => {
+      const matches = this.data.some(d => d.id === item.id);
+      return !matches;
+    });
+    this.data = [];
     return this;
   }
 

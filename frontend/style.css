@@ -337,16 +337,22 @@ a:hover {
   align-items: center;
 }
 
-.hero-image {
+.hero-canvas {
   width: 100%;
   max-width: 400px;
   height: 400px;
-  object-fit: cover;
   border-radius: 50% 50% 30% 70% / 50% 60% 40% 50%;
-  border: 3px solid rgba(56, 177, 123, 0.2);
-  box-shadow: var(--shadow-premium);
+  border: 3px solid rgba(56, 177, 123, 0.25);
+  box-shadow: var(--shadow-premium), 0 0 35px rgba(56, 177, 123, 0.15);
   animation: blobMorph 10s infinite alternate ease-in-out;
   z-index: 2;
+  background: radial-gradient(circle, rgba(13, 26, 18, 0.85) 0%, rgba(7, 14, 10, 0.98) 100%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.hero-canvas:active {
+  cursor: grabbing;
 }
 
 .glowing-orb {
@@ -1698,7 +1704,7 @@ a:hover {
     justify-content: center;
   }
   
-  .hero-image {
+  .hero-canvas {
     max-width: 320px;
     height: 320px;
   }
@@ -1788,5 +1794,173 @@ a:hover {
     border: none !important;
     padding: 0 !important;
     color: #000000 !important;
+  }
+}
+
+/* Scroll Reveal Animations */
+.reveal-element {
+  opacity: 0;
+  transform: translateY(35px);
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.reveal-element.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ==========================================================================
+   ADMIN PANEL MODULE STYLING
+   ========================================================================== */
+.admin-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+.admin-form-card, .admin-inventory-list-card {
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 1.8rem;
+  box-shadow: var(--shadow-premium);
+}
+
+.admin-form-card h3, .admin-inventory-list-card h3 {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.5rem;
+  color: var(--color-primary);
+  font-family: var(--font-display);
+}
+
+.admin-layout .input-field {
+  margin-bottom: 1rem;
+}
+
+.admin-layout .input-field input,
+.admin-layout .input-field select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-light);
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  width: 100%;
+}
+
+.admin-layout .input-field input:focus,
+.admin-layout .input-field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.input-group-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.admin-inventory-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.admin-inventory-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  transition: var(--transition);
+}
+
+.admin-inventory-item:hover {
+  border-color: rgba(56, 177, 123, 0.3);
+  background: rgba(56, 177, 123, 0.03);
+}
+
+.admin-inventory-item img {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+
+.admin-inv-details {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-inv-details h4 {
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.admin-inv-price-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.admin-inv-price-edit span {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.admin-inv-price-edit input {
+  background: rgba(7, 14, 10, 0.6);
+  border: 1px solid var(--color-border);
+  color: var(--color-accent-gold);
+  font-weight: bold;
+  padding: 0.2rem;
+  width: 75px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.btn-admin-price-update {
+  background: rgba(56, 177, 123, 0.1);
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-admin-price-update:hover {
+  background: var(--color-primary);
+  color: var(--color-bg-dark);
+}
+
+.btn-admin-delete {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.5rem;
+  transition: var(--transition);
+}
+
+.btn-admin-delete:hover {
+  color: var(--color-danger);
+}
+
+@media (max-width: 992px) {
+  .admin-layout {
+    grid-template-columns: 1fr;
   }
 }

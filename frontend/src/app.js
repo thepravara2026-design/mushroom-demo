@@ -1,4 +1,4 @@
-// MYCOFLORA CLIENT CONTROLLER
+// SPOREKART CLIENT CONTROLLER
 
 // Global State
 let state = {
@@ -22,6 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadUser();
   fetchProducts();
   updateCartUI();
+  initThreeJS();
+  initScrollReveal();
 
   // If hash is present, route to it
   handleRouting();
@@ -34,21 +36,34 @@ function handleRouting() {
   const hash = window.location.hash || '#shop';
   const navShop = document.getElementById('btn-nav-shop');
   const navTrack = document.getElementById('btn-nav-track');
+  const navAdmin = document.getElementById('btn-nav-admin');
+  
   const pageShop = document.getElementById('shop-page');
   const pageTrack = document.getElementById('tracker-page');
+  const pageAdmin = document.getElementById('admin-page');
+  
   const heroSection = document.getElementById('hero-section');
 
-  // Deactivate all
+  // Deactivate all nav links & sections
   navShop.classList.remove('active');
   navTrack.classList.remove('active');
+  navAdmin.classList.remove('active');
+  
   pageShop.classList.remove('active');
   pageTrack.classList.remove('active');
+  pageAdmin.classList.remove('active');
 
   if (hash === '#shop') {
     navShop.classList.add('active');
     pageShop.classList.add('active');
     heroSection.classList.remove('hidden');
   } else if (hash.startsWith('#track')) {
+    // Access validation for tracking (must be grower or admin)
+    if (!state.user || (state.user.role !== 'grower' && state.user.role !== 'admin')) {
+      window.location.hash = '#shop';
+      return;
+    }
+    
     navTrack.classList.add('active');
     pageTrack.classList.add('active');
     heroSection.classList.add('hidden');
@@ -60,6 +75,17 @@ function handleRouting() {
       state.activeTrackingId = match[1];
       startTrackingPoll(match[1]);
     }
+  } else if (hash === '#admin') {
+    // Access validation for admin console
+    if (!state.user || state.user.role !== 'admin') {
+      window.location.hash = '#shop';
+      return;
+    }
+
+    navAdmin.classList.add('active');
+    pageAdmin.classList.add('active');
+    heroSection.classList.add('hidden');
+    fetchAdminInventory();
   }
 }
 
@@ -69,18 +95,27 @@ function handleRouting() {
 function initEventListeners() {
   // Navigation Routing Links
   document.getElementById('btn-nav-shop').addEventListener('click', () => window.location.hash = '#shop');
+  
   document.getElementById('btn-nav-track').addEventListener('click', () => {
     if (!state.user) {
       openAuthModal();
-      showLoginError("Please log in to view your cultivation tracker.");
+      showLoginError("Please log in to view your cultivation support log.");
     } else {
       window.location.hash = '#track';
     }
   });
+
+  document.getElementById('btn-nav-admin').addEventListener('click', () => {
+    if (state.user && state.user.role === 'admin') {
+      window.location.hash = '#admin';
+    }
+  });
+
   document.getElementById('nav-logo').addEventListener('click', (e) => {
     e.preventDefault();
     window.location.hash = '#shop';
   });
+  
   document.getElementById('hero-shop-btn').addEventListener('click', () => window.location.hash = '#shop');
 
   // Auth Modals Open/Close
@@ -98,6 +133,9 @@ function initEventListeners() {
   // Auth Submissions
   document.getElementById('form-login').addEventListener('submit', handleLoginSubmit);
   document.getElementById('form-signup').addEventListener('submit', handleSignupSubmit);
+
+  // Admin Module Submissions
+  document.getElementById('form-admin-add-product').addEventListener('submit', handleAdminAddProduct);
 
   // Cart Slide Out Drawer
   document.getElementById('btn-open-cart').addEventListener('click', () => toggleCartDrawer(true));
@@ -153,8 +191,8 @@ async function loadUser() {
     if (res.ok) {
       state.user = await res.json();
       updateAuthHeaderUI();
+      handleRouting(); // trigger routing refresh for access checks
     } else {
-      // Token expired or invalid
       logout();
     }
   } catch (err) {
@@ -181,6 +219,15 @@ async function handleLoginSubmit(e) {
     if (res.ok) {
       saveAuthSession(data.token, data.user);
       closeAuthModal();
+      
+      // Route based on role
+      if (data.user.role === 'admin') {
+        window.location.hash = '#admin';
+      } else if (data.user.role === 'grower') {
+        window.location.hash = '#track';
+      } else {
+        window.location.hash = '#shop';
+      }
     } else {
       showLoginError(data.error || "Login credentials incorrect.");
     }
@@ -194,6 +241,7 @@ async function handleSignupSubmit(e) {
   const fullName = document.getElementById('signup-name').value;
   const email = document.getElementById('signup-email').value;
   const whatsappNumber = document.getElementById('signup-whatsapp').value;
+  const role = document.getElementById('signup-role').value; // account intent
   const password = document.getElementById('signup-password').value;
   const errorPanel = document.getElementById('signup-error');
 
@@ -203,13 +251,19 @@ async function handleSignupSubmit(e) {
     const res = await fetch(`${API_BASE}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fullName, email, password, whatsappNumber })
+      body: JSON.stringify({ fullName, email, password, whatsappNumber, role })
     });
 
     const data = await res.json();
     if (res.ok) {
       saveAuthSession(data.token, data.user);
       closeAuthModal();
+
+      if (data.user.role === 'grower') {
+        window.location.hash = '#track';
+      } else {
+        window.location.hash = '#shop';
+      }
     } else {
       errorPanel.textContent = data.error || "Failed to create lab credentials.";
       errorPanel.classList.remove('hidden');
@@ -234,6 +288,7 @@ function logout() {
   state.token = null;
   state.user = null;
   state.orders = [];
+  if (state.trackingTimer) clearInterval(state.trackingTimer);
   localStorage.removeItem('token');
   updateAuthHeaderUI();
   window.location.hash = '#shop';
@@ -241,16 +296,33 @@ function logout() {
 
 function updateAuthHeaderUI() {
   const profileSection = document.getElementById('user-profile-section');
+  const navTrack = document.getElementById('btn-nav-track');
+  const navAdmin = document.getElementById('btn-nav-admin');
+
   if (state.user) {
+    const roleLabel = state.user.role.toUpperCase();
     profileSection.innerHTML = `
       <div class="user-profile-nav">
-        <span><i class="fa-solid fa-microscope text-primary"></i> ${state.user.fullName}</span>
+        <span><i class="fa-solid fa-circle-user text-primary"></i> ${state.user.fullName} <span style="font-size:0.7rem; background:rgba(255,255,255,0.08); padding:0.2rem 0.4rem; border-radius:4px; margin-left:0.25rem;">${roleLabel}</span></span>
         <button class="btn btn-secondary" id="btn-logout" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
           <i class="fa-solid fa-right-from-bracket"></i> Exit
         </button>
       </div>
     `;
     document.getElementById('btn-logout').addEventListener('click', logout);
+
+    // Toggle navigation visibilities
+    if (state.user.role === 'admin') {
+      navTrack.style.display = 'inline-flex';
+      navAdmin.style.display = 'inline-flex';
+    } else if (state.user.role === 'grower') {
+      navTrack.style.display = 'inline-flex';
+      navAdmin.style.display = 'none';
+    } else {
+      // Buyer
+      navTrack.style.display = 'none';
+      navAdmin.style.display = 'none';
+    }
   } else {
     profileSection.innerHTML = `
       <button class="btn btn-secondary-glow" id="btn-open-auth">
@@ -258,6 +330,8 @@ function updateAuthHeaderUI() {
       </button>
     `;
     document.getElementById('btn-open-auth').addEventListener('click', () => openAuthModal());
+    navTrack.style.display = 'none';
+    navAdmin.style.display = 'none';
   }
 }
 
@@ -320,15 +394,18 @@ function renderProducts(productsList) {
     grid.innerHTML = `
       <div class="grid-skeleton">
         <i class="fa-solid fa-magnifying-glass loader-icon"></i>
-        <p>No compatible genetics or tools match your search criteria.</p>
+        <p>No compatible genetics match your search criteria.</p>
       </div>
     `;
     return;
   }
 
-  grid.innerHTML = productsList.map(prod => {
+  grid.innerHTML = productsList.map((prod, idx) => {
+    // Label translations
+    const catLabel = prod.category === 'spawn' ? 'Spawn & Seeds' : 'Mushroom';
+    
     return `
-      <div class="product-card" data-id="${prod.id}">
+      <div class="product-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
         <div class="product-img-wrapper">
           <img src="${prod.image_url}" alt="${prod.name}" loading="lazy">
           <div class="product-tags">
@@ -337,7 +414,7 @@ function renderProducts(productsList) {
           <span class="product-gst-badge">${prod.gst_rate}% GST</span>
         </div>
         <div class="product-info">
-          <span class="product-category-lbl">${prod.category}</span>
+          <span class="product-category-lbl">${catLabel}</span>
           <h3>${prod.name}</h3>
           <p class="product-desc">${prod.description}</p>
           <div class="product-card-footer">
@@ -351,12 +428,19 @@ function renderProducts(productsList) {
     `;
   }).join('');
 
+  // Stagger reveal animation trigger
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      document.querySelectorAll('.product-grid .product-card').forEach(card => {
+        card.classList.add('revealed');
+      });
+    }, 50);
+  });
+
   // Add click events for product modals and add buttons
   document.querySelectorAll('.product-card').forEach(card => {
     card.addEventListener('click', (e) => {
-      // Prevent detail modal from launching if user clicked the Add-to-Cart button
       if (e.target.closest('.btn-card-add')) return;
-      
       const id = card.getAttribute('data-id');
       openProductDetails(id);
     });
@@ -377,12 +461,10 @@ function filterProducts() {
 
   let filtered = state.products;
 
-  // Filter by category
   if (selectedCat !== 'all') {
     filtered = filtered.filter(p => p.category === selectedCat);
   }
 
-  // Filter by search text
   if (query.trim() !== '') {
     filtered = filtered.filter(p => p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query));
   }
@@ -446,7 +528,7 @@ async function openProductDetails(id) {
             <span class="stat-val">${product.stock > 0 ? 'In Stock' : 'Out of Stock'}</span>
           </div>
           <div class="stat-row">
-            <span class="stat-lbl"><i class="fa-solid fa-percent"></i> Applicable Tax</span>
+            <span class="stat-lbl"><i class="fa-solid fa-percent"></i> Tax Rate</span>
             <span class="stat-val">${product.gst_rate}% GST (Category: ${product.category})</span>
           </div>
         </div>
@@ -466,7 +548,7 @@ async function openProductDetails(id) {
         ${metaHTML}
 
         <button class="btn btn-primary" id="btn-modal-add" style="margin-top: 1rem;">
-          <i class="fa-solid fa-basket-shopping"></i> Add to Inoculation Basket
+          <i class="fa-solid fa-basket-shopping"></i> Add to Basket
         </button>
       </div>
     `;
@@ -580,7 +662,6 @@ function updateCartUI() {
   const container = document.getElementById('cart-items-container');
   const countBadge = document.getElementById('cart-count');
   
-  // Total basket item count
   const totalCount = state.cart.reduce((sum, item) => sum + item.quantity, 0);
   countBadge.textContent = totalCount;
 
@@ -588,7 +669,7 @@ function updateCartUI() {
     container.innerHTML = `
       <div class="cart-empty-message">
         <i class="fa-solid fa-basket-shopping"></i>
-        <p>Your basket is barren. Select some genetics or kits to get growing!</p>
+        <p>Your basket is barren. Select some genetics or spawn to get growing!</p>
       </div>
     `;
     document.getElementById('ledger-subtotal').textContent = '₹0.00';
@@ -598,14 +679,13 @@ function updateCartUI() {
     return;
   }
 
-  // Render items
   container.innerHTML = state.cart.map(item => {
     return `
       <div class="cart-item">
         <img src="${item.image_url}" alt="${item.name}">
         <div class="cart-item-details">
           <h4>${item.name}</h4>
-          <span class="cart-item-price">₹${item.price.toFixed(2)} <span style="font-size:0.75rem; color:var(--color-text-muted);">(${item.gst_rate}% tax)</span></span>
+          <span class="cart-item-price">₹${item.price.toFixed(2)} <span style="font-size:0.75rem; color:var(--color-text-muted);">(${item.gst_rate}% GST)</span></span>
           <div class="cart-item-qty-row">
             <button class="qty-btn" onclick="window.changeQty('${item.id}', -1)">-</button>
             <span class="qty-val">${item.quantity}</span>
@@ -619,15 +699,12 @@ function updateCartUI() {
     `;
   }).join('');
 
-  // Calculate LEDGER
   let subtotal = 0;
   let gstAmount = 0;
 
   state.cart.forEach(item => {
     const lineSubtotal = item.price * item.quantity;
     subtotal += lineSubtotal;
-
-    // Apply promo discount on the individual items to compute tax
     const lineDiscount = lineSubtotal * state.promoDiscountPct;
     const lineDiscountedSubtotal = lineSubtotal - lineDiscount;
     const lineGst = lineDiscountedSubtotal * (item.gst_rate / 100);
@@ -651,7 +728,6 @@ function updateCartUI() {
   document.getElementById('ledger-total').textContent = `₹${netTotal.toFixed(2)}`;
 }
 
-// Bind to window for HTML click attributes
 window.changeQty = changeQuantity;
 window.removeCartItem = removeFromCart;
 
@@ -665,16 +741,11 @@ function calculateSubstrateMix() {
 
   const resultsPanel = document.getElementById('calc-results-panel');
 
-  // Basic organic math for spawn and substrate mixing ratios:
-  // Assuming a standard substrate density and depth factor:
-  // Weight factor: 0.16 kg per Litre at standard 3.5" bed depth
   const depthMultiplier = depth / 3.5;
   const totalBedWeight = volume * 0.18 * depthMultiplier;
 
   const spawnWeight = totalBedWeight * ratio;
   const substrateWeight = totalBedWeight * (1 - ratio);
-  
-  // Hydration water required: Coir hydration ratio roughly 1.5L of water per kg of dry substrate
   const mistingWater = substrateWeight * 1.35;
 
   document.getElementById('res-grain-spawn').textContent = `${spawnWeight.toFixed(2)} kg`;
@@ -685,15 +756,24 @@ function calculateSubstrateMix() {
 }
 
 // ==========================================================================
-// CHECKOUT & PAYMENT INTEGRATIONS
+// CHECKOUT & PAYMENT INTEGRATIONS (FORCE LOGIN BEFORE CHECKOUT)
 // ==========================================================================
 async function handleCheckoutInitiation() {
   const warning = document.getElementById('cart-auth-warning');
   warning.classList.add('hidden');
 
+  // FORCE USER REGISTRATION/LOGIN BEFORE BUYING
   if (!state.user) {
+    warning.textContent = "⚠️ Please register or log in to complete checkout.";
     warning.classList.remove('hidden');
     openAuthModal();
+    return;
+  }
+
+  // Growers are registered for Cultivation Support, block them from buying or suggest Buyer account
+  if (state.user.role === 'grower') {
+    warning.textContent = "⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.";
+    warning.classList.remove('hidden');
     return;
   }
 
@@ -721,17 +801,15 @@ async function handleCheckoutInitiation() {
     const rzpDetails = data.razorpay;
     const orderRecord = data.order;
 
-    // Check if we are running in MOCK Payment mode (default fallback on key)
     if (rzpDetails.keyId.includes('mockKey') || rzpDetails.keyId.includes('rzp_test_mock')) {
       showMockPaymentModal(rzpDetails, orderRecord);
     } else {
-      // Launch standard Razorpay SDK payment screen
       const options = {
         key: rzpDetails.keyId,
         amount: rzpDetails.amount,
         currency: rzpDetails.currency,
-        name: "MycoFlora Bio-Farms",
-        description: "Fruiting Cultures Checkout",
+        name: "Sporekart Store",
+        description: "Fruiting Spore Seeds Checkout",
         order_id: rzpDetails.orderId,
         handler: async function (response) {
           await completeOrderPayment(
@@ -760,9 +838,7 @@ async function handleCheckoutInitiation() {
   }
 }
 
-// Simulated offline/mock payment portal
 function showMockPaymentModal(rzpDetails, orderRecord) {
-  // Create a mock payment modal layout
   const mockModal = document.createElement('div');
   mockModal.className = 'modal-overlay open';
   mockModal.id = 'mock-payment-gateway-modal';
@@ -770,7 +846,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
   mockModal.innerHTML = `
     <div class="modal-card modal-small" style="background:#091410; border:2px solid var(--color-primary);">
-      <h3 style="color:var(--color-primary); margin-bottom: 0.5rem;"><i class="fa-solid fa-credit-card"></i> Razorpay Sandboxed Checkout</h3>
+      <h3 style="color:var(--color-primary); margin-bottom: 0.5rem;"><i class="fa-solid fa-credit-card"></i> Sporekart Sandboxed Checkout</h3>
       <p style="font-size:0.85rem; color:var(--color-text-muted); margin-bottom:1.5rem;">Running offline development simulator. No real money will be charged.</p>
       
       <div class="growth-stats-table" style="margin-bottom:1.5rem; background:rgba(0,0,0,0.4);">
@@ -816,7 +892,6 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
   document.getElementById('btn-submit-mock-pay').addEventListener('click', async () => {
     mockModal.remove();
-    // Simulate Razorpay signature response
     const mockPaymentId = `pay_mock_${Math.random().toString(36).substr(2, 9)}`;
     const mockSignature = `sig_mock_${Math.random().toString(36).substr(2, 12)}`;
     
@@ -838,7 +913,6 @@ async function completeOrderPayment(orderId, paymentId, signature) {
 
     const data = await res.json();
     if (res.ok) {
-      // Clear cart
       state.cart = [];
       saveCart();
       updateCartUI();
@@ -847,9 +921,14 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       document.getElementById('promo-input').value = '';
       document.getElementById('promo-message').classList.add('hidden');
 
-      // Go to tracking
-      alert("Inoculation order completed! Redirecting to tracker...");
-      window.location.hash = `#track-${data.order.id}`;
+      alert("Inoculation order completed successfully! Review logs in support dashboard.");
+      
+      // Admin and Growers get redirected to tracking. Buyers go to shop (as they don't have tracking).
+      if (state.user.role === 'admin' || state.user.role === 'grower') {
+        window.location.hash = `#track-${data.order.id}`;
+      } else {
+        window.location.hash = '#shop';
+      }
     } else {
       alert("Payment verification failed: " + data.error);
     }
@@ -883,11 +962,10 @@ function renderOrdersSidebar() {
   const list = document.getElementById('orders-list');
   
   if (!state.orders.length) {
-    list.innerHTML = `<p class="no-orders">No active inoculations. Visit the Laboratory Shop to purchase cultures!</p>`;
+    list.innerHTML = `<p class="no-orders">No active runs found. Purchase cultures or spawn to activate incubator tracking!</p>`;
     return;
   }
 
-  // Sort orders descending by created_at
   const sorted = [...state.orders].sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
 
   list.innerHTML = sorted.map(order => {
@@ -899,7 +977,7 @@ function renderOrdersSidebar() {
     return `
       <div class="order-sidebar-card ${activeClass}" data-id="${order.id}">
         <div class="order-card-header">
-          <span class="order-id-lbl">INV-${order.id.substring(0, 8).toUpperCase()}</span>
+          <span class="order-id-lbl">RUN-${order.id.substring(0, 8).toUpperCase()}</span>
           <span class="order-status-badge ${order.delivery_status}">${order.delivery_status}</span>
         </div>
         <div class="order-card-date">${dateFormatted}</div>
@@ -917,7 +995,6 @@ function renderOrdersSidebar() {
 }
 
 function startTrackingPoll(orderId) {
-  // Clear any existing tracker poll
   if (state.trackingTimer) clearInterval(state.trackingTimer);
 
   const panelEmpty = document.getElementById('tracking-details-panel');
@@ -926,10 +1003,8 @@ function startTrackingPoll(orderId) {
   panelEmpty.classList.remove('empty');
   viewActive.classList.remove('hidden');
 
-  // Trigger immediate load
   pollTrackingData(orderId);
 
-  // Poll tracking details every 10 seconds for real-time vibe-updates
   state.trackingTimer = setInterval(() => {
     pollTrackingData(orderId);
   }, 10000);
@@ -957,7 +1032,6 @@ function renderTrackingDetails(track) {
   const container = document.getElementById('tracker-active-view');
   const dateStr = new Date(track.timestamp).toLocaleTimeString();
   
-  // Format checkmarks
   const timelineHTML = track.timeline.map(checkpoint => {
     const doneClass = checkpoint.done ? 'done' : '';
     const icon = checkpoint.done ? '<i class="fa-solid fa-circle-check" style="color:var(--color-primary);"></i>' : '<i class="fa-regular fa-circle" style="color:var(--color-text-muted);"></i>';
@@ -983,12 +1057,11 @@ function renderTrackingDetails(track) {
     <div class="tracker-details-header">
       <div>
         <h3>Mycelium Incubator Log</h3>
-        <p class="subtitle">Order ID: INV-${track.orderId.substring(0,8).toUpperCase()} | Status: <span class="order-status-badge ${track.deliveryStatus}">${track.deliveryStatus}</span></p>
+        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0,8).toUpperCase()} | Stage: <span class="order-status-badge ${track.deliveryStatus}">${track.deliveryStatus}</span></p>
       </div>
       <span style="font-size:0.75rem; color:var(--color-text-muted);">Sync time: ${dateStr}</span>
     </div>
 
-    <!-- Active progression timeline visual -->
     <div class="progress-container">
       <div class="progress-pct-lbl">MYCELIUM RUN: ${track.progressPercent}%</div>
       <div class="progress-track-bg">
@@ -996,7 +1069,6 @@ function renderTrackingDetails(track) {
       </div>
     </div>
 
-    <!-- Current State Description -->
     <div class="tracker-status-box">
       <h4>Inoculation Stage Notes</h4>
       <p>${track.trackingMessage}</p>
@@ -1006,7 +1078,6 @@ function renderTrackingDetails(track) {
       ${timelineHTML}
     </div>
 
-    <!-- Action buttons for invoice / WhatsApp sharing -->
     <div class="tracker-details-actions">
       <button class="btn btn-secondary" onclick="window.viewInvoice('${track.orderId}')">
         <i class="fa-solid fa-file-invoice-dollar"></i> Generate Tax Invoice
@@ -1017,11 +1088,9 @@ function renderTrackingDetails(track) {
     </div>
   `;
 
-  // Update active background class on sidebar order lists
   document.querySelectorAll('.order-sidebar-card').forEach(card => {
     if (card.getAttribute('data-id') === track.orderId) {
       card.classList.add('active');
-      // Update badge in sidebar dynamically
       const badge = card.querySelector('.order-status-badge');
       if (badge) {
         badge.textContent = track.deliveryStatus;
@@ -1033,7 +1102,6 @@ function renderTrackingDetails(track) {
   });
 }
 
-// Invoice view renderer
 async function viewInvoice(orderId) {
   const modal = document.getElementById('invoice-modal');
   const paper = document.getElementById('invoice-paper');
@@ -1065,7 +1133,6 @@ function renderInvoicePaper(inv) {
     day: 'numeric', month: 'long', year: 'numeric'
   });
 
-  // Table items rows
   const itemsRows = inv.items.map((item, idx) => {
     const rate = item.price;
     const qty = item.quantity;
@@ -1088,7 +1155,6 @@ function renderInvoicePaper(inv) {
     `;
   }).join('');
 
-  // GST Ledger Slabs Rows
   const slabs = ['slab5', 'slab12', 'slab18'];
   const gstLedgerHTML = slabs.map(slab => {
     const rates = { slab5: '5%', slab12: '12%', slab18: '18%' };
@@ -1110,7 +1176,7 @@ function renderInvoicePaper(inv) {
   paper.innerHTML = `
     <div class="invoice-header-grid">
       <div class="invoice-brand">
-        <h2><i class="fa-solid fa-mushroom logo-icon" style="color:#38b17b;"></i> MycoFlora Bio-Farms</h2>
+        <h2><i class="fa-solid fa-mushroom logo-icon" style="color:#38b17b;"></i> Sporekart Store</h2>
         <p>${inv.seller.address}</p>
         <p><strong>GSTIN:</strong> ${inv.seller.gstin}</p>
         <p><strong>Support:</strong> ${inv.seller.email} | ${inv.seller.phone}</p>
@@ -1142,7 +1208,7 @@ function renderInvoicePaper(inv) {
       <thead>
         <tr>
           <th class="text-center" width="5%">#</th>
-          <th width="35%">Specimen / Equipment Details</th>
+          <th width="35%">Specimen / Seed Details</th>
           <th class="text-right" width="10%">Unit Rate</th>
           <th class="text-center" width="8%">Qty</th>
           <th class="text-right" width="10%">Discount</th>
@@ -1196,36 +1262,426 @@ function renderInvoicePaper(inv) {
     </div>
 
     <div class="invoice-declaration">
-      <p>Declaration: This is a computer generated invoice and does not require a physical signature. The genetics sold are for gourmet or medicinal cultivation purposes under certified laboratory conditions.</p>
-      <p style="margin-top:0.5rem; font-weight:600; color:#14281c;">Thank you for growing with MycoFlora Bio-Farms!</p>
+      <p>Declaration: This is a computer generated invoice. The spawn seeds and fresh mushrooms sold are subject to standard agricultural taxation rates.</p>
+      <p style="margin-top:0.5rem; font-weight:600; color:#14281c;">Thank you for growing with Sporekart!</p>
     </div>
   `;
 
-  // Attach dynamic share parameters to WhatsApp button
-  const shareText = `Hello MycoFlora, check my paid invoice ${inv.invoiceNumber} for ₹${inv.totals.total.toFixed(2)}. I'm tracking my spawn growth at http://localhost:3000/#track-${inv.invoiceNumber.split('-')[1].toLowerCase()}`;
+  const shareText = `Hello Sporekart, check my paid invoice ${inv.invoiceNumber} for ₹${inv.totals.total.toFixed(2)}. I'm tracking my spawn growth at http://localhost:3000/#track-${inv.invoiceNumber.split('-')[1].toLowerCase()}`;
   const whatsappUrl = `https://wa.me/${inv.buyer.phone || '918049913822'}?text=${encodeURIComponent(shareText)}`;
   
   const waBtn = document.getElementById('btn-whatsapp-invoice');
   waBtn.onclick = () => window.open(whatsappUrl, '_blank');
 }
 
-// Real-time WhatsApp text generator for active tracking
 function whatsappQuickMessage(orderId) {
   const order = state.orders.find(o => o.id === orderId);
   if (!order) return;
 
-  const orderNum = `INV-${order.id.substring(0,8).toUpperCase()}`;
+  const orderNum = `RUN-${order.id.substring(0,8).toUpperCase()}`;
   const orderItemsStr = order.items.map(i => `${i.name} (x${i.quantity})`).join(', ');
   
-  const text = `Hi, I am tracking my MycoFlora Order ${orderNum} [${orderItemsStr}]. Mycelium incubator status is: ${order.delivery_status.toUpperCase()}. Live updates at: http://localhost:3000/#track-${order.id}`;
+  const text = `Hi, I am tracking my Sporekart Run ${orderNum} [${orderItemsStr}]. Mycelium incubator status is: ${order.delivery_status.toUpperCase()}. Live updates at: http://localhost:3000/#track-${order.id}`;
   
   const userWhatsapp = state.user ? state.user.whatsappNumber : '';
-  const finalWhatsappNumber = userWhatsapp || '918049913822'; // fallback desk
+  const finalWhatsappNumber = userWhatsapp || '918049913822';
 
   const url = `https://wa.me/${finalWhatsappNumber}?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
 }
 
+// ==========================================================================
+// ADMIN MODULE OPERATIONS (CRUD FOR PRODUCT CATALOG)
+// ==========================================================================
+async function fetchAdminInventory() {
+  const grid = document.getElementById('admin-inventory-grid');
+  grid.innerHTML = `
+    <div style="display:flex; justify-content:center; align-items:center; padding: 2rem; width:100%;">
+      <i class="fa-solid fa-spinner fa-spin loader-icon" style="font-size: 1.5rem;"></i>
+    </div>
+  `;
+
+  try {
+    const res = await fetch(`${API_BASE}/products`);
+    if (!res.ok) throw new Error("Failed to load products");
+
+    const products = await res.json();
+    
+    if (products.length === 0) {
+      grid.innerHTML = `<p class="no-orders" style="padding:1.5rem;">No products listed in catalog.</p>`;
+      return;
+    }
+
+    grid.innerHTML = products.map(prod => {
+      const catLabel = prod.category === 'spawn' ? 'Spawn & Seeds' : 'Mushroom';
+      return `
+        <div class="admin-inventory-item" data-id="${prod.id}">
+          <img src="${prod.image_url}" alt="${prod.name}">
+          <div class="admin-inv-details">
+            <h4>${prod.name}</h4>
+            <span style="font-size:0.7rem; color:var(--color-text-muted); text-transform:uppercase;">${catLabel} | GST: ${prod.gst_rate}%</span>
+            <div class="admin-inv-price-edit">
+              <span>Price: ₹</span>
+              <input type="number" step="0.01" class="price-input" value="${prod.price.toFixed(2)}" data-id="${prod.id}">
+              <button class="btn-admin-price-update" onclick="window.adminUpdatePrice('${prod.id}')">Update</button>
+            </div>
+          </div>
+          <button class="btn-admin-delete" onclick="window.adminDeleteProduct('${prod.id}')">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    grid.innerHTML = `<p style="color:var(--color-danger); padding:1rem;">Failed to synchronize active inventory directory.</p>`;
+  }
+}
+
+async function handleAdminAddProduct(e) {
+  e.preventDefault();
+  const feedback = document.getElementById('admin-add-feedback');
+  feedback.classList.add('hidden');
+
+  const name = document.getElementById('admin-prod-name').value.trim();
+  const category = document.getElementById('admin-prod-category').value;
+  const description = document.getElementById('admin-prod-desc').value.trim();
+  const price = document.getElementById('admin-prod-price').value;
+  const gst_rate = document.getElementById('admin-prod-gst').value;
+  const difficulty = document.getElementById('admin-prod-difficulty').value;
+  const stock = document.getElementById('admin-prod-stock').value;
+  const image_url = document.getElementById('admin-prod-image').value.trim();
+
+  try {
+    const res = await fetch(`${API_BASE}/products`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.token}`
+      },
+      body: JSON.stringify({
+        name, category, description, price, gst_rate, difficulty, stock, image_url
+      })
+    });
+
+    const data = await res.json();
+    
+    if (res.ok) {
+      alert(`Specimen "${name}" successfully listed in inventory catalog.`);
+      document.getElementById('form-admin-add-product').reset();
+      
+      // Refresh views
+      fetchProducts();
+      fetchAdminInventory();
+    } else {
+      feedback.textContent = data.error || "Failed to publish listing.";
+      feedback.classList.remove('hidden');
+    }
+  } catch (err) {
+    console.error("Admin add product error:", err);
+    feedback.textContent = "Server communication failure.";
+    feedback.classList.remove('hidden');
+  }
+}
+
+async function adminUpdatePrice(productId) {
+  const itemCard = document.querySelector(`.admin-inventory-item[data-id="${productId}"]`);
+  if (!itemCard) return;
+
+  const priceInput = itemCard.querySelector('.price-input');
+  const newPrice = parseFloat(priceInput.value);
+
+  if (isNaN(newPrice) || newPrice < 0) {
+    alert("Please enter a valid positive decimal price.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/products/${productId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.token}`
+      },
+      body: JSON.stringify({ price: newPrice })
+    });
+
+    if (res.ok) {
+      alert("Inventory listing price successfully adjusted.");
+      fetchProducts(); // sync shop catalog
+      fetchAdminInventory(); // sync list
+    } else {
+      const data = await res.json();
+      alert(data.error || "Failed to modify item price.");
+    }
+  } catch (err) {
+    console.error("Admin price update error:", err);
+    alert("Communication error with server.");
+  }
+}
+
+async function adminDeleteProduct(productId) {
+  if (!confirm("Are you sure you want to permanently delete this product from directory inventory?")) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/products/${productId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${state.token}` }
+    });
+
+    if (res.ok) {
+      alert("Product successfully deleted from directory inventory.");
+      fetchProducts();
+      fetchAdminInventory();
+    } else {
+      const data = await res.json();
+      alert(data.error || "Failed to remove item.");
+    }
+  } catch (err) {
+    console.error("Admin delete product error:", err);
+    alert("Server communication error.");
+  }
+}
+
+window.adminUpdatePrice = adminUpdatePrice;
+window.adminDeleteProduct = adminDeleteProduct;
+
 // Bind methods globally
 window.viewInvoice = viewInvoice;
 window.whatsappQuickMessage = whatsappQuickMessage;
+
+// ==========================================================================
+// THREE.JS 3D WEBGL ENGINE & INTERACTIVE PARTICLE SYSTEM
+// ==========================================================================
+function initThreeJS() {
+  const canvas = document.getElementById('hero-three-canvas');
+  if (!canvas) return;
+
+  const scene = new THREE.Scene();
+  
+  const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.z = 4.5;
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    alpha: true,
+    antialias: true
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+  // Layer 1: Emerald/Green Spores
+  const particlesCount1 = 900;
+  const positions1 = new Float32Array(particlesCount1 * 3);
+  const colors1 = new Float32Array(particlesCount1 * 3);
+  const greenColor = new THREE.Color('#38b17b');
+
+  for (let i = 0; i < particlesCount1 * 3; i += 3) {
+    const u = Math.random();
+    const v = Math.random();
+    const theta = u * 2.0 * Math.PI;
+    const phi = Math.acos(2.0 * v - 1.0);
+    const r = Math.cbrt(Math.random()) * 2.0;
+
+    positions1[i] = r * Math.sin(phi) * Math.cos(theta);
+    positions1[i + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions1[i + 2] = r * Math.cos(phi);
+
+    const colorMix = Math.random();
+    if (colorMix > 0.85) {
+      colors1[i] = 1.0;
+      colors1[i + 1] = 0.82;
+      colors1[i + 2] = 0.4;
+    } else {
+      colors1[i] = greenColor.r + (Math.random() - 0.5) * 0.1;
+      colors1[i + 1] = greenColor.g + (Math.random() - 0.5) * 0.1;
+      colors1[i + 2] = greenColor.b + (Math.random() - 0.5) * 0.1;
+    }
+  }
+
+  const geometry1 = new THREE.BufferGeometry();
+  geometry1.setAttribute('position', new THREE.BufferAttribute(positions1, 3));
+  geometry1.setAttribute('color', new THREE.BufferAttribute(colors1, 3));
+
+  const material1 = new THREE.PointsMaterial({
+    size: 0.07,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.75,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+
+  const sporeCloud1 = new THREE.Points(geometry1, material1);
+  scene.add(sporeCloud1);
+
+  // Layer 2: Gold/Amber Spores
+  const particlesCount2 = 500;
+  const positions2 = new Float32Array(particlesCount2 * 3);
+  const colors2 = new Float32Array(particlesCount2 * 3);
+  const goldColor = new THREE.Color('#ffd166');
+
+  for (let i = 0; i < particlesCount2 * 3; i += 3) {
+    const u = Math.random();
+    const v = Math.random();
+    const theta = u * 2.0 * Math.PI;
+    const phi = Math.acos(2.0 * v - 1.0);
+    const r = Math.cbrt(Math.random()) * 1.3;
+
+    positions2[i] = r * Math.sin(phi) * Math.cos(theta);
+    positions2[i + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions2[i + 2] = r * Math.cos(phi);
+
+    colors2[i] = goldColor.r + (Math.random() - 0.5) * 0.05;
+    colors2[i + 1] = goldColor.g + (Math.random() - 0.5) * 0.05;
+    colors2[i + 2] = goldColor.b + (Math.random() - 0.5) * 0.05;
+  }
+
+  const geometry2 = new THREE.BufferGeometry();
+  geometry2.setAttribute('position', new THREE.BufferAttribute(positions2, 3));
+  geometry2.setAttribute('color', new THREE.BufferAttribute(colors2, 3));
+
+  const material2 = new THREE.PointsMaterial({
+    size: 0.05,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+
+  const sporeCloud2 = new THREE.Points(geometry2, material2);
+  scene.add(sporeCloud2);
+
+  // Central Wireframe Cluster
+  const coreGeo = new THREE.IcosahedronGeometry(0.7, 2);
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: 0x38b17b,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.25
+  });
+  const nucleus = new THREE.Mesh(coreGeo, coreMat);
+  scene.add(nucleus);
+
+  // Interactive Drag Control
+  let isDragging = false;
+  let previousMousePosition = { x: 0, y: 0 };
+  let dragRotation = { x: 0, y: 0 };
+
+  const handlePointerDown = (e) => {
+    isDragging = true;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    previousMousePosition = { x: clientX, y: clientY };
+  };
+
+  const handlePointerMove = (e) => {
+    if (!isDragging) return;
+    
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    const deltaMove = {
+      x: clientX - previousMousePosition.x,
+      y: clientY - previousMousePosition.y
+    };
+
+    dragRotation.y += deltaMove.x * 0.007;
+    dragRotation.x += deltaMove.y * 0.007;
+
+    previousMousePosition = { x: clientX, y: clientY };
+  };
+
+  const handlePointerUp = () => {
+    isDragging = false;
+  };
+
+  canvas.addEventListener('mousedown', handlePointerDown);
+  canvas.addEventListener('mousemove', handlePointerMove);
+  canvas.addEventListener('mouseup', handlePointerUp);
+  canvas.addEventListener('mouseleave', handlePointerUp);
+
+  canvas.addEventListener('touchstart', handlePointerDown, { passive: true });
+  canvas.addEventListener('touchmove', handlePointerMove, { passive: true });
+  canvas.addEventListener('touchend', handlePointerUp);
+
+  // Scroll linkage Parallax
+  let scrollTargetY = 0;
+  window.addEventListener('scroll', () => {
+    scrollTargetY = window.scrollY;
+  }, { passive: true });
+
+  // Window Resize
+  const handleResize = () => {
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(width, height, false);
+  };
+  window.addEventListener('resize', handleResize);
+
+  const clock = new THREE.Clock();
+
+  const animate = () => {
+    requestAnimationFrame(animate);
+
+    const elapsedTime = clock.getElapsedTime();
+
+    sporeCloud1.rotation.y = elapsedTime * 0.08 + dragRotation.y;
+    sporeCloud1.rotation.x = elapsedTime * 0.03 + dragRotation.x;
+
+    sporeCloud2.rotation.y = -elapsedTime * 0.12 + dragRotation.y;
+    sporeCloud2.rotation.x = -elapsedTime * 0.05 + dragRotation.x;
+
+    nucleus.rotation.y = elapsedTime * 0.15 + dragRotation.y;
+    nucleus.rotation.x = elapsedTime * 0.1 + dragRotation.x;
+
+    sporeCloud1.position.y = -scrollTargetY * 0.0008;
+    sporeCloud2.position.y = -scrollTargetY * 0.0005;
+    nucleus.position.y = -scrollTargetY * 0.0003;
+
+    const scaleFactor = 1.0 + Math.sin(elapsedTime * 2.0) * 0.05;
+    nucleus.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+    renderer.render(scene, camera);
+  };
+
+  animate();
+}
+
+// ==========================================================================
+// SCROLL-REVEAL OBSERVATION SYSTEM
+// ==========================================================================
+function initScrollReveal() {
+  const targets = [
+    document.querySelector('.section-header'),
+    document.querySelector('.category-filters-row'),
+    document.getElementById('calculator-anchor'),
+    document.querySelector('.tracker-layout'),
+    document.querySelector('.calc-header')
+  ].filter(el => el !== null);
+
+  const observerOptions = {
+    root: null,
+    rootMargin: '0px',
+    threshold: 0.1
+  };
+
+  const observer = new IntersectionObserver((entries, obs) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('revealed');
+        obs.unobserve(entry.target);
+      }
+    });
+  }, observerOptions);
+
+  targets.forEach(target => {
+    target.classList.add('reveal-element');
+    observer.observe(target);
+  });
+}
