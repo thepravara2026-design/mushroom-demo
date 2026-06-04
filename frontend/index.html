@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MycoFlora | Premium Mushroom Cultivation & Spawn Store</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/style.css">
+  <!-- Razorpay SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+<body>
+
+  <!-- Floating Ambient Spores -->
+  <div class="spore-background">
+    <div class="spore s1"></div>
+    <div class="spore s2"></div>
+    <div class="spore s3"></div>
+    <div class="spore s4"></div>
+  </div>
+
+  <!-- NAVIGATION HEADER -->
+  <header class="app-header">
+    <div class="header-container">
+      <a href="#" class="logo" id="nav-logo">
+        <i class="fa-solid fa-mushroom logo-icon"></i>
+        <span>Myco<span>Flora</span></span>
+      </a>
+
+      <nav class="main-nav">
+        <a href="#shop" class="nav-link active" id="btn-nav-shop"><i class="fa-solid fa-seedling"></i> Laboratory Shop</a>
+        <a href="#track" class="nav-link" id="btn-nav-track"><i class="fa-solid fa-truck-ramp-box"></i> Cultivation Tracker</a>
+      </nav>
+
+      <div class="header-actions">
+        <div id="user-profile-section" class="user-profile">
+          <button class="btn btn-secondary-glow" id="btn-open-auth">
+            <i class="fa-solid fa-user-astronaut"></i> Log In
+          </button>
+        </div>
+        <button class="cart-trigger" id="btn-open-cart">
+          <i class="fa-solid fa-basket-shopping"></i>
+          <span class="cart-badge" id="cart-count">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO SECTION -->
+  <section class="hero" id="hero-section">
+    <div class="hero-content">
+      <div class="hero-tag">BIO-REVOLUTION AT HOME</div>
+      <h1>Cultivate Gourmet & <br>Medicinal Mushrooms</h1>
+      <p>Source high-viability liquid cultures, ready-to-fruit mycelium blocks, sterilization gear, and follow real-time growth incubation tracking.</p>
+      <div class="hero-actions-row">
+        <a href="#shop" class="btn btn-primary" id="hero-shop-btn">Explore Spawn Catalog</a>
+        <a href="#calculator-anchor" class="btn btn-secondary">Substrate Calculator</a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="glowing-orb"></div>
+      <img src="https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600" alt="Mycelium Colonization" class="hero-image">
+    </div>
+  </section>
+
+  <!-- MAIN CONTAINER -->
+  <main class="container">
+
+    <!-- SHOPPING CATALOG PAGE -->
+    <section id="shop-page" class="page-section active">
+      <div class="section-header">
+        <div>
+          <h2>Sterile Laboratory Inventory</h2>
+          <p class="subtitle">Filter and select active genetics, cultivation gear, and fresh harvests.</p>
+        </div>
+        <div class="filter-controls">
+          <div class="search-bar">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="shop-search" placeholder="Search cultures, spore syringes...">
+          </div>
+        </div>
+      </div>
+
+      <!-- Categories Navigation -->
+      <div class="category-filters-row">
+        <button class="cat-btn active" data-category="all">All Items</button>
+        <button class="cat-btn" data-category="spawn"><i class="fa-solid fa-dna"></i> Grain Spawn & Spores (5% GST)</button>
+        <button class="cat-btn" data-category="kits"><i class="fa-solid fa-box-archive"></i> Fruiting Kits (12% GST)</button>
+        <button class="cat-btn" data-category="mushrooms"><i class="fa-solid fa-utensils"></i> Fresh Harvests (5% GST)</button>
+        <button class="cat-btn" data-category="tools"><i class="fa-solid fa-flask"></i> Cultivation Tools (18% GST)</button>
+      </div>
+
+      <!-- Catalog Grid -->
+      <div class="product-grid" id="product-grid">
+        <!-- Products will be injected dynamically -->
+        <div class="grid-skeleton">
+          <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
+          <p>Connecting to MycoFlora Genetics Database...</p>
+        </div>
+      </div>
+
+      <!-- SUBSTRATE CALCULATOR SECTION -->
+      <div id="calculator-anchor" class="calculator-card">
+        <div class="calc-header">
+          <i class="fa-solid fa-calculator calc-icon"></i>
+          <div>
+            <h3>Bulk Substrate & Spawn Calculator</h3>
+            <p>Calculate your ratio of spawn-to-substrate for mono-tub cultivation setups.</p>
+          </div>
+        </div>
+        <div class="calc-grid">
+          <div class="input-group">
+            <label for="tub-volume">Tub Size (Liters / Quarts)</label>
+            <input type="number" id="tub-volume" value="30" min="5" max="150">
+          </div>
+          <div class="input-group">
+            <label for="spawn-ratio">Spawn Ratio (Spawn : Bulk)</label>
+            <select id="spawn-ratio">
+              <option value="0.5">1:1 (Super Fast Colonization)</option>
+              <option value="0.33" selected>1:2 (Recommended Standard)</option>
+              <option value="0.25">1:3 (Economical)</option>
+              <option value="0.20">1:4 (Slower, higher contamination risk)</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label for="substrate-depth">Target Bed Depth (Inches)</label>
+            <input type="number" id="substrate-depth" value="3.5" min="1" max="6" step="0.5">
+          </div>
+          <div class="calc-action">
+            <button class="btn btn-primary" id="btn-calculate-substrate">Calculate Myco-Mix</button>
+          </div>
+        </div>
+        <div class="calc-results hidden" id="calc-results-panel">
+          <div class="result-box">
+            <span class="result-val" id="res-grain-spawn">0.00 kg</span>
+            <span class="result-lbl">Grain Spawn Needed</span>
+          </div>
+          <div class="result-box">
+            <span class="result-val" id="res-bulk-substrate">0.00 kg</span>
+            <span class="result-lbl">Bulk Substrate (Coir/Verm)</span>
+          </div>
+          <div class="result-box">
+            <span class="result-val" id="res-water">0.00 Liters</span>
+            <span class="result-lbl">Required Hydration (Misting)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CULTIVATION TRACKER PAGE -->
+    <section id="tracker-page" class="page-section">
+      <div class="section-header">
+        <div>
+          <h2>Order & Cultivation Progress Tracker</h2>
+          <p class="subtitle">Monitor your mycelium colonization, fruiting timelines, and shipping updates in real-time.</p>
+        </div>
+      </div>
+
+      <div class="tracker-layout">
+        <!-- Active Orders List Sidebar -->
+        <div class="orders-sidebar">
+          <h3>Your Inoculations</h3>
+          <div class="orders-list" id="orders-list">
+            <!-- Orders injected here -->
+            <p class="no-orders">No active inoculations. Visit the Laboratory Shop to purchase cultures!</p>
+          </div>
+        </div>
+
+        <!-- Tracking Details View -->
+        <div class="tracking-details-panel empty" id="tracking-details-panel">
+          <div class="tracker-empty-state">
+            <i class="fa-solid fa-microscope"></i>
+            <p>Select an order from the list to pull up its live mycelium incubator metrics and delivery status.</p>
+          </div>
+          <div class="tracker-active-state hidden" id="tracker-active-view">
+            <!-- Active order details injected here -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- PRODUCT DETAIL OVERLAY MODAL -->
+  <div class="modal-overlay" id="product-detail-modal">
+    <div class="modal-card">
+      <button class="modal-close" id="btn-close-detail"><i class="fa-solid fa-xmark"></i></button>
+      <div class="modal-body-split" id="detail-modal-body">
+        <!-- Injected product details -->
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTHENTICATION MODAL -->
+  <div class="modal-overlay" id="auth-modal">
+    <div class="modal-card modal-small">
+      <button class="modal-close" id="btn-close-auth"><i class="fa-solid fa-xmark"></i></button>
+      <div class="auth-container">
+        <!-- LOGIN STATE -->
+        <div id="auth-login-view" class="auth-form-panel">
+          <h3>Welcome Back, Cultivator</h3>
+          <p class="auth-subtitle">Log in to manage spawn tracking and checkouts.</p>
+          <form id="form-login">
+            <div class="input-field">
+              <label><i class="fa-solid fa-envelope"></i> Email Address</label>
+              <input type="email" id="login-email" required placeholder="grower@shroom.com">
+            </div>
+            <div class="input-field">
+              <label><i class="fa-solid fa-lock"></i> Password</label>
+              <input type="password" id="login-password" required placeholder="••••••••">
+            </div>
+            <div class="auth-error-msg hidden" id="login-error"></div>
+            <button type="submit" class="btn btn-primary btn-block">Establish Connection</button>
+          </form>
+          <p class="auth-toggle-link">New grower? <a href="#" id="link-to-signup">Create a Lab Account</a></p>
+        </div>
+
+        <!-- SIGNUP STATE -->
+        <div id="auth-signup-view" class="auth-form-panel hidden">
+          <h3>Create Lab Credentials</h3>
+          <p class="auth-subtitle">Sign up to buy professional genetics and trace shipments.</p>
+          <form id="form-signup">
+            <div class="input-field">
+              <label><i class="fa-solid fa-id-card"></i> Full Name / Farm Name</label>
+              <input type="text" id="signup-name" required placeholder="Amanita Farms">
+            </div>
+            <div class="input-field">
+              <label><i class="fa-solid fa-envelope"></i> Email Address</label>
+              <input type="email" id="signup-email" required placeholder="shroomer@myco.com">
+            </div>
+            <div class="input-field">
+              <label><i class="fa-solid fa-whatsapp"></i> WhatsApp Number (for notifications)</label>
+              <input type="tel" id="signup-whatsapp" placeholder="9876543210" pattern="[0-9]{10}" title="Ten digit mobile number">
+            </div>
+            <div class="input-field">
+              <label><i class="fa-solid fa-lock"></i> Create Password</label>
+              <input type="password" id="signup-password" required placeholder="••••••••">
+            </div>
+            <div class="auth-error-msg hidden" id="signup-error"></div>
+            <button type="submit" class="btn btn-primary btn-block">Register Lab Profile</button>
+          </form>
+          <p class="auth-toggle-link">Already registered? <a href="#" id="link-to-login">Log In</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAX INVOICE MODAL -->
+  <div class="modal-overlay" id="invoice-modal">
+    <div class="modal-card modal-invoice">
+      <button class="modal-close" id="btn-close-invoice"><i class="fa-solid fa-xmark"></i></button>
+      <div class="invoice-actions-row">
+        <button class="btn btn-secondary-glow" onclick="window.print()"><i class="fa-solid fa-print"></i> Print Invoice</button>
+        <button class="btn btn-whatsapp-action" id="btn-whatsapp-invoice"><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
+      </div>
+      <div class="invoice-container-paper" id="invoice-paper">
+        <!-- Dynamic invoice content generated by app.js -->
+        <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE-OUT CART DRAWER -->
+  <div class="cart-drawer-overlay" id="cart-drawer-overlay"></div>
+  <div class="cart-drawer" id="cart-drawer">
+    <div class="cart-header">
+      <h3>Your Inoculation Basket</h3>
+      <button class="btn-close-cart" id="btn-close-cart"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <!-- Cart list container -->
+    <div class="cart-items-wrapper" id="cart-items-container">
+      <!-- Injected items -->
+      <div class="cart-empty-message">
+        <i class="fa-solid fa-basket-shopping"></i>
+        <p>Your basket is barren. Select some genetics or kits to get growing!</p>
+      </div>
+    </div>
+
+    <!-- Promo code + invoice calculator footer -->
+    <div class="cart-footer">
+      <div class="promo-code-box">
+        <input type="text" id="promo-input" placeholder="Promo Code (e.g. SPORE10, SHROOM20)">
+        <button class="btn btn-secondary" id="btn-apply-promo">Apply</button>
+      </div>
+      <div class="promo-feedback hidden" id="promo-message">Code Applied!</div>
+
+      <div class="summary-invoice-ledger">
+        <div class="ledger-row">
+          <span>Incubator Subtotal:</span>
+          <span id="ledger-subtotal">₹0.00</span>
+        </div>
+        <div class="ledger-row discount hidden" id="ledger-discount-row">
+          <span>Offers / Promo Discount:</span>
+          <span id="ledger-discount">-₹0.00</span>
+        </div>
+        <div class="ledger-row">
+          <span>Mycology Taxes (GST):</span>
+          <span id="ledger-tax">₹0.00</span>
+        </div>
+        <div class="ledger-row total">
+          <span>Net Payable:</span>
+          <span id="ledger-total">₹0.00</span>
+        </div>
+      </div>
+
+      <div class="cart-checkout-actions">
+        <button class="btn btn-primary btn-block" id="btn-checkout">
+          <i class="fa-solid fa-circle-nodes"></i> Initiate Payment (Razorpay)
+        </button>
+        <p class="auth-warning-label hidden" id="cart-auth-warning">⚠️ Please log in to complete checkout.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer-bar">
+    <p>&copy; 2026 MycoFlora Bio-Farms. Full-Stack Agentic Vibe-Coding Platform Demonstration.</p>
+  </footer>
+
+  <!-- Core App Logic -->
+  <script type="module" src="/src/app.js"></script>
+</body>
+</html>
