@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const keyId = process.env.RAZORPAY_KEY_ID || '';
 const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
 
-const isMock = !keyId || keyId.includes('your-') || !keySecret;
+const isMock = !keyId || keyId.includes('your') || !keySecret;
 
 let razorpayInstance = null;
 if (!isMock) {

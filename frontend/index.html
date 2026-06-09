@@ -1,412 +1,1041 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sporekart | Premium Mushroom Genetics & Spawn Store</title>
-  <!-- Google Fonts -->
+  <title>Sporekart | Fresh Mushrooms, Better Living. Naturally.</title>
+  <meta name="description"
+    content="Premium quality Fresh & Dry Mushrooms, Spawn Seeds and expert training – everything you need to grow success.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <!-- FontAwesome Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- Stylesheet -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="/style.css">
-  <!-- Razorpay SDK -->
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <!-- Three.js CDN for 3D graphics -->
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
+
 <body>
 
-  <!-- Floating Ambient Spores -->
-  <div class="spore-background">
-    <div class="spore s1"></div>
-    <div class="spore s2"></div>
-    <div class="spore s3"></div>
-    <div class="spore s4"></div>
-  </div>
-
-  <!-- NAVIGATION HEADER -->
-  <header class="app-header">
-    <div class="header-container">
+  <!-- ============================================================
+       TOP HEADER BAR
+  ============================================================ -->
+  <div class="topbar">
+    <div class="topbar-inner">
       <a href="#" class="logo" id="nav-logo">
-        <i class="fa-solid fa-mushroom logo-icon"></i>
-        <span>Spore<span>kart</span></span>
+        <div class="logo-icon-wrap"><i class="fa-solid fa-seedling"></i></div>
+        <div class="logo-text">
+          <span class="logo-brand">Sporekart</span>
+          <span class="logo-tagline">Grow. Learn. Thrive.</span>
+        </div>
       </a>
 
-      <nav class="main-nav">
-        <a href="#shop" class="nav-link active" id="btn-nav-shop"><i class="fa-solid fa-basket-shopping"></i> Shop</a>
-        <a href="#track" class="nav-link" id="btn-nav-track" style="display:none;"><i class="fa-solid fa-seedling"></i> Cultivation Support</a>
-        <a href="#admin" class="nav-link" id="btn-nav-admin" style="display:none;"><i class="fa-solid fa-screwdriver-wrench"></i> Admin Panel</a>
-      </nav>
+      <div class="topbar-search" id="topbar-search-wrap">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="shop-search" placeholder="Search for mushrooms, spawn seeds..." autocomplete="off">
+        <button class="search-btn"><i class="fa-solid fa-magnifying-glass"></i></button>
+        <div id="search-suggestions-dropdown" class="search-suggestions-dropdown hidden"></div>
+      </div>
 
-      <div class="header-actions">
-        <div id="user-profile-section" class="user-profile">
-          <button class="btn btn-secondary-glow" id="btn-open-auth">
-            <i class="fa-solid fa-user-astronaut"></i> Log In
-          </button>
-        </div>
-        <button class="cart-trigger" id="btn-open-cart">
-          <i class="fa-solid fa-basket-shopping"></i>
+      <div class="topbar-actions">
+        <a href="#track" class="topbar-action-btn" id="btn-nav-track" style="display:none">
+          <i class="fa-solid fa-truck-fast"></i>
+          <span>Track Order</span>
+        </a>
+        <a href="#admin" class="topbar-action-btn" id="btn-nav-admin" style="display:none">
+          <i class="fa-solid fa-user-shield"></i>
+          <span>Admin Console</span>
+        </a>
+        <div id="user-profile-section" style="display: flex; align-items: center;"></div>
+        <button class="cart-trigger topbar-action-btn" id="btn-open-cart">
+          <i class="fa-solid fa-cart-shopping"></i>
+          <span>Cart</span>
           <span class="cart-badge" id="cart-count">0</span>
         </button>
       </div>
     </div>
-  </header>
+  </div>
 
-  <!-- HERO SECTION -->
-  <section class="hero" id="hero-section">
-    <div class="hero-content">
-      <div class="hero-tag">BIO-REVOLUTION AT HOME</div>
-      <h1>Premium Spawn Seeds & <br>Organic Mushrooms</h1>
-      <p>Source high-viability liquid cultures, ready-to-fruit mycelium block spawns, organic culinary mushrooms, and follow real-time growth incubation tracking.</p>
-      <div class="hero-actions-row">
-        <a href="#shop" class="btn btn-primary" id="hero-shop-btn">Explore Spawn Catalog</a>
-        <a href="#calculator-anchor" class="btn btn-secondary">Substrate Calculator</a>
+  <!-- ============================================================
+       NAVIGATION BAR
+  ============================================================ -->
+  <nav class="main-navbar">
+    <div class="navbar-inner">
+      <button class="cat-dropdown-btn" id="btn-nav-shop">
+        <i class="fa-solid fa-grid-2"></i> Shop by Category <i class="fa-solid fa-chevron-down"></i>
+      </button>
+      <div class="nav-links">
+        <a href="#" class="nav-link" data-category="fresh">Fresh Mushrooms</a>
+        <a href="#" class="nav-link" data-category="dry">Dry Mushrooms</a>
+        <a href="#" class="nav-link" data-category="spawn">Spawn Seeds</a>
+        <a href="#" class="nav-link" data-category="kits">Mushroom Kits</a>
+        <a href="#training-section" class="nav-link">Training &amp; Courses</a>
+        <a href="#" class="nav-link">Bulk Orders</a>
+        <a href="#footer" class="nav-link">Contact Us</a>
       </div>
     </div>
-    <div class="hero-visual">
-      <div class="glowing-orb"></div>
-      <canvas id="hero-three-canvas" class="hero-canvas"></canvas>
-    </div>
-  </section>
+  </nav>
 
-  <!-- MAIN CONTAINER -->
-  <main class="container">
-
-    <!-- SHOPPING CATALOG PAGE -->
-    <section id="shop-page" class="page-section active">
-      <div class="section-header">
-        <div>
-          <h2>Active Inventory Storefront</h2>
-          <p class="subtitle">Filter and select high-viability genetics, grains spawn, and fresh mushroom harvests.</p>
-        </div>
-        <div class="filter-controls">
-          <div class="search-bar">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" id="shop-search" placeholder="Search cultures, spawns, mushrooms...">
+  <!-- ============================================================
+       HERO SECTION
+  ============================================================ -->
+  <!-- ============================================================
+       SHOP PAGE WRAPPER (Dynamic SPA Page Section)
+  ============================================================ -->
+  <div id="shop-page" class="page-section active">
+    <!-- HERO SECTION -->
+    <section class="hero-section" id="hero-section">
+      <div class="hero-inner">
+        <div class="hero-content">
+          <div class="hero-badge"><i class="fa-solid fa-leaf"></i> 100% Organic &amp; Natural</div>
+          <h1 class="hero-title">
+            Fresh Mushrooms,<br>
+            Better Living.<br>
+            <span class="hero-highlight">Naturally.</span>
+          </h1>
+          <p class="hero-desc">
+            Premium quality Fresh &amp; Dry Mushrooms, Spawn Seeds and expert training –
+            everything you need to grow success.
+          </p>
+          <div class="hero-btns">
+            <a href="#shop-section" class="btn-primary-hero">Shop Now <i class="fa-solid fa-arrow-right"></i></a>
+            <a href="#training-section" class="btn-outline-hero">Explore Training <i
+                class="fa-solid fa-arrow-right"></i></a>
+            <a href="#" class="btn-outline-hero">Bulk Orders <i class="fa-solid fa-arrow-right"></i></a>
           </div>
-        </div>
-      </div>
-
-      <!-- Categories Navigation -->
-      <div class="category-filters-row">
-        <button class="cat-btn active" data-category="all">All Items</button>
-        <button class="cat-btn" data-category="spawn"><i class="fa-solid fa-dna"></i> Spawn & Seeds</button>
-        <button class="cat-btn" data-category="mushrooms"><i class="fa-solid fa-mushroom"></i> Fresh & Dried Mushrooms</button>
-      </div>
-
-      <!-- Catalog Grid -->
-      <div class="product-grid" id="product-grid">
-        <!-- Products will be injected dynamically -->
-        <div class="grid-skeleton">
-          <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
-          <p>Connecting to Sporekart Genetics Database...</p>
-        </div>
-      </div>
-
-      <!-- SUBSTRATE CALCULATOR SECTION -->
-      <div id="calculator-anchor" class="calculator-card">
-        <div class="calc-header">
-          <i class="fa-solid fa-calculator calc-icon"></i>
-          <div>
-            <h3>Bulk Substrate & Spawn Calculator</h3>
-            <p>Calculate your ratio of spawn-to-substrate for mono-tub cultivation setups.</p>
-          </div>
-        </div>
-        <div class="calc-grid">
-          <div class="input-group">
-            <label for="tub-volume">Tub Size (Liters / Quarts)</label>
-            <input type="number" id="tub-volume" value="30" min="5" max="150">
-          </div>
-          <div class="input-group">
-            <label for="spawn-ratio">Spawn Ratio (Spawn : Bulk)</label>
-            <select id="spawn-ratio">
-              <option value="0.5">1:1 (Super Fast Colonization)</option>
-              <option value="0.33" selected>1:2 (Recommended Standard)</option>
-              <option value="0.25">1:3 (Economical)</option>
-              <option value="0.20">1:4 (Slower, higher contamination risk)</option>
-            </select>
-          </div>
-          <div class="input-group">
-            <label for="substrate-depth">Target Bed Depth (Inches)</label>
-            <input type="number" id="substrate-depth" value="3.5" min="1" max="6" step="0.5">
-          </div>
-          <div class="calc-action">
-            <button class="btn btn-primary" id="btn-calculate-substrate">Calculate Myco-Mix</button>
+          <div class="hero-trust-badges">
+            <div class="trust-badge">
+              <i class="fa-solid fa-leaf"></i>
+              <div>
+                <strong>100% Natural</strong>
+                <span>Farm fresh</span>
+              </div>
+            </div>
+            <div class="trust-badge">
+              <i class="fa-solid fa-box"></i>
+              <div>
+                <strong>Secure Packaging</strong>
+                <span>Safe delivery</span>
+              </div>
+            </div>
+            <div class="trust-badge">
+              <i class="fa-solid fa-truck"></i>
+              <div>
+                <strong>Pan India Delivery</strong>
+                <span>Fast &amp; Reliable</span>
+              </div>
+            </div>
+            <div class="trust-badge">
+              <i class="fa-solid fa-headset"></i>
+              <div>
+                <strong>Expert Support</strong>
+                <span>Always with you</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="calc-results hidden" id="calc-results-panel">
-          <div class="result-box">
-            <span class="result-val" id="res-grain-spawn">0.00 kg</span>
-            <span class="result-lbl">Grain Spawn Needed</span>
-          </div>
-          <div class="result-box">
-            <span class="result-val" id="res-bulk-substrate">0.00 kg</span>
-            <span class="result-lbl">Bulk Substrate (Coir/Verm)</span>
-          </div>
-          <div class="result-box">
-            <span class="result-val" id="res-water">0.00 Liters</span>
-            <span class="result-lbl">Required Hydration (Misting)</span>
+        <!--   <div class="hero-image-wrap">
+          <div class="hero-img-frame">
+            <img src="/images/hero_mushroom.png" alt="Premium Fresh Mushrooms" class="hero-img">
+            <div class="hero-badge-float">
+              <i class="fa-solid fa-certificate"></i>
+              <div>
+                <span class="badge-float-top">Farm to</span>
+                <span class="badge-float-bot">Doorstep</span>
+              </div>
+            </div> -->
+        <div class="hero-image-wrap">
+          <img src="/images/hero_mushroom.png" alt="Premium Fresh Mushrooms" class="hero-img">
+          <div class="hero-badge-float">
+            <i class="fa-solid fa-certificate"></i>
+            <div>
+              <span class="badge-float-top">Farm to</span>
+              <span class="badge-float-bot">Doorstep</span>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- CULTIVATION TRACKER PAGE (GROWER SUPPORT) -->
-    <section id="tracker-page" class="page-section">
-      <div class="section-header">
-        <div>
-          <h2>Cultivation Incubator & Guidelines</h2>
-          <p class="subtitle">Monitor your spawn run colonization, fruiting timelines, and access growth parameters.</p>
-        </div>
+    <!-- ============================================================
+       SHOP BY CATEGORY
+  ============================================================ -->
+    <section class="section-wrap" id="shop-section">
+      <div class="section-header-center">
+        <div class="section-label"><i class="fa-solid fa-seedling"></i> Shop by Category <i
+            class="fa-solid fa-seedling"></i></div>
+        <h2 class="section-title">Everything you need for mushroom cultivation and healthy living</h2>
       </div>
 
-      <div class="tracker-layout">
-        <!-- Active Orders List Sidebar -->
-        <div class="orders-sidebar">
-          <h3>Your Active Runs</h3>
-          <div class="orders-list" id="orders-list">
-            <!-- Orders injected here -->
-            <p class="no-orders">No active runs found. Purchase cultures or spawn to activate incubator tracking!</p>
+      <div class="category-slider-wrap">
+        <button class="slider-arrow left" id="cat-prev"><i class="fa-solid fa-chevron-left"></i></button>
+        <div class="category-grid" id="category-grid">
+          <div class="category-card" data-filter-category="fresh">
+            <div class="category-img-wrap">
+              <img src="/images/product_fresh.png" alt="Fresh Mushrooms">
+            </div>
+            <h3>Fresh Mushrooms</h3>
+            <p>Handpicked &amp; hygienically packed for best taste</p>
+            <button class="btn-category-shop" data-filter-category="fresh">Shop Now <i
+                class="fa-solid fa-arrow-right"></i></button>
+          </div>
+          <div class="category-card" data-filter-category="dry">
+            <div class="category-img-wrap dry-bg">
+              <img src="/images/product_dry.png" alt="Dry Mushrooms">
+            </div>
+            <h3>Dry Mushrooms</h3>
+            <p>100% natural &amp; sun-dried for rich nutrition</p>
+            <button class="btn-category-shop" data-filter-category="dry">Shop Now <i
+                class="fa-solid fa-arrow-right"></i></button>
+          </div>
+          <div class="category-card" data-filter-category="spawn">
+            <div class="category-img-wrap spawn-bg">
+              <img src="/images/product_spawn.png" alt="Spawn Seeds">
+            </div>
+            <h3>Spawn Seeds</h3>
+            <p>High quality spawn for better yield</p>
+            <button class="btn-category-shop" data-filter-category="spawn">Shop Now <i
+                class="fa-solid fa-arrow-right"></i></button>
+          </div>
+          <div class="category-card" data-filter-category="kits">
+            <div class="category-img-wrap kit-bg">
+              <img src="/images/product_kit.png" alt="Mushroom Kits">
+            </div>
+            <h3>Mushroom Kits</h3>
+            <p>All-in-one kits for beginners &amp; home growers</p>
+            <button class="btn-category-shop" data-filter-category="kits">Shop Now <i
+                class="fa-solid fa-arrow-right"></i></button>
           </div>
         </div>
-
-        <!-- Tracking Details View -->
-        <div class="tracking-details-panel empty" id="tracking-details-panel">
-          <div class="tracker-empty-state">
-            <i class="fa-solid fa-microscope"></i>
-            <p>Select a spawn run from the list to synchronize metrics and growth logs.</p>
-          </div>
-          <div class="tracker-active-state hidden" id="tracker-active-view">
-            <!-- Active order details injected here -->
-          </div>
-        </div>
+        <button class="slider-arrow right" id="cat-next"><i class="fa-solid fa-chevron-right"></i></button>
       </div>
     </section>
 
-    <!-- ADMIN PRODUCT CONTROL PANEL -->
-    <section id="admin-page" class="page-section">
-      <div class="section-header">
+    <!-- ============================================================
+       FEATURED PRODUCTS WITH LIVE CATEGORY FILTERS
+  ============================================================ -->
+    <section class="section-wrap featured-section" id="products-section">
+      <div class="featured-header">
         <div>
-          <h2>Sporekart Administration Console</h2>
-          <p class="subtitle">Update product pricing, add new spawn strains, or remove listings from the directory.</p>
+          <div class="section-label left"><i class="fa-solid fa-seedling"></i> Our Products</div>
+          <h2 class="section-title left">Fresh from the Farm &amp; Lab</h2>
         </div>
       </div>
 
-      <div class="admin-layout">
-        <!-- Add New Product Form -->
-        <div class="admin-form-card">
-          <h3>Add New Inventory Item</h3>
-          <form id="form-admin-add-product">
-            <div class="input-group-row">
-              <div class="input-field">
-                <label>Product Name</label>
-                <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Spore print">
-              </div>
-              <div class="input-field">
-                <label>Category</label>
-                <select id="admin-prod-category">
-                  <option value="spawn">Spawn & Seeds</option>
-                  <option value="mushrooms">Mushrooms</option>
-                </select>
-              </div>
-            </div>
-            <div class="input-field">
-              <label>Description</label>
-              <textarea id="admin-prod-desc" required placeholder="Product specifications, growth guidelines, dimensions..." style="background:rgba(0,0,0,0.3); border:1px solid var(--color-border); color:var(--color-text-light); padding:0.75rem 1rem; border-radius:8px; height:80px; font-family:var(--font-body); resize:none;"></textarea>
-            </div>
-            <div class="input-group-row">
-              <div class="input-field">
-                <label>Price (INR)</label>
-                <input type="number" id="admin-prod-price" required step="0.01" placeholder="380.00">
-              </div>
-              <div class="input-field">
-                <label>GST Rate (%)</label>
-                <input type="number" id="admin-prod-gst" required value="5">
-              </div>
-            </div>
-            <div class="input-group-row">
-              <div class="input-field">
-                <label>Difficulty</label>
-                <select id="admin-prod-difficulty">
-                  <option value="beginner">Beginner</option>
-                  <option value="intermediate">Intermediate</option>
-                  <option value="advanced">Advanced</option>
-                </select>
-              </div>
-              <div class="input-field">
-                <label>Initial Stock</label>
-                <input type="number" id="admin-prod-stock" required value="100">
-              </div>
-            </div>
-            <div class="input-field">
-              <label>Image URL</label>
-              <input type="text" id="admin-prod-image" placeholder="https://images.unsplash.com/...">
-            </div>
-            <button type="submit" class="btn btn-primary btn-block">Publish Listing</button>
-          </form>
-          <div id="admin-add-feedback" class="auth-error-msg hidden" style="margin-top:1rem;"></div>
-        </div>
+      <!-- LIVE CATEGORY FILTER TABS -->
+      <div class="category-filters-row" id="product-filters-row">
+        <button class="cat-btn active" data-category="all" id="cat-filter-all">
+          <i class="fa-solid fa-grid-2"></i> All Products
+        </button>
+        <!-- Dynamic category buttons added by fetchCategories() in app.js -->
+      </div>
 
-        <!-- Inventory List (For editing prices and deleting) -->
-        <div class="admin-inventory-list-card">
-          <h3>Catalog Directory</h3>
-          <div class="admin-inventory-grid" id="admin-inventory-grid">
-            <!-- Dynamic inventory listing with pricing inputs and delete buttons -->
+      <div class="products-grid-wrap">
+        <div class="product-grid" id="product-grid">
+          <!-- Loading state -->
+          <div class="grid-skeleton">
             <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
+            <p>Loading products...</p>
           </div>
         </div>
       </div>
     </section>
 
-  </main>
+    <!-- ============================================================
+       TRAINING SECTION
+  ============================================================ -->
+    <section class="training-section" id="training-section">
+      <div class="training-inner">
+        <!-- Left: Video/Image -->
+        <div class="training-media">
+          <img src="/images/training_farm.png" alt="Mushroom Cultivation Training">
+          <button class="play-btn"><i class="fa-solid fa-play"></i></button>
+          <div class="training-media-badge">Watch Our Farm Tour</div>
+        </div>
 
-  <!-- PRODUCT DETAIL OVERLAY MODAL -->
-  <div class="modal-overlay" id="product-detail-modal">
-    <div class="modal-card">
-      <button class="modal-close" id="btn-close-detail"><i class="fa-solid fa-xmark"></i></button>
-      <div class="modal-body-split" id="detail-modal-body">
-        <!-- Injected product details -->
+        <!-- Middle: Content -->
+        <div class="training-content">
+          <div class="section-label left">LEARN · GROW · SUCCEED</div>
+          <h2 class="training-title">Mushroom Cultivation Training &amp; Support</h2>
+          <p class="training-desc">
+            Join our practical training programs and get lifetime support to build your successful mushroom business.
+          </p>
+          <ul class="training-features">
+            <li><i class="fa-solid fa-laptop"></i>
+              <div><strong>Online &amp; Offline Training</strong><span>Learn at your convenience</span></div>
+            </li>
+            <li><i class="fa-solid fa-hands-holding"></i>
+              <div><strong>Practical &amp; Hands-on</strong><span>Real farm training experience</span></div>
+            </li>
+            <li><i class="fa-solid fa-chart-line"></i>
+              <div><strong>Business Guidance</strong><span>Start, grow &amp; scale your business</span></div>
+            </li>
+            <li><i class="fa-solid fa-infinity"></i>
+              <div><strong>Lifetime Support</strong><span>We are always with you</span></div>
+            </li>
+          </ul>
+          <a href="#" class="btn-training">Explore Training Programs <i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+
+        <!-- Right: Audience cards -->
+        <div class="training-audience">
+          <div class="audience-card">
+            <i class="fa-solid fa-user-graduate"></i>
+            <div>
+              <strong>For Beginners</strong>
+              <span>Step-by-step guidance</span>
+            </div>
+          </div>
+          <div class="audience-card">
+            <i class="fa-solid fa-tractor"></i>
+            <div>
+              <strong>For Farmers</strong>
+              <span>Scale your production</span>
+            </div>
+          </div>
+          <div class="audience-card">
+            <i class="fa-solid fa-briefcase"></i>
+            <div>
+              <strong>For Entrepreneurs</strong>
+              <span>Build a profitable business</span>
+            </div>
+          </div>
+          <div class="audience-card">
+            <i class="fa-solid fa-certificate"></i>
+            <div>
+              <strong>Certification</strong>
+              <span>Get certified &amp; grow</span>
+            </div>
+          </div>
+          <div class="trained-count">
+            <div class="trained-avatars">
+              <img src="https://i.pravatar.cc/36?img=1" alt="Farmer">
+              <img src="https://i.pravatar.cc/36?img=2" alt="Farmer">
+              <img src="https://i.pravatar.cc/36?img=3" alt="Farmer">
+              <img src="https://i.pravatar.cc/36?img=4" alt="Farmer">
+              <img src="https://i.pravatar.cc/36?img=5" alt="Farmer">
+            </div>
+            <div>
+              <strong>500+</strong>
+              <span>Farmers Trained</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+       STATS BAR
+  ============================================================ -->
+    <div class="stats-bar">
+      <div class="stats-inner">
+        <div class="stat-item">
+          <i class="fa-solid fa-face-smile"></i>
+          <div>
+            <strong>1000+</strong>
+            <span>Happy Customers</span>
+          </div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <i class="fa-solid fa-user-tie"></i>
+          <div>
+            <strong>500+</strong>
+            <span>Farmers Trained</span>
+          </div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <i class="fa-solid fa-seedling"></i>
+          <div>
+            <strong>10+</strong>
+            <span>Mushroom Varieties</span>
+          </div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <i class="fa-solid fa-location-dot"></i>
+          <div>
+            <strong>50+</strong>
+            <span>Cities Delivered</span>
+          </div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <i class="fa-solid fa-star"></i>
+          <div>
+            <strong>99%</strong>
+            <span>Customer Satisfaction</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+       TESTIMONIALS
+  ============================================================ -->
+    <section class="testimonials-section">
+      <div class="section-header-center">
+        <div class="section-label"><i class="fa-solid fa-star"></i> What Our Customers Say <i
+            class="fa-solid fa-star"></i></div>
+      </div>
+      <div class="testimonials-slider-wrap">
+        <button class="slider-arrow left" id="test-prev"><i class="fa-solid fa-chevron-left"></i></button>
+        <div class="testimonials-row" id="testimonials-row">
+          <div class="testimonial-card">
+            <div class="test-stars">★★★★★</div>
+            <p>"Sporekart's fresh mushrooms are insanely good! The quality and taste are unmatched."</p>
+            <div class="test-author">
+              <img src="https://i.pravatar.cc/44?img=10" alt="Priya Sharma">
+              <div>
+                <strong>Priya Sharma</strong>
+                <span>Home Chef</span>
+              </div>
+            </div>
+          </div>
+          <div class="testimonial-card">
+            <div class="test-stars">★★★★★</div>
+            <p>"The training program was very practical and helped me start my own mushroom farm."</p>
+            <div class="test-author">
+              <img src="https://i.pravatar.cc/44?img=11" alt="Ramesh Patil">
+              <div>
+                <strong>Ramesh Patil</strong>
+                <span>Mushroom Farmer</span>
+              </div>
+            </div>
+          </div>
+          <div class="testimonial-card">
+            <div class="test-stars">★★★★★</div>
+            <p>"Excellent spawn quality and amazing support. Highly recommended for beginners!"</p>
+            <div class="test-author">
+              <img src="https://i.pravatar.cc/44?img=12" alt="Anjali Verma">
+              <div>
+                <strong>Anjali Verma</strong>
+                <span>Home Grower</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="slider-arrow right" id="test-next"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </section>
+
+    <!-- ============================================================
+       NEWSLETTER SECTION
+  ============================================================ -->
+    <section class="newsletter-section">
+      <div class="newsletter-inner">
+        <div class="newsletter-content">
+          <h2>Join the Sporekart Family</h2>
+          <p>Get the latest updates on products, training, offers and mushroom cultivation tips straight to your inbox.
+          </p>
+        </div>
+        <div class="newsletter-form-wrap">
+          <div class="newsletter-form">
+            <input type="email" placeholder="Enter your email" id="newsletter-email">
+            <button class="btn-subscribe">Subscribe</button>
+          </div>
+          <div class="newsletter-perks">
+            <span><i class="fa-solid fa-check"></i> Exclusive Offers</span>
+            <span><i class="fa-solid fa-check"></i> Expert Tips</span>
+            <span><i class="fa-solid fa-check"></i> New Launches</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div> <!-- END SHOP PAGE -->
+
+  <!-- ============================================================
+       TRACKER PAGE WRAPPER (Dynamic SPA Page Section)
+  ============================================================ -->
+  <div id="tracker-page" class="page-section container"
+    style="max-width: var(--max-w); margin: 40px auto; padding: 40px 24px;">
+    <h2 style="font-family: var(--font-head); margin-bottom: 24px; color: var(--text-dark);"><i
+        class="fa-solid fa-seedling" style="color: var(--green-mid)"></i> Mycelium Incubator Log</h2>
+    <div class="tracker-layout">
+      <div id="orders-list"></div>
+      <div id="tracking-details-panel">
+        <div class="tracker-empty-state">
+          <i class="fa-solid fa-cubes-stacked"></i>
+          <p>Select a cultivation run from the sidebar to inspect mycelium colonization status.</p>
+        </div>
+        <div class="tracker-active-state hidden" id="tracker-active-view"></div>
       </div>
     </div>
   </div>
 
-  <!-- AUTHENTICATION MODAL -->
+  <!-- ============================================================
+       ADMIN PAGE WRAPPER (Dynamic SPA Page Section)
+  ============================================================ -->
+  <div id="admin-page" class="page-section">
+    <!-- ADMIN DASHBOARD HEADER -->
+    <div class="admin-dashboard-topbar">
+      <div class="admin-dash-brand">
+        <div class="admin-dash-icon"><i class="fa-solid fa-user-shield"></i></div>
+        <div>
+          <h2>Admin Control Panel</h2>
+          <span id="admin-dash-subtitle">Sporekart Inventory Management</span>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+        <div class="admin-dash-stats" id="admin-dash-stats">
+          <div class="admin-stat-chip"><i class="fa-solid fa-box"></i> <span id="admin-stat-products">0</span> Products
+          </div>
+          <div class="admin-stat-chip"><i class="fa-solid fa-shopping-bag"></i> <span id="admin-stat-orders">0</span>
+            Orders</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="btn-admin-exit-shop"
+            style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: white; padding: 6px 12px; font-size: 0.8rem; border-radius: var(--radius-sm); cursor: pointer;"><i
+              class="fa-solid fa-store"></i> View Shop</button>
+          <button class="btn" id="btn-admin-logout"
+            style="background: #e74c3c; border: 1px solid #e74c3c; color: white; padding: 6px 12px; font-size: 0.8rem; border-radius: var(--radius-sm); cursor: pointer;"><i
+              class="fa-solid fa-right-from-bracket"></i> Logout</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN TAB BAR -->
+    <div class="admin-tab-bar">
+      <button class="admin-tab active" data-tab="products"><i class="fa-solid fa-boxes-stacked"></i> Products</button>
+      <button class="admin-tab" data-tab="orders"><i class="fa-solid fa-truck-fast"></i> Orders &amp; Shipping</button>
+      <button class="admin-tab" data-tab="add-product"><i class="fa-solid fa-plus-circle"></i> Add Product</button>
+      <button class="admin-tab" data-tab="categories"><i class="fa-solid fa-tags"></i> Categories</button>
+    </div>
+
+    <!-- ADMIN CONTENT: Products Tab -->
+    <div class="admin-tab-content active" id="admin-content-products">
+      <div class="admin-content-inner">
+        <div class="admin-section-header">
+          <h3><i class="fa-solid fa-list"></i> Product Inventory</h3>
+          <div class="admin-filter-row">
+            <input type="text" id="admin-search-prod" placeholder="Search products..." class="admin-search-input">
+            <select id="admin-filter-cat" class="admin-select-input">
+              <option value="all">All Categories</option>
+              <option value="mushrooms">Mushrooms</option>
+              <option value="spawn">Spawn & Seeds</option>
+            </select>
+          </div>
+        </div>
+        <div id="admin-inventory-grid" class="admin-product-table-wrap">
+          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading products...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN CONTENT: Orders Tab -->
+    <div class="admin-tab-content" id="admin-content-orders">
+      <div class="admin-content-inner">
+        <div class="admin-section-header">
+          <h3><i class="fa-solid fa-truck-fast"></i> Orders & Shipping Management</h3>
+        </div>
+        <div id="admin-orders-list" class="admin-orders-wrap">
+          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading orders...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN CONTENT: Categories Tab -->
+    <div class="admin-tab-content" id="admin-content-categories">
+      <div class="admin-content-inner">
+        <div class="admin-section-header">
+          <h3><i class="fa-solid fa-tags"></i> Category Management</h3>
+        </div>
+        <!-- Add/Edit Category Form -->
+        <div class="admin-cat-form-wrap">
+          <input type="hidden" id="admin-edit-cat-id" value="">
+          <div class="admin-cat-form-row">
+            <div class="input-field">
+              <label>Category Slug / ID *</label>
+              <input type="text" id="admin-cat-id" placeholder="e.g. fresh" pattern="[a-z0-9\-]+"
+                title="Lowercase letters, numbers and hyphens only">
+            </div>
+            <div class="input-field">
+              <label>Category Name *</label>
+              <input type="text" id="admin-cat-name" placeholder="e.g. Fresh Mushrooms">
+            </div>
+            <div class="input-field" style="flex:2">
+              <label>Description</label>
+              <input type="text" id="admin-cat-desc" placeholder="Short description of this category...">
+            </div>
+            <div class="admin-cat-form-actions">
+              <button type="button" id="btn-admin-save-cat" class="btn btn-primary"><i
+                  class="fa-solid fa-floppy-disk"></i> Save</button>
+              <button type="button" id="btn-admin-reset-cat" class="btn btn-secondary"><i
+                  class="fa-solid fa-rotate-left"></i></button>
+            </div>
+          </div>
+          <div class="admin-error-msg hidden" id="admin-cat-feedback"></div>
+        </div>
+        <!-- Categories List -->
+        <div id="admin-categories-list" class="admin-categories-wrap">
+          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading categories...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN CONTENT: Add Product Tab -->
+    <div class="admin-tab-content" id="admin-content-add-product">
+      <div class="admin-content-inner">
+        <div class="admin-section-header">
+          <h3><i class="fa-solid fa-plus-circle"></i> Add / Edit Product</h3>
+        </div>
+        <div class="admin-form-wrap">
+          <form id="form-admin-add-product" class="admin-product-form">
+            <input type="hidden" id="admin-edit-id" value="">
+            <div class="admin-form-grid">
+              <div class="admin-form-col">
+                <div class="input-field">
+                  <label>Product Name *</label>
+                  <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit">
+                </div>
+                <div class="input-field">
+                  <label>Description *</label>
+                  <textarea id="admin-prod-desc" required placeholder="Product details, cultivation notes..."
+                    class="admin-textarea"></textarea>
+                </div>
+                <div class="admin-form-row-3">
+                  <div class="input-field">
+                    <label>Category *</label>
+                    <select id="admin-prod-category" class="admin-select-input">
+                      <option value="mushrooms">Fresh Mushrooms</option>
+                      <option value="spawn">Spawn &amp; Seeds</option>
+                    </select>
+                  </div>
+                  <div class="input-field">
+                    <label>Difficulty</label>
+                    <select id="admin-prod-difficulty" class="admin-select-input">
+                      <option value="beginner">Beginner</option>
+                      <option value="intermediate">Intermediate</option>
+                      <option value="advanced">Advanced</option>
+                    </select>
+                  </div>
+                  <div class="input-field">
+                    <label>GST Slab (%)</label>
+                    <select id="admin-prod-gst" class="admin-select-input">
+                      <option value="0">0% (Exempt)</option>
+                      <option value="5" selected>5% (Food/Agri)</option>
+                      <option value="12">12% (Standard)</option>
+                      <option value="18">18% (Standard+)</option>
+                      <option value="28">28% (Luxury)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="admin-form-col">
+                <div class="admin-form-row-2">
+                  <div class="input-field">
+                    <label>Actual Price (₹) *</label>
+                    <input type="number" step="0.01" id="admin-prod-price" required placeholder="350.00">
+                  </div>
+                  <div class="input-field">
+                    <label>MRP / Strikeout (₹)</label>
+                    <input type="number" step="0.01" id="admin-prod-mrp" placeholder="499.00">
+                  </div>
+                </div>
+                <div class="input-field">
+                  <label>Stock Quantity</label>
+                  <input type="number" id="admin-prod-stock" value="100" min="0">
+                </div>
+                <div class="input-field">
+                  <label>Product Image URL</label>
+                  <input type="url" id="admin-prod-image" placeholder="https://images.unsplash.com/...">
+                </div>
+                <div class="admin-form-preview" id="admin-img-preview">
+                  <i class="fa-solid fa-image"></i>
+                  <span>Image preview</span>
+                </div>
+              </div>
+            </div>
+            <div class="admin-error-msg hidden" id="admin-add-feedback"></div>
+            <div class="admin-form-actions">
+              <button type="button" id="btn-admin-reset-form" class="btn btn-secondary">Reset</button>
+              <button type="submit" class="btn btn-primary admin-submit-btn" id="admin-form-submit-btn">
+                <i class="fa-solid fa-plus-circle"></i> <span id="admin-submit-label">Publish Product</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       FOOTER
+  ============================================================ -->
+  <footer class="site-footer" id="footer">
+    <div class="footer-inner">
+      <!-- Brand -->
+      <div class="footer-col brand-col">
+        <div class="footer-logo">
+          <div class="logo-icon-wrap small"><i class="fa-solid fa-seedling"></i></div>
+          <div class="logo-text">
+            <span class="logo-brand">Sporekart</span>
+            <span class="logo-tagline">Grow. Learn. Thrive.</span>
+          </div>
+        </div>
+        <p class="footer-desc">Your trusted partner for premium mushrooms, quality spawn seeds, and expert mushroom
+          cultivation training.</p>
+        <div class="footer-socials">
+          <!--  <a href="#" aria-label="Facebook"><i class="fa-brands fa-facebook-f"></i></a>
+          <a href="https://www.instagram.com/pravaramedia" aria-label="Instagram"><i class="fa-brands fa-instagram"></i></a>
+          <a href="#" aria-label="YouTube"><i class="fa-brands fa-youtube"></i></a>
+          <a href="https://wa.me/+917204709870" aria-label="WhatsApp"><i class="fa-brands fa-whatsapp"></i></a> -->
+          <a href="https://www.facebook.com/pravaramedia" target="_blank" rel="noopener noreferrer"
+            aria-label="Facebook"><i class="fa-brands fa-facebook-f"></i></a>
+          <a href="https://www.instagram.com/pravaramedia" target="_blank" rel="noopener noreferrer"
+            aria-label="Instagram"><i class="fa-brands fa-instagram"></i></a>
+          <a href="https://www.youtube.com/@YOUR_CHANNEL" target="_blank" rel="noopener noreferrer"
+            aria-label="YouTube"><i class="fa-brands fa-youtube"></i></a>
+          <a href="https://wa.me/917204709870" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp"><i
+              class="fa-brands fa-whatsapp"></i></a>
+        </div>
+      </div>
+
+      <!-- Shop -->
+      <div class="footer-col">
+        <h4>Shop</h4>
+        <ul>
+          <li><a href="#" class="footer-cat-link" data-category="fresh">Fresh Mushrooms</a></li>
+          <li><a href="#" class="footer-cat-link" data-category="dry">Dry Mushrooms</a></li>
+          <li><a href="#" class="footer-cat-link" data-category="spawn">Spawn Seeds</a></li>
+          <li><a href="#" class="footer-cat-link" data-category="kits">Mushroom Kits</a></li>
+          <li><a href="#" class="footer-cat-link" data-category="all">All Products</a></li>
+        </ul>
+      </div>
+
+      <!-- Training -->
+      <div class="footer-col">
+        <h4>Training</h4>
+        <ul>
+          <li><a href="#">Training Programs</a></li>
+          <li><a href="#">Online Training</a></li>
+          <li><a href="#">Offline Training</a></li>
+          <li><a href="#">Business Support</a></li>
+          <li><a href="#">Success Stories</a></li>
+        </ul>
+      </div>
+
+      <!-- Information -->
+      <div class="footer-col">
+        <h4>Information</h4>
+        <ul>
+          <li><a href="#">About Us</a></li>
+          <li><a href="#">Blog</a></li>
+          <li><a href="#">Shipping &amp; Delivery</a></li>
+          <li><a href="#">Returns &amp; Refunds</a></li>
+          <li><a href="#">Privacy Policy</a></li>
+          <li><a href="#">Terms &amp; Conditions</a></li>
+        </ul>
+      </div>
+
+      <!-- Support / Need Help -->
+      <div class="footer-col need-help-col">
+        <h4>Need Help?</h4>
+        <div class="need-help-items">
+          <div class="need-help-item">
+            <i class="fa-solid fa-phone"></i>
+            <div>
+              <span class="help-label">Call Us</span>
+              <a href="tel:+911234567890">+91 7204709870</a>
+            </div>
+          </div>
+          <div class="need-help-item">
+            <i class="fa-solid fa-envelope"></i>
+            <div>
+              <span class="help-label">Email</span>
+              <a href="mailto:support@sporekart.com">support@sporekart.com</a>
+            </div>
+          </div>
+          <div class="need-help-item">
+            <i class="fa-solid fa-location-dot"></i>
+            <div>
+              <span class="help-label">SHRIYAP ENTERPRISE</span>
+              <a href="#">Basapura Village, Davangere-577005, Karnataka,India</a>
+            </div>
+          </div>
+          <div class="need-help-item">
+            <i class="fa-solid fa-clock"></i>
+            <div>
+              <span class="help-label">Hours</span>
+              <span>Mon – Sat: 9AM – 6PM</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>© 2026 Sporekart. All Rights Reserved.</p>
+      <p>Design And Developed By PRAVARA Media.</p>
+    </div>
+  </footer>
+
+  <!-- ============================================================
+       MODALS (Auth, Cart, Invoice – kept functional)
+  ============================================================ -->
+
+  <!-- AUTHENTICATION MODAL (Multi-Method Login) -->
   <div class="modal-overlay" id="auth-modal">
     <div class="modal-card modal-small">
       <button class="modal-close" id="btn-close-auth"><i class="fa-solid fa-xmark"></i></button>
       <div class="auth-container">
-        <!-- LOGIN STATE -->
-        <div id="auth-login-view" class="auth-form-panel">
-          <h3>Establish Connection</h3>
-          <p class="auth-subtitle">Log in to process checkouts or sync cultivation support logs.</p>
-          <form id="form-login">
-            <div class="input-field">
-              <label><i class="fa-solid fa-envelope"></i> Email Address</label>
-              <input type="email" id="login-email" required placeholder="grower@sporekart.com">
-            </div>
-            <div class="input-field">
-              <label><i class="fa-solid fa-lock"></i> Password</label>
-              <input type="password" id="login-password" required placeholder="••••••••">
-            </div>
-            <div class="auth-error-msg hidden" id="login-error"></div>
-            <button type="submit" class="btn btn-primary btn-block">Secure Login</button>
-          </form>
-          <p class="auth-toggle-link">New grower? <a href="#" id="link-to-signup">Register Lab Account</a></p>
+
+        <!-- STEP 1: Choose Login Method -->
+        <div id="auth-method-view" class="auth-form-panel">
+          <div class="auth-logo"><i class="fa-solid fa-seedling"></i></div>
+          <h3 id="auth-modal-title">Welcome to Sporekart</h3>
+          <p class="auth-subtitle">Choose how you'd like to continue</p>
+          <div class="auth-methods-list">
+            <button class="auth-method-btn" id="btn-auth-google">
+              <i class="fa-brands fa-google" style="color:#ea4335;"></i>
+              <div>
+                <strong>Continue with Google</strong>
+                <span>Fast & secure Google login</span>
+              </div>
+              <i class="fa-solid fa-chevron-right auth-method-arrow"></i>
+            </button>
+            <button class="auth-method-btn" id="btn-auth-phone">
+              <i class="fa-solid fa-mobile-screen" style="color:#25d366;"></i>
+              <div>
+                <strong>Phone OTP</strong>
+                <span>Verify with your mobile number</span>
+              </div>
+              <i class="fa-solid fa-chevron-right auth-method-arrow"></i>
+            </button>
+            <button class="auth-method-btn" id="btn-auth-email">
+              <i class="fa-solid fa-envelope" style="color:#38b17b;"></i>
+              <div>
+                <strong>Email OTP</strong>
+                <span>Get a code to your email</span>
+              </div>
+              <i class="fa-solid fa-chevron-right auth-method-arrow"></i>
+            </button>
+          </div>
+          <p class="auth-note">By continuing, you agree to our Terms & Privacy Policy</p>
         </div>
 
-        <!-- SIGNUP STATE -->
-        <div id="auth-signup-view" class="auth-form-panel hidden">
-          <h3>Register Lab Account</h3>
-          <p class="auth-subtitle">Sign up to buy professional genetics or view tracking logs.</p>
-          <form id="form-signup">
+        <!-- STEP 1b: Phone OTP Entry -->
+        <div id="auth-phone-view" class="auth-form-panel hidden">
+          <div class="auth-logo"><i class="fa-solid fa-mobile-screen"></i></div>
+          <h3>Enter Phone Number</h3>
+          <p class="auth-subtitle">We'll send a 6-digit OTP to your number</p>
+          <form id="form-request-phone-otp">
             <div class="input-field">
-              <label><i class="fa-solid fa-id-card"></i> Full Name / Farm Name</label>
-              <input type="text" id="signup-name" required placeholder="Amanita Farms">
+              <label><i class="fa-solid fa-phone"></i> Mobile Number</label>
+              <div style="display:flex;gap:8px;">
+                <select id="auth-phone-country"
+                  style="width:90px;background:var(--card-bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 8px;font-size:0.9rem;color:var(--text-dark);outline:none;">
+                  <option value="+91">🇮🇳 +91</option>
+                  <option value="+1">🇺🇸 +1</option>
+                  <option value="+44">🇬🇧 +44</option>
+                  <option value="+61">🇦🇺 +61</option>
+                </select>
+                <input type="tel" id="auth-phone" required placeholder="9876543210" maxlength="10" style="flex:1;">
+              </div>
+            </div>
+            <div class="input-field" id="auth-phone-name-field" style="display:none;">
+              <label><i class="fa-solid fa-user"></i> Full Name</label>
+              <input type="text" id="auth-phone-fullname" placeholder="Your full name">
+            </div>
+            <div class="auth-error-msg hidden" id="phone-request-error"></div>
+            <button type="submit" class="btn btn-primary btn-block">Send OTP</button>
+          </form>
+          <p class="auth-toggle-link"><a href="#" id="link-back-method-phone">← Back to login options</a></p>
+        </div>
+
+        <!-- STEP 1c: Email OTP Entry -->
+        <div id="auth-request-view" class="auth-form-panel hidden">
+          <div class="auth-logo"><i class="fa-solid fa-envelope"></i></div>
+          <h3 id="auth-email-title">Email Login</h3>
+          <p class="auth-subtitle">We'll send you a secure code to your inbox.</p>
+          <form id="form-request-otp">
+            <div class="input-field" id="auth-name-field" style="display: none;">
+              <label><i class="fa-solid fa-user"></i> Full Name</label>
+              <input type="text" id="auth-fullname" placeholder="Enter your full name">
             </div>
             <div class="input-field">
               <label><i class="fa-solid fa-envelope"></i> Email Address</label>
-              <input type="email" id="signup-email" required placeholder="grower@sporekart.com">
+              <input type="email" id="auth-email" required placeholder="you@example.com">
             </div>
-            <div class="input-field">
-              <label><i class="fa-solid fa-whatsapp"></i> WhatsApp Number</label>
-              <input type="tel" id="signup-whatsapp" placeholder="9876543210" pattern="[0-9]{10}" title="Ten digit mobile number">
-            </div>
-            <div class="input-field">
-              <label><i class="fa-solid fa-circle-question"></i> Account Intent / Account Type</label>
-              <select id="signup-role" required style="background: rgba(0, 0, 0, 0.3); border: 1px solid var(--color-border); color: var(--color-text-light); padding: 0.75rem 1rem; border-radius: 8px; font-family: var(--font-body); width: 100%;">
-                <option value="buyer">Commercial / Retail Buyer (Product Purchase)</option>
-                <option value="grower">Home / Hobby Cultivator (Cultivation Tracker Support)</option>
-              </select>
-            </div>
-            <div class="input-field">
-              <label><i class="fa-solid fa-lock"></i> Create Password</label>
-              <input type="password" id="signup-password" required placeholder="••••••••">
-            </div>
-            <div class="auth-error-msg hidden" id="signup-error"></div>
-            <button type="submit" class="btn btn-primary btn-block">Register Credentials</button>
+            <div class="auth-error-msg hidden" id="request-error"></div>
+            <button type="submit" class="btn btn-primary btn-block">Get Access Code</button>
           </form>
-          <p class="auth-toggle-link">Already registered? <a href="#" id="link-to-login">Log In</a></p>
+          <p class="auth-toggle-link"><a href="#" id="link-back-method-email">← Back to login options</a></p>
         </div>
+
+        <!-- STEP 2: Verify OTP (shared for phone & email) -->
+        <div id="auth-verify-view" class="auth-form-panel hidden">
+          <div class="auth-logo"><i class="fa-solid fa-lock"></i></div>
+          <h3>Verify It's You</h3>
+          <p class="auth-subtitle" id="verify-subtitle">Enter the 6-digit code sent to your contact.</p>
+          <form id="form-verify-otp">
+            <div class="input-field">
+              <label>Secure Code</label>
+              <input type="text" id="auth-otp" required placeholder="123456" maxlength="6"
+                style="letter-spacing: 0.5rem; text-align: center; font-size: 1.2rem;">
+            </div>
+            <div class="auth-error-msg hidden" id="verify-error"></div>
+            <button type="submit" class="btn btn-primary btn-block">Verify &amp; Login</button>
+          </form>
+          <p class="auth-toggle-link"><a href="#" id="link-back-request">← Use a different method</a></p>
+        </div>
+
       </div>
     </div>
   </div>
 
-  <!-- TAX INVOICE MODAL -->
+  <!-- ADMIN LOGIN MODAL (Hidden, Isolated) -->
+  <div class="modal-overlay" id="admin-login-modal">
+    <div class="modal-card modal-small" style="border: 2px solid #e74c3c;">
+      <button class="modal-close" id="btn-close-admin-login"><i class="fa-solid fa-xmark"></i></button>
+      <div class="auth-form-panel">
+        <h3 style="color: #e74c3c;"><i class="fa-solid fa-user-shield"></i> Admin Access</h3>
+        <form id="form-admin-auth">
+          <div class="input-field">
+            <label>Admin Email</label>
+            <input type="email" id="admin-auth-email" required>
+          </div>
+          <div class="input-field">
+            <label>Master Password</label>
+            <input type="password" id="admin-auth-password" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" style="background:#e74c3c">Secure Login</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRODUCT DETAIL MODAL -->
+  <div class="modal-overlay" id="product-detail-modal">
+    <div class="modal-card">
+      <button class="modal-close" id="btn-close-detail"><i class="fa-solid fa-xmark"></i></button>
+      <div class="modal-body-split" id="detail-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- INVOICE MODAL -->
   <div class="modal-overlay" id="invoice-modal">
     <div class="modal-card modal-invoice">
       <button class="modal-close" id="btn-close-invoice"><i class="fa-solid fa-xmark"></i></button>
       <div class="invoice-actions-row">
-        <button class="btn btn-secondary-glow" onclick="window.print()"><i class="fa-solid fa-print"></i> Print Invoice</button>
-        <button class="btn btn-whatsapp-action" id="btn-whatsapp-invoice"><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
+        <button class="btn btn-secondary-glow" onclick="window.print()"><i class="fa-solid fa-print"></i> Print
+          Invoice</button>
+        <button class="btn btn-whatsapp-action" id="btn-whatsapp-invoice"><i class="fa-brands fa-whatsapp"></i> Share on
+          WhatsApp</button>
       </div>
       <div class="invoice-container-paper" id="invoice-paper">
-        <!-- Dynamic invoice content -->
         <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
       </div>
     </div>
   </div>
 
-  <!-- SLIDE-OUT CART DRAWER -->
+  <!-- CART DRAWER -->
   <div class="cart-drawer-overlay" id="cart-drawer-overlay"></div>
   <div class="cart-drawer" id="cart-drawer">
     <div class="cart-header">
-      <h3>Your Inoculation Basket</h3>
+      <h3><i class="fa-solid fa-cart-shopping"></i> Your Cart</h3>
       <button class="btn-close-cart" id="btn-close-cart"><i class="fa-solid fa-xmark"></i></button>
     </div>
-
-    <!-- Cart list container -->
     <div class="cart-items-wrapper" id="cart-items-container">
-      <!-- Injected items -->
       <div class="cart-empty-message">
-        <i class="fa-solid fa-basket-shopping"></i>
-        <p>Your basket is barren. Select some genetics or spawn to get growing!</p>
+        <i class="fa-solid fa-cart-shopping"></i>
+        <p>Your cart is empty. Add some products!</p>
       </div>
     </div>
-
-    <!-- Promo code + invoice calculator footer -->
     <div class="cart-footer">
       <div class="promo-code-box">
-        <input type="text" id="promo-input" placeholder="Promo Code (e.g. SPORE10, SHROOM20)">
+        <input type="text" id="promo-input" placeholder="Promo Code (e.g. SPORE10)">
         <button class="btn btn-secondary" id="btn-apply-promo">Apply</button>
       </div>
       <div class="promo-feedback hidden" id="promo-message">Code Applied!</div>
-
       <div class="summary-invoice-ledger">
-        <div class="ledger-row">
-          <span>Incubator Subtotal:</span>
-          <span id="ledger-subtotal">₹0.00</span>
-        </div>
-        <div class="ledger-row discount hidden" id="ledger-discount-row">
-          <span>Offers / Promo Discount:</span>
-          <span id="ledger-discount">-₹0.00</span>
-        </div>
-        <div class="ledger-row">
-          <span>Mycology Taxes (GST):</span>
-          <span id="ledger-tax">₹0.00</span>
-        </div>
-        <div class="ledger-row total">
-          <span>Net Payable:</span>
-          <span id="ledger-total">₹0.00</span>
-        </div>
+        <div class="ledger-row"><span>Subtotal:</span><span id="ledger-subtotal">₹0.00</span></div>
+        <div class="ledger-row discount hidden" id="ledger-discount-row"><span>Discount:</span><span
+            id="ledger-discount">-₹0.00</span></div>
+        <div class="ledger-row"><span>GST:</span><span id="ledger-tax">₹0.00</span></div>
+        <div class="ledger-row total"><span>Total:</span><span id="ledger-total">₹0.00</span></div>
       </div>
-
       <div class="cart-checkout-actions">
         <button class="btn btn-primary btn-block" id="btn-checkout">
-          <i class="fa-solid fa-circle-nodes"></i> Initiate Payment (Razorpay)
+          <i class="fa-solid fa-lock"></i> Checkout (Razorpay)
         </button>
-        <p class="auth-warning-label hidden" id="cart-auth-warning">⚠️ Please register / log in as a Buyer to complete checkout.</p>
+        <p class="auth-warning-label hidden" id="cart-auth-warning">⚠️ Please log in to checkout.</p>
       </div>
     </div>
   </div>
 
-  <footer class="app-footer-bar">
-    <p>&copy; 2026 Sporekart Store. Full-Stack Agentic Vibe-Coding Platform Demonstration.</p>
-  </footer>
+  <!-- ============================================================
+       MOBILE BOTTOM CATEGORY NAV (Mobile-First Design)
+  ============================================================ -->
+  <nav class="mobile-cat-nav" id="mobile-cat-nav" aria-label="Category Navigation">
+    <div class="mobile-cat-nav-inner" id="mobile-cat-nav-inner">
+      <!-- Populated dynamically from API -->
+    </div>
+  </nav>
 
-  <!-- Core App Logic -->
+  <!-- HIDDEN: Compatibility stubs for app.js – all required IDs/classes preserved -->
+  <div style="display:none" aria-hidden="true">
+    <!-- Hero btn stub -->
+    <a id="hero-shop-btn" href="#shop"></a>
+    <!-- Three.js canvas stub -->
+    <canvas id="hero-three-canvas"></canvas>
+    <!-- Calculator stubs -->
+    <div id="calculator-anchor" class="calc-header">
+      <button id="btn-calculate-substrate"></button>
+      <input type="number" id="tub-volume" value="30">
+      <select id="spawn-ratio">
+        <option value="0.33" selected></option>
+      </select>
+      <input type="number" id="substrate-depth" value="3.5">
+    </div>
+    <!-- Calculator results stubs -->
+    <div id="calc-results-panel" class="hidden">
+      <span id="res-grain-spawn"></span>
+      <span id="res-bulk-substrate"></span>
+      <span id="res-water"></span>
+    </div>
+  </div>
+
   <script type="module" src="/src/app.js"></script>
+  <script>
+    // Slider logic for category & testimonials
+    document.addEventListener('DOMContentLoaded', () => {
+      // Category slider
+      const catGrid = document.getElementById('category-grid');
+      if (catGrid) {
+        document.getElementById('cat-prev')?.addEventListener('click', () => catGrid.scrollBy({ left: -280, behavior: 'smooth' }));
+        document.getElementById('cat-next')?.addEventListener('click', () => catGrid.scrollBy({ left: 280, behavior: 'smooth' }));
+      }
+
+      // Testimonial slider
+      const testRow = document.getElementById('testimonials-row');
+      if (testRow) {
+        document.getElementById('test-prev')?.addEventListener('click', () => testRow.scrollBy({ left: -360, behavior: 'smooth' }));
+        document.getElementById('test-next')?.addEventListener('click', () => testRow.scrollBy({ left: 360, behavior: 'smooth' }));
+      }
+
+      // Smooth scroll for anchor links (section anchors only, not routing hashes)
+      const sectionAnchors = ['#training-section', '#shop-section', '#footer'];
+      document.querySelectorAll('a[href^="#"]').forEach(a => {
+        a.addEventListener('click', e => {
+          const href = a.getAttribute('href');
+          // Only scroll for known section anchors; routing links are handled by app.js
+          if (href && href.length > 1 && sectionAnchors.includes(href)) {
+            try {
+              const target = document.querySelector(href);
+              if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
+            } catch (_) { /* invalid selector, skip */ }
+          }
+        });
+      });
+    });
+  </script>
 </body>
+
 </html>

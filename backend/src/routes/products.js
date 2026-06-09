@@ -87,20 +87,24 @@ router.get('/:id', async (req, res) => {
 // Add a new product to listing
 router.post('/', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, description, price, image_url, category, difficulty, gst_rate, stock } = req.body;
+    const { name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock } = req.body;
 
     if (!name || !description || price === undefined || !category) {
       return res.status(400).json({ error: 'Please provide name, description, price, and category.' });
     }
 
-    if (category !== 'spawn' && category !== 'mushrooms') {
-      return res.status(400).json({ error: 'Category must be either "spawn" or "mushrooms".' });
+    // Dynamic category validation
+    const { data: categoriesList } = await db.from('categories').select('id');
+    const validCategoryIds = categoriesList ? categoriesList.map(c => c.id) : [];
+    if (!validCategoryIds.includes(category)) {
+      return res.status(400).json({ error: `Invalid category "${category}".` });
     }
 
     const { data: newProduct, error } = await db.from('products').insert({
       name,
       description,
       price: parseFloat(price),
+      mrp_price: mrp_price ? parseFloat(mrp_price) : parseFloat(price) * 1.4,
       image_url: image_url || 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600',
       category,
       difficulty: difficulty || 'beginner',
@@ -122,17 +126,20 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 // Update product details (pricing, stock, etc.)
 router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, description, price, image_url, category, difficulty, gst_rate, stock } = req.body;
+    const { name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock } = req.body;
     
     // Build update object dynamically
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
     if (price !== undefined) updates.price = parseFloat(price);
+    if (mrp_price !== undefined) updates.mrp_price = parseFloat(mrp_price);
     if (image_url !== undefined) updates.image_url = image_url;
     if (category !== undefined) {
-      if (category !== 'spawn' && category !== 'mushrooms') {
-        return res.status(400).json({ error: 'Category must be either "spawn" or "mushrooms".' });
+      const { data: categoriesList } = await db.from('categories').select('id');
+      const validCategoryIds = categoriesList ? categoriesList.map(c => c.id) : [];
+      if (!validCategoryIds.includes(category)) {
+        return res.status(400).json({ error: `Invalid category "${category}".` });
       }
       updates.category = category;
     }

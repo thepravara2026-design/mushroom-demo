@@ -104,7 +104,7 @@ router.post('/checkout', authMiddleware, async (req, res) => {
         orderId: rzpOrder.id,
         amount: rzpOrder.amount,
         currency: rzpOrder.currency,
-        keyId: process.env.RAZORPAY_KEY_ID || 'rzp_test_mockKey123'
+        keyId: razorpay.isMock ? 'rzp_test_mockKey123' : (process.env.RAZORPAY_KEY_ID || 'rzp_test_mockKey123')
       }
     });
 
@@ -174,6 +174,70 @@ router.get('/my-orders', authMiddleware, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// GET /api/orders/all-orders
+// Fetch all orders in the system (admin only)
+router.get('/all-orders', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Admins only.' });
+    }
+
+    const { data: orders, error: ordersErr } = await db.from('orders').select('*');
+    if (ordersErr) {
+      return res.status(500).json({ error: ordersErr.message });
+    }
+
+    const { data: users } = await db.from('users').select('*');
+    const userMap = {};
+    if (users) {
+      users.forEach(u => {
+        userMap[u.id] = u.email;
+      });
+    }
+
+    const enrichedOrders = orders.map(o => ({
+      ...o,
+      user_email: userMap[o.user_id] || 'unknown@sporekart.com'
+    }));
+
+    // Sort descending by created_at
+    enrichedOrders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    res.json(enrichedOrders);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/orders/:id/status
+// Update delivery status of an order (admin only)
+router.put('/:id/status', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Admins only.' });
+    }
+
+    const { delivery_status } = req.body;
+    if (!delivery_status) {
+      return res.status(400).json({ error: 'Delivery status is required.' });
+    }
+
+    const { data: updatedOrder, error } = await db.from('orders')
+      .update({ delivery_status })
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ message: 'Order status updated successfully.', order: updatedOrder });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // GET /api/orders/:id/invoice
 // Generate detailed invoice data
