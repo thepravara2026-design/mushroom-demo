@@ -49,11 +49,11 @@ jobs:
           CI: true
         run: node test.js
 
-      - name: Upload logs
-        if: failure()
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-logs
+          name: e2e-artifacts
           path: |
+            e2e-artifacts/**
             /tmp/backend.log
             /tmp/frontend.log
