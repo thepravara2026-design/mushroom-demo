@@ -14,6 +14,26 @@ import { showErrorToast, showSuccessToast } from './utils/notify.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
+// Storefront pagination/sort state
+let _shopInventoryPage = 1;
+const SHOP_PAGE_SIZE = 10;
+
+function getShopInventorySortValue() {
+  return document.getElementById('shop-inventory-sort')?.value || 'name_asc';
+}
+
+function applyShopInventorySort(products) {
+  const sortValue = getShopInventorySortValue();
+  const [sortKey, sortDirection] = sortValue.split('_');
+  const multiplier = sortDirection === 'desc' ? -1 : 1;
+  return [...products].sort((a, b) => {
+    if (sortKey === 'price') return multiplier * ((a.price || 0) - (b.price || 0));
+    if (sortKey === 'stock') return multiplier * ((a.stock || 0) - (b.stock || 0));
+    const nameA = String(a.name || '').toLowerCase();
+    const nameB = String(b.name || '').toLowerCase();
+    return multiplier * nameA.localeCompare(nameB);
+  });
+}
 
 // Initialize App
 function initApp() {
@@ -382,6 +402,7 @@ function initEventListeners() {
   const searchInput = document.getElementById('shop-search');
   if (searchInput) {
     searchInput.addEventListener('input', () => {
+      _shopInventoryPage = 1;
       filterProducts();
       updateSearchSuggestions(searchInput.value);
     });
@@ -412,9 +433,18 @@ function initEventListeners() {
         .forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.activeCategory = btn.getAttribute('data-category') || 'all';
+      _shopInventoryPage = 1;
       filterProducts();
     });
   });
+
+  const shopSortSelect = document.getElementById('shop-inventory-sort');
+  if (shopSortSelect) {
+    shopSortSelect.addEventListener('change', () => {
+      _shopInventoryPage = 1;
+      filterProducts();
+    });
+  }
 
   // Category nav links in NAVBAR (data-category on nav-link)
   document.querySelectorAll('.nav-link[data-category]').forEach((link) => {
@@ -726,7 +756,14 @@ function renderProducts(productsList) {
     return;
   }
 
-  const html = productsList
+  // Apply sorting and pagination
+  const sorted = applyShopInventorySort(productsList);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / SHOP_PAGE_SIZE));
+  if (_shopInventoryPage > totalPages) _shopInventoryPage = totalPages;
+  const start = (_shopInventoryPage - 1) * SHOP_PAGE_SIZE;
+  const pageProducts = sorted.slice(start, start + SHOP_PAGE_SIZE);
+
+  const html = pageProducts
     .map((prod, idx) => {
       const catLabel = prod.category === 'spawn' ? 'Spawn & Seeds' : 'Mushroom';
       const hasMrp = prod.mrp_price && prod.mrp_price > prod.price;
@@ -788,9 +825,34 @@ function renderProducts(productsList) {
       addToCart(btn.getAttribute('data-id'));
     });
   });
+
+  // Pagination controls
+  const paginationWrap = document.getElementById('product-pagination');
+  if (paginationWrap) {
+    paginationWrap.innerHTML = `
+      <div class="admin-pagination">
+        <div class="admin-pagination-info">Showing ${start + 1}–${Math.min(start + pageProducts.length, sorted.length)} of ${sorted.length} products</div>
+        <div class="admin-pagination-actions">
+          <button type="button" class="btn btn-secondary" id="shop-page-prev" ${_shopInventoryPage === 1 ? 'disabled' : ''}>
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          <span class="admin-pagination-label">Page ${_shopInventoryPage} of ${totalPages}</span>
+          <button type="button" class="btn btn-secondary" id="shop-page-next" ${_shopInventoryPage === totalPages ? 'disabled' : ''}>
+            <i class="fa-solid fa-chevron-right"></i>
+          </button>
+        </div>
+      </div>
+    `;
+
+    const prev = document.getElementById('shop-page-prev');
+    const next = document.getElementById('shop-page-next');
+    if (prev) prev.addEventListener('click', () => { if (_shopInventoryPage > 1) { _shopInventoryPage -= 1; renderProducts(productsList); } });
+    if (next) next.addEventListener('click', () => { if (_shopInventoryPage < totalPages) { _shopInventoryPage += 1; renderProducts(productsList); } });
+  }
 }
 
 function filterProducts() {
+  _shopInventoryPage = 1;
   const query = document.getElementById('shop-search').value.toLowerCase();
   const selectedCat = state.activeCategory || 'all';
 

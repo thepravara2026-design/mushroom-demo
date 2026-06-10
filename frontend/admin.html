@@ -193,7 +193,7 @@
             <div class="admin-content-inner">
               <div class="admin-section-header">
                 <h3><i class="fa-solid fa-list"></i> Product Inventory</h3>
-                <div class="admin-filter-row">
+                <div class="admin-filter-row admin-inventory-controls">
                   <input
                     type="text"
                     id="admin-search-prod"
@@ -203,6 +203,17 @@
                   <select id="admin-filter-cat" class="admin-select-input">
                     <option value="all">All Categories</option>
                   </select>
+                  <div class="admin-sort-group">
+                    <label for="admin-inventory-sort" class="admin-sort-label">Sort by</label>
+                    <select id="admin-inventory-sort" class="admin-select-input">
+                      <option value="name_asc">Name A–Z</option>
+                      <option value="name_desc">Name Z–A</option>
+                      <option value="price_asc">Price low → high</option>
+                      <option value="price_desc">Price high → low</option>
+                      <option value="stock_asc">Stock low → high</option>
+                      <option value="stock_desc">Stock high → low</option>
+                    </select>
+                  </div>
                 </div>
               </div>
               <div id="admin-inventory-grid" class="admin-product-table-wrap">

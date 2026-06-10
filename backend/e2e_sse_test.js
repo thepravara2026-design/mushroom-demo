@@ -3,7 +3,7 @@ const https = require('https');
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
-const BASE = process.env.BASE_URL || 'http://localhost:5001';
+const BASE = process.env.BASE_URL || 'http://localhost:5000';
 
 function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });

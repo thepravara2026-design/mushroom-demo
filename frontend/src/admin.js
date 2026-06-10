@@ -11,6 +11,8 @@ let _adminCategories = [];
 let _adminTrainings = [];
 let pendingCategoryEditId = null;
 let adminOrdersCache = [];
+let _adminInventoryPage = 1;
+const ADMIN_INVENTORY_PAGE_SIZE = 10;
 let productImagePreviewValid = false;
 
 const loginPanel = document.getElementById('admin-login-panel');
@@ -182,6 +184,33 @@ function generateProductId(categoryUid) {
     });
   const nextNumber = existingIds.length ? Math.max(...existingIds) + 1 : 1;
   return `${categoryUid}-pid-${String(nextNumber).padStart(5, '0')}`;
+}
+
+function getAdminInventorySortValue() {
+  return document.getElementById('admin-inventory-sort')?.value || 'name_asc';
+}
+
+function applyAdminInventorySort(products) {
+  const sortValue = getAdminInventorySortValue();
+  const [sortKey, sortDirection] = sortValue.split('_');
+  const sortMultiplier = sortDirection === 'desc' ? -1 : 1;
+
+  return [...products].sort((a, b) => {
+    if (sortKey === 'price') {
+      return sortMultiplier * ((a.price || 0) - (b.price || 0));
+    }
+    if (sortKey === 'stock') {
+      return sortMultiplier * ((a.stock || 0) - (b.stock || 0));
+    }
+    if (sortKey === 'category') {
+      const categoryA = String(a.category || '').toLowerCase();
+      const categoryB = String(b.category || '').toLowerCase();
+      return sortMultiplier * categoryA.localeCompare(categoryB);
+    }
+    const nameA = String(a.name || '').toLowerCase();
+    const nameB = String(b.name || '').toLowerCase();
+    return sortMultiplier * nameA.localeCompare(nameB);
+  });
 }
 
 function updateProductIdDisplay() {
@@ -359,10 +388,16 @@ function renderAdminInventory() {
     grid.innerHTML = '<div class="admin-loading">No products found.</div>';
     return;
   }
+  products = applyAdminInventorySort(products);
+  const totalPages = Math.max(1, Math.ceil(products.length / ADMIN_INVENTORY_PAGE_SIZE));
+  if (_adminInventoryPage > totalPages) _adminInventoryPage = totalPages;
+  const pageStart = (_adminInventoryPage - 1) * ADMIN_INVENTORY_PAGE_SIZE;
+  const pageProducts = products.slice(pageStart, pageStart + ADMIN_INVENTORY_PAGE_SIZE);
+  const pageEnd = Math.min(pageStart + pageProducts.length, products.length);
 
   grid.innerHTML = `
     <div class="admin-product-grid">
-      ${products
+      ${pageProducts
     .map((p) => {
       const stockClass = p.stock === 0
         ? 'out-stock'
@@ -418,7 +453,37 @@ function renderAdminInventory() {
     })
     .join('')}
     </div>
-  `;
+    <div class="admin-pagination">
+      <div class="admin-pagination-info">Showing ${pageStart + 1}–${pageEnd} of ${products.length} products</div>
+      <div class="admin-pagination-actions">
+        <button type="button" class="btn btn-secondary" id="admin-page-prev" ${_adminInventoryPage === 1 ? 'disabled' : ''}>
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <span class="admin-pagination-label">Page ${_adminInventoryPage} of ${totalPages}</span>
+        <button type="button" class="btn btn-secondary" id="admin-page-next" ${_adminInventoryPage === totalPages ? 'disabled' : ''}>
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      </div>
+    </div>`;
+
+  const prevBtn = document.getElementById('admin-page-prev');
+  const nextBtn = document.getElementById('admin-page-next');
+  if (prevBtn) {
+    prevBtn.addEventListener('click', () => {
+      if (_adminInventoryPage > 1) {
+        _adminInventoryPage -= 1;
+        renderAdminInventory();
+      }
+    });
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      if (_adminInventoryPage < totalPages) {
+        _adminInventoryPage += 1;
+        renderAdminInventory();
+      }
+    });
+  }
 }
 
 function adminEditProduct(productId) {
@@ -1589,6 +1654,28 @@ function initAdminPage() {
   }
   if (categoryImageFile) categoryImageFile.addEventListener('change', updateCategoryImagePreview);
   if (categoryImageUrl) categoryImageUrl.addEventListener('input', updateCategoryImagePreview);
+
+  const adminSearchProd = document.getElementById('admin-search-prod');
+  const adminFilterCat = document.getElementById('admin-filter-cat');
+  const adminSortSelect = document.getElementById('admin-inventory-sort');
+  if (adminSearchProd) {
+    adminSearchProd.addEventListener('input', () => {
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  }
+  if (adminFilterCat) {
+    adminFilterCat.addEventListener('change', () => {
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  }
+  if (adminSortSelect) {
+    adminSortSelect.addEventListener('change', () => {
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  }
 
   // Expose globals
   window.adminEditProduct = adminEditProduct;

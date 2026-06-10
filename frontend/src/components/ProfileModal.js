@@ -13,22 +13,31 @@ class ProfileModal {
     this.modal.className = 'modal-overlay open';
     this.modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
     this.modal.innerHTML = `
-      <div style="width:100%;max-width:920px;background:#fff;border-radius:10px;overflow:auto;max-height:90vh;">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid #eef2f7;">
-          <h3 style="margin:0">My Profile</h3>
+      <div class="profile-modal-card">
+        <div class="profile-modal-header">
           <div>
-            <button id="btn-profile-logout" class="btn btn-secondary">Logout</button>
-            <button id="btn-profile-close" class="btn">Close</button>
+            <p class="profile-modal-overline">My Profile</p>
+            <h3 class="profile-modal-title">Your account dashboard</h3>
+            <p class="profile-modal-subtitle">A modern control center for your orders, delivery info and profile settings.</p>
+          </div>
+          <div class="profile-modal-actions">
+            <button id="btn-profile-logout" class="btn btn-secondary profile-mini-btn">Logout</button>
+            <button id="btn-profile-close" class="btn btn-primary profile-mini-btn">Close</button>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 360px;gap:12px;padding:14px;">
-          <div id="profile-main" style="padding:8px 12px;"></div>
-          <aside style="padding:12px;border-left:1px solid #f1f5f9;">
-            <h4 style="margin-top:0">Quick Actions</h4>
-            <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-              <button id="btn-delete-account" class="btn btn-danger">Delete account</button>
-              <button id="btn-view-orders" class="btn">Refresh Orders</button>
-              <button id="btn-clear-local" class="btn btn-secondary">Clear Local Profile</button>
+        <div class="profile-modal-content">
+          <div class="profile-main-column">
+            <div id="profile-main"></div>
+          </div>
+          <aside class="profile-sidebar">
+            <div class="profile-sidebar-card">
+              <h4>Quick actions</h4>
+              <p class="profile-sidebar-copy">Refresh your latest orders, clear local profile data, or manage your account quickly from one place.</p>
+              <div class="profile-sidebar-buttons">
+                <button id="btn-view-orders" class="btn btn-secondary profile-sidebar-btn">Refresh Orders</button>
+                <button id="btn-clear-local" class="btn btn-secondary profile-sidebar-btn">Clear Local Profile</button>
+                <button id="btn-delete-account" class="btn btn-danger profile-sidebar-btn">Delete Account</button>
+              </div>
             </div>
           </aside>
         </div>
@@ -97,51 +106,73 @@ class ProfileModal {
       || (user.whatsappNumber ? 'phone' : user.email ? 'email' : 'guest');
 
     container.innerHTML = `
-      <section style="padding-bottom:12px;border-bottom:1px solid #f1f5f9;">
-        <h4>Basic Details</h4>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
-          <div>
-            <label style="font-size:0.9rem">Full name</label>
-            <input id="profile-fullname" value="${user.fullName || ''}" style="width:100%;padding:8px;border:1px solid #e6edf3;border-radius:6px;">
-          </div>
-          <div>
-            <label style="font-size:0.9rem">Email</label>
-            <input id="profile-email" value="${user.email || ''}" style="width:100%;padding:8px;border:1px solid #e6edf3;border-radius:6px;" ${loginMethod === 'google' ? 'disabled' : ''}>
-          </div>
+      <section class="profile-summary-card">
+        <div class="profile-summary-content">
+          <p class="profile-overline">Account overview</p>
+          <h4>Welcome back, ${user.fullName || 'Sporekart user'}</h4>
+          <p class="profile-copy">Update your contact details and shipping preferences to keep orders moving smoothly.</p>
         </div>
-        <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div>
-            <label style="font-size:0.9rem">Phone</label>
-            <input id="profile-phone" value="${user.whatsappNumber || ''}" style="width:100%;padding:8px;border:1px solid #e6edf3;border-radius:6px;" ${loginMethod === 'phone' ? 'disabled' : ''}>
-          </div>
-          <div>
-            <label style="font-size:0.9rem">Role</label>
-            <input value="${user.role || 'buyer'}" disabled style="width:100%;padding:8px;border:1px solid #e6edf3;border-radius:6px;">
-          </div>
-        </div>
-        <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div>
-            <label style="font-size:0.9rem">Default Pincode</label>
-            <input id="profile-pincode" value="${user.defaultPincode || ''}" style="width:100%;padding:8px;border:1px solid #e6edf3;border-radius:6px;">
-          </div>
-          <div>
-            <label style="font-size:0.9rem">Default Address</label>
-            <input id="profile-address" value="${user.defaultAddress || ''}" style="width:100%;padding:8px;border:1px solid #e6edf3;border-radius:6px;">
-          </div>
-        </div>
-        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-          <button id="btn-save-profile" class="btn btn-primary">Save</button>
+        <div class="profile-summary-meta">
+          <span class="profile-pill">${(user.role || 'buyer').toUpperCase()}</span>
         </div>
       </section>
 
-      <section style="margin-top:12px;padding-bottom:12px;border-bottom:1px solid #f1f5f9;">
-        <h4 style="margin-top:12px">My Cart</h4>
-        <div id="profile-cart" style="margin-top:8px"></div>
+      <section class="profile-form-card">
+        <div class="profile-card-header">
+          <div>
+            <h4>Basic details</h4>
+            <p class="profile-card-subtitle">Your personal information and default delivery address.</p>
+          </div>
+        </div>
+        <div class="profile-field-grid">
+          <div class="input-field">
+            <label>Full name</label>
+            <input id="profile-fullname" value="${user.fullName || ''}" class="profile-input">
+          </div>
+          <div class="input-field">
+            <label>Email</label>
+            <input id="profile-email" value="${user.email || ''}" class="profile-input" ${loginMethod === 'google' ? 'disabled' : ''}>
+          </div>
+          <div class="input-field">
+            <label>Phone</label>
+            <input id="profile-phone" value="${user.whatsappNumber || ''}" class="profile-input" ${loginMethod === 'phone' ? 'disabled' : ''}>
+          </div>
+          <div class="input-field">
+            <label>Role</label>
+            <input value="${user.role || 'buyer'}" disabled class="profile-input">
+          </div>
+          <div class="input-field">
+            <label>Default pincode</label>
+            <input id="profile-pincode" value="${user.defaultPincode || ''}" class="profile-input">
+          </div>
+          <div class="input-field">
+            <label>Default address</label>
+            <input id="profile-address" value="${user.defaultAddress || ''}" class="profile-input">
+          </div>
+        </div>
+        <div class="profile-form-footer">
+          <button id="btn-save-profile" class="btn btn-primary">Save changes</button>
+        </div>
       </section>
 
-      <section style="margin-top:12px;">
-        <h4 style="margin-top:12px">Tracking & Orders</h4>
-        <div id="profile-orders" style="margin-top:8px"></div>
+      <section class="profile-card profile-section">
+        <div class="profile-card-header">
+          <div>
+            <h4>Current cart</h4>
+            <p class="profile-card-subtitle">A quick snapshot of the items you are ready to purchase.</p>
+          </div>
+        </div>
+        <div id="profile-cart" class="profile-cart-list"></div>
+      </section>
+
+      <section class="profile-card profile-section">
+        <div class="profile-card-header">
+          <div>
+            <h4>Tracking & Orders</h4>
+            <p class="profile-card-subtitle">Everything you need to review and manage your recent orders.</p>
+          </div>
+        </div>
+        <div id="profile-orders" class="profile-orders-list"></div>
       </section>
     `;
 
@@ -204,8 +235,25 @@ class ProfileModal {
     const cancelNote = o.delivery_status === 'cancelled' && o.cancel_reason
       ? `<div style="margin-top:10px;font-size:0.92rem;color:#b91c1c;"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
       : '';
+    const canCancel = o.delivery_status === 'processing';
 
-    return `<div style="padding:8px 0;border-bottom:1px solid #f1f5f9;"><div style="display:flex;justify-content:space-between;align-items:center;"><div><strong>Order ${o.id || o.orderId}</strong><div style="font-size:0.9rem;color:#475569">Placed: ${placed}</div></div><div style="text-align:right"><div style="font-weight:700">₹${total}</div><div style="font-size:0.9rem;color:#475569">${status}</div></div></div>${trackingHtml}${cancelNote}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;"><button class="btn btn-secondary" onclick="window.viewInvoice('${o.id}')">View invoice</button>${shareLink ? `<button class="btn btn-secondary" data-share-url="${shareLink}" onclick="window.open(this.dataset.shareUrl,'_blank')">Open shareable invoice</button><button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy invoice link</button>` : ''}</div></div>`;
+    return `<div class="profile-order-card">
+      <div class="profile-order-header">
+        <div>
+          <div class="profile-order-title">Order ${o.id || o.orderId}</div>
+          <div class="profile-order-meta">Placed: ${placed}</div>
+        </div>
+        <span class="profile-order-status ${status}">${status}</span>
+      </div>
+      <div class="profile-order-summary">₹${total} • ${o.items?.length || 0} item${(o.items?.length || 0) !== 1 ? 's' : ''}</div>
+      ${trackingHtml}
+      ${cancelNote}
+      <div class="profile-order-actions">
+        <button class="btn btn-secondary" onclick="window.viewInvoice('${o.id}')">View invoice</button>
+        ${shareLink ? `<button class="btn btn-secondary" data-share-url="${shareLink}" onclick="window.open(this.dataset.shareUrl,'_blank')">Share invoice</button><button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy invoice link</button>` : ''}
+        ${canCancel ? `<button class="btn btn-cancel profile-order-cancel" onclick="window.cancelOrderFromProfile('${o.id}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
+      </div>
+    </div>`;
   }
 
   renderTrackingTimeline(o) {
@@ -342,6 +390,38 @@ class ProfileModal {
     showSuccessToast('Profile saved locally.');
   }
 
+  async cancelOrder(orderId) {
+    const order = (state.orders || []).find((o) => o.id === orderId);
+    const status = order?.delivery_status || order?.status || 'unknown';
+
+    if (status !== 'processing') {
+      showErrorToast('Order can be cancelled only when the order is in processing stage.');
+      return;
+    }
+
+    const confirmed = confirm(
+      'Cancel this order? This will stop processing and cannot be undone.',
+    );
+    if (!confirmed) return;
+
+    const reason = prompt('Please enter a cancellation reason for this order:');
+    if (!reason || !reason.trim()) {
+      showErrorToast('Cancellation reason is required.');
+      return;
+    }
+
+    try {
+      await fetchWithAuth(`/orders/${orderId}/cancel`, {
+        method: 'PUT',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      showSuccessToast('✅ Order cancelled successfully.');
+      await this.renderOrders(true);
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
+    }
+  }
+
   async handleDelete() {
     const doDelete = confirm(
       'Delete account? This will remove your account. This action cannot be undone. Proceed?',
@@ -371,4 +451,5 @@ class ProfileModal {
 }
 
 const _profileModal = new ProfileModal();
+window.cancelOrderFromProfile = (orderId) => _profileModal.cancelOrder(orderId);
 export const profileModal = _profileModal;

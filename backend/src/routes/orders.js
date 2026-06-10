@@ -614,6 +614,14 @@ router.put('/:id/cancel', authMiddleware, async (req, res) => {
       );
     }
 
+    if (!isAdmin && order.delivery_status !== 'processing') {
+      return respondError(
+        res,
+        'Order can be cancelled only when the order is in processing stage.',
+        400,
+      );
+    }
+
     if (['shipped', 'delivered', 'cancelled'].includes(order.delivery_status)) {
       return respondError(res, 'Order cannot be cancelled at this stage.', 400);
     }

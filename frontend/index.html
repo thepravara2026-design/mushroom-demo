@@ -510,12 +510,28 @@
         </div>
 
         <div class="products-grid-wrap">
+          <div class="shop-inventory-controls" style="display:flex;align-items:flex-end;gap:12px;margin:12px 0;flex-wrap:wrap;">
+            <div class="admin-sort-group" style="min-width:200px;">
+              <label for="shop-inventory-sort" class="admin-sort-label">Sort by</label>
+              <select id="shop-inventory-sort" class="admin-select-input">
+                <option value="name_asc">Name A–Z</option>
+                <option value="name_desc">Name Z–A</option>
+                <option value="price_asc">Price low → high</option>
+                <option value="price_desc">Price high → low</option>
+                <option value="stock_asc">Stock low → high</option>
+                <option value="stock_desc">Stock high → low</option>
+              </select>
+            </div>
+          </div>
           <div class="product-grid" id="product-grid">
             <!-- Loading state -->
             <div class="grid-skeleton">
               <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
               <p>Loading products...</p>
             </div>
+          </div>
+          <div id="product-pagination" class="admin-pagination" style="display:block;">
+            <!-- pagination rendered by JS -->
           </div>
         </div>
       </section>
