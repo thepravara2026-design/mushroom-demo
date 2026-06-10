@@ -1,0 +1,16 @@
+# Enforce LF line endings for cross-platform consistency
+* text=auto eol=lf
+
+# Ensure shell scripts use LF
+*.sh text eol=lf
+
+# Node artifacts
+node_modules/** -text
+dist/** -text
+
+# Lockfiles should stay as-is
+package-lock.json text eol=lf
+
+# Ignore built reports
+coverage/** -text
+

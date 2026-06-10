@@ -34,11 +34,11 @@ jobs:
 
       - name: Start backend
         run: |
-          nohup node backend/src/server.js >/tmp/backend.log 2>&1 &
+          PORT=5000 nohup node backend/src/server.js >/tmp/backend.log 2>&1 &
 
       - name: Start frontend preview
         run: |
-          nohup npm run preview --prefix frontend >/tmp/frontend.log 2>&1 &
+          nohup npm run preview --prefix frontend -- --port 3000 >/tmp/frontend.log 2>&1 &
 
       - name: Wait for services
         run: |

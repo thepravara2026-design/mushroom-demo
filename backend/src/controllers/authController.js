@@ -1,4 +1,5 @@
 const express = require('express');
+
 const router = express.Router();
 const authService = require('../services/authService');
 const authMiddleware = require('../middleware/auth');
@@ -12,15 +13,21 @@ const db = require('../config/db');
 router.post('/request-otp', async (req, res) => {
   try {
     const { email, role, fullName } = req.body;
-    
+
     if (!email) {
-      return res.status(400).json({ error: 'Email is required to request OTP.' });
+      return res
+        .status(400)
+        .json({ error: 'Email is required to request OTP.' });
     }
 
     const result = await authService.generateAndSendOTP(email, role, fullName);
     return success(res, result);
   } catch (error) {
-    return respondError(res, error.message || 'Failed to send OTP', error.status || 500);
+    return respondError(
+      res,
+      error.message || 'Failed to send OTP',
+      error.status || 500,
+    );
   }
 });
 
@@ -31,19 +38,27 @@ router.post('/request-otp', async (req, res) => {
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email, otpCode } = req.body;
-    
+
     if (!email || !otpCode) {
-      return res.status(400).json({ error: 'Email and OTP code are required.' });
+      return res
+        .status(400)
+        .json({ error: 'Email and OTP code are required.' });
     }
     // Allow client to optionally pass loginMethod and whatsappNumber so server can persist provider and phone
     const { loginMethod, whatsappNumber } = req.body;
-    const authResult = await authService.verifyOTP(email, otpCode, { loginMethod, whatsappNumber });
+    const authResult = await authService.verifyOTP(email, otpCode, {
+      loginMethod,
+      whatsappNumber,
+    });
     return success(res, authResult);
   } catch (error) {
-    return respondError(res, error.message || 'OTP verification failed', error.status || 400);
+    return respondError(
+      res,
+      error.message || 'OTP verification failed',
+      error.status || 400,
+    );
   }
 });
-
 
 /**
  * PUT /api/auth/me
@@ -51,13 +66,13 @@ router.post('/verify-otp', async (req, res) => {
  */
 router.put('/me', authMiddleware, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const { userId } = req.user;
     const updates = {
       fullName: req.body.fullName,
       email: req.body.email,
       whatsappNumber: req.body.whatsappNumber,
       defaultAddress: req.body.default_address,
-      defaultPincode: req.body.default_pincode
+      defaultPincode: req.body.default_pincode,
     };
 
     const updated = await authService.updateProfile(userId, updates);
@@ -70,13 +85,16 @@ router.put('/me', authMiddleware, async (req, res) => {
       role: updated.role,
       loginMethod: updated.login_method || null,
       defaultAddress: updated.default_address || '',
-      defaultPincode: updated.default_pincode || ''
+      defaultPincode: updated.default_pincode || '',
     });
   } catch (err) {
-    return respondError(res, err.message || 'Failed to update profile', err.status || 500);
+    return respondError(
+      res,
+      err.message || 'Failed to update profile',
+      err.status || 500,
+    );
   }
 });
-
 
 /**
  * DELETE /api/auth/me
@@ -84,12 +102,18 @@ router.put('/me', authMiddleware, async (req, res) => {
  */
 router.delete('/me', authMiddleware, async (req, res) => {
   try {
-    const userId = req.user.userId;
-    const reason = req.body && req.body.reason ? String(req.body.reason).slice(0, 500) : null;
+    const { userId } = req.user;
+    const reason = req.body && req.body.reason
+      ? String(req.body.reason).slice(0, 500)
+      : null;
     await authService.deleteAccount(userId, reason);
     return success(res, { message: 'Account deleted.' });
   } catch (err) {
-    return respondError(res, err.message || 'Failed to delete account', err.status || 500);
+    return respondError(
+      res,
+      err.message || 'Failed to delete account',
+      err.status || 500,
+    );
   }
 });
 
@@ -105,7 +129,11 @@ router.post('/admin-login', async (req, res) => {
       const result = await authService.adminLogin(email, password);
       return success(res, result);
     } catch (err) {
-      return respondError(res, err.message || 'Admin login failed', err.status || 401);
+      return respondError(
+        res,
+        err.message || 'Admin login failed',
+        err.status || 401,
+      );
     }
   } catch (error) {
     return respondError(res, error.message || 'Admin login failed', 500);
@@ -124,10 +152,14 @@ router.get('/me', authMiddleware, async (req, res) => {
       email: user.email,
       fullName: user.full_name,
       whatsappNumber: user.whatsapp_number || '',
-      role: user.role
+      role: user.role,
     });
   } catch (error) {
-    return respondError(res, error.message || 'Failed to fetch user', error.status || 500);
+    return respondError(
+      res,
+      error.message || 'Failed to fetch user',
+      error.status || 500,
+    );
   }
 });
 

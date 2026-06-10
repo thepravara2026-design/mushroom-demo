@@ -1,14 +1,22 @@
-import { state, saveAuth, clearAuth, saveCart, saveUserProfile } from './utils/state.js';
+import {
+  state,
+  saveAuth,
+  clearAuth,
+  saveCart,
+  saveUserProfile,
+} from './utils/state.js';
 import { authModal } from './components/AuthModal.js';
 import { profileModal } from './components/ProfileModal.js';
 import { authApi } from './api/authApi.js';
-import { API_BASE, fetchWithAuth } from './api/client.js';
+import { trainingApi } from './api/trainingApi.js';
+import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
+import { showErrorToast, showSuccessToast } from './utils/notify.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
 
 // Initialize App
-document.addEventListener('DOMContentLoaded', () => {
+function initApp() {
   initEventListeners();
   loadUser();
   fetchProducts();
@@ -21,15 +29,99 @@ document.addEventListener('DOMContentLoaded', () => {
   // If hash is present, route to it
   handleRouting();
 
-  // Routing â€” must be inside DOMContentLoaded so DOM is available
+  // Routing — must be inside DOMContentLoaded so DOM is available
   window.addEventListener('hashchange', handleRouting);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 // Listen for category updates from admin (cross-tab)
 try {
   const bc = new BroadcastChannel('spore-categories');
   bc.addEventListener('message', (ev) => {
     if (ev?.data?.type === 'categories:updated') {
+      fetchCategories();
+      fetchProducts();
+    }
+  });
+} catch (err) {
+  // BroadcastChannel might not be supported; ignore
+}
+
+// Connect to server-sent events to receive order updates cross-browser
+try {
+  if (state && state.token) {
+    const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
+    const orderEs = new EventSource(esUrl);
+    orderEs.addEventListener('order:updated', (ev) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        const updated = payload.order;
+        if (!updated) return;
+        // If this client owns the order, refresh user's orders
+        if (state.user && state.user.userId === updated.user_id) {
+          fetchOrders();
+        }
+        // If admin, fetch admin orders too (admin page may be open)
+        if (state.user && state.user.role === 'admin') {
+          // admin page handles its own SSE, but refresh products/orders if present
+          fetchOrders();
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    });
+    orderEs.addEventListener('error', () => {
+      // noop
+    });
+  }
+} catch (e) {
+  // ignore
+}
+
+let orderEs = null;
+function initOrderSse() {
+  try {
+    if (!state || !state.token) return;
+    if (orderEs) return;
+    const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
+    orderEs = new EventSource(esUrl);
+    orderEs.addEventListener('order:updated', (ev) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        const updated = payload.order;
+        if (!updated) return;
+        if (state.user && state.user.userId === updated.user_id) {
+          fetchOrders();
+          if (updated.delivery_status) {
+            showInfoToast(`Order ${updated.id} status updated: ${updated.delivery_status}`);
+          } else {
+            showInfoToast(`Order ${updated.id} has been updated.`);
+          }
+        }
+        if (state.user && state.user.role === 'admin') fetchOrders();
+      } catch (e) {
+        /* ignore */
+      }
+    });
+    orderEs.addEventListener('error', () => {});
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+window.addEventListener('auth:changed', () => initOrderSse());
+
+// Training feature removed: no fetchTrainings implementation
+try {
+  const bcProd = new BroadcastChannel('spore-products');
+  bcProd.addEventListener('message', (ev) => {
+    if (ev?.data?.type === 'products:updated') {
+      fetchProducts();
       fetchCategories();
     }
   });
@@ -41,7 +133,9 @@ function renderCategoryGrid(categories) {
   const grid = document.getElementById('category-grid');
   if (!grid) return;
   const isAdmin = state.user?.role === 'admin';
-  grid.innerHTML = categories.map(cat => `
+  grid.innerHTML = categories
+    .map(
+      (cat) => `
     <div class="category-card" data-filter-category="${cat.id}">
       ${isAdmin ? `<button class="category-admin-edit-btn" data-edit-category="${cat.id}" title="Edit category"><i class="fa-solid fa-pen"></i></button>` : ''}
       <div class="category-img-wrap">
@@ -51,17 +145,19 @@ function renderCategoryGrid(categories) {
       <p>${cat.description || ''}</p>
       <button class="btn-category-shop" data-filter-category="${cat.id}">Shop Now <i class="fa-solid fa-arrow-right"></i></button>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 
   // Ensure category card buttons navigate to filtered shop
-  grid.querySelectorAll('.btn-category-shop').forEach(btn => {
+  grid.querySelectorAll('.btn-category-shop').forEach((btn) => {
     btn.addEventListener('click', () => {
       navigateToCategory(btn.getAttribute('data-filter-category'));
     });
   });
 
   if (isAdmin) {
-    grid.querySelectorAll('.category-admin-edit-btn').forEach(btn => {
+    grid.querySelectorAll('.category-admin-edit-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const catId = btn.getAttribute('data-edit-category');
         window.location.href = `/admin.html#categories?edit=${encodeURIComponent(catId)}`;
@@ -75,19 +171,19 @@ function handleRouting() {
   const navShop = document.getElementById('btn-nav-shop');
   const navTrack = document.getElementById('btn-nav-track');
   const navAdmin = document.getElementById('btn-nav-admin');
-  
+
   const pageShop = document.getElementById('shop-page');
   const pageCheckout = document.getElementById('checkout-page');
   const pageTrack = document.getElementById('tracker-page');
   const pageAdmin = document.getElementById('admin-page');
-  
+
   const heroSection = document.getElementById('hero-section');
 
   // Deactivate all nav links & sections
   navShop.classList.remove('active');
   navTrack.classList.remove('active');
   navAdmin.classList.remove('active');
-  
+
   pageShop.classList.remove('active');
   if (pageCheckout) pageCheckout.classList.remove('active');
   pageTrack.classList.remove('active');
@@ -115,15 +211,14 @@ function handleRouting() {
     if (pageCheckout) pageCheckout.classList.add('active');
     renderCheckoutPage();
   } else if (hash.startsWith('#track')) {
-    // Access validation for tracking/grower portal
-    if (!state.user || (state.user.role !== 'grower' && state.user.role !== 'admin')) {
-      window.location.hash = '#shop';
-      authModal.open('grower', () => {
+    // Access validation for tracking is available to any logged-in user
+    if (!state.user) {
+      authModal.open('buyer', () => {
         window.location.hash = '#track';
       });
       return;
     }
-    
+
     navTrack.classList.add('active');
     pageTrack.classList.add('active');
     if (heroSection) heroSection.classList.add('hidden');
@@ -139,6 +234,42 @@ function handleRouting() {
     navShop.classList.add('active');
     pageShop.classList.add('active');
     if (heroSection) heroSection.classList.remove('hidden');
+  }
+
+  // Additional SPA routes for training register and training courses (anchor-based)
+  const shopSection = document.getElementById('shop-section');
+  const productsSection = document.getElementById('products-section');
+  try {
+    const regSection = document.getElementById('training-register');
+    const coursesSection = document.getElementById('training-courses');
+    if (hash === '#training-register') {
+      if (regSection) regSection.style.display = 'block';
+      if (coursesSection) coursesSection.style.display = 'none';
+      if (shopSection) shopSection.style.display = 'block';
+      if (productsSection) productsSection.style.display = 'block';
+      if (heroSection) heroSection.classList.add('hidden');
+      // scroll into view for registration
+      regSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (hash === '#training-courses') {
+      if (regSection) regSection.style.display = 'none';
+      if (coursesSection) coursesSection.style.display = 'block';
+      if (shopSection) shopSection.style.display = 'none';
+      if (productsSection) productsSection.style.display = 'none';
+      if (heroSection) heroSection.classList.add('hidden');
+      coursesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // load courses on navigation
+      renderTrainingCourses();
+      return;
+    }
+    // default: hide both
+    if (regSection) regSection.style.display = 'none';
+    if (coursesSection) coursesSection.style.display = 'none';
+    if (shopSection) shopSection.style.display = 'block';
+    if (productsSection) productsSection.style.display = 'block';
+  } catch (err) {
+    // ignore if elements not present
   }
 }
 
@@ -160,11 +291,11 @@ function initEventListeners() {
       window.location.hash = '#shop';
     });
   }
-  
+
   document.getElementById('btn-nav-track').addEventListener('click', (e) => {
     e.preventDefault();
-    if (!state.user || (state.user.role !== 'grower' && state.user.role !== 'admin')) {
-      authModal.open('grower', () => {
+    if (!state.user) {
+      authModal.open('buyer', () => {
         window.location.hash = '#track';
       });
     } else {
@@ -172,14 +303,12 @@ function initEventListeners() {
     }
   });
 
-  // Training Section Explore button -> Grower login gate
+  // Training Section Explore button -> open training registration flow
   const exploreTrainingBtn = document.querySelector('.btn-training');
   if (exploreTrainingBtn) {
     exploreTrainingBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      authModal.open('grower', () => {
-        window.location.hash = '#track';
-      });
+      window.location.hash = '#training-register';
     });
   }
 
@@ -187,8 +316,10 @@ function initEventListeners() {
     e.preventDefault();
     window.location.hash = '#shop';
   });
-  
-  document.getElementById('hero-shop-btn').addEventListener('click', () => window.location.hash = '#shop');
+
+  document
+    .getElementById('hero-shop-btn')
+    .addEventListener('click', () => { window.location.hash = '#shop'; });
 
   // Listen for global auth changes from new modules
   window.addEventListener('auth:changed', () => {
@@ -197,12 +328,20 @@ function initEventListeners() {
   });
 
   // Cart Slide Out Drawer
-  document.getElementById('btn-open-cart').addEventListener('click', () => toggleCartDrawer(true));
-  document.getElementById('btn-close-cart').addEventListener('click', () => toggleCartDrawer(false));
-  document.getElementById('cart-drawer-overlay').addEventListener('click', () => toggleCartDrawer(false));
+  document
+    .getElementById('btn-open-cart')
+    .addEventListener('click', () => { toggleCartDrawer(true); });
+  document
+    .getElementById('btn-close-cart')
+    .addEventListener('click', () => { toggleCartDrawer(false); });
+  document
+    .getElementById('cart-drawer-overlay')
+    .addEventListener('click', () => { toggleCartDrawer(false); });
 
   // Promo application
-  document.getElementById('btn-apply-promo').addEventListener('click', applyPromoCode);
+  document
+    .getElementById('btn-apply-promo')
+    .addEventListener('click', applyPromoCode);
 
   // Checkout
   const btnCheckout = document.getElementById('btn-checkout');
@@ -225,7 +364,9 @@ function initEventListeners() {
   }
 
   // Calculator
-  document.getElementById('btn-calculate-substrate').addEventListener('click', calculateSubstrateMix);
+  document
+    .getElementById('btn-calculate-substrate')
+    .addEventListener('click', calculateSubstrateMix);
 
   // General detail modal closure
   document.getElementById('btn-close-detail').addEventListener('click', () => {
@@ -264,9 +405,11 @@ function initEventListeners() {
   });
 
   // Category filter button toggles â€“ scoped to the visible product filters row only
-  document.querySelectorAll('#product-filters-row .cat-btn').forEach(btn => {
+  document.querySelectorAll('#product-filters-row .cat-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#product-filters-row .cat-btn').forEach(b => b.classList.remove('active'));
+      document
+        .querySelectorAll('#product-filters-row .cat-btn')
+        .forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.activeCategory = btn.getAttribute('data-category') || 'all';
       filterProducts();
@@ -274,7 +417,7 @@ function initEventListeners() {
   });
 
   // Category nav links in NAVBAR (data-category on nav-link)
-  document.querySelectorAll('.nav-link[data-category]').forEach(link => {
+  document.querySelectorAll('.nav-link[data-category]').forEach((link) => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
       navigateToCategory(link.getAttribute('data-category'));
@@ -282,12 +425,14 @@ function initEventListeners() {
   });
 
   // Category links in FOOTER
-  document.querySelectorAll('.footer-cat-link[data-category]').forEach(link => {
-    link.addEventListener('click', (e) => {
-      e.preventDefault();
-      navigateToCategory(link.getAttribute('data-category'));
+  document
+    .querySelectorAll('.footer-cat-link[data-category]')
+    .forEach((link) => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateToCategory(link.getAttribute('data-category'));
+      });
     });
-  });
 
   // Mobile menu toggles
   const btnMobile = document.getElementById('btn-mobile-menu');
@@ -306,7 +451,7 @@ function initEventListeners() {
   const mobileLinks = document.getElementById('mobile-nav-links');
   if (mainLinks && mobileLinks) {
     mobileLinks.innerHTML = mainLinks.innerHTML;
-    mobileLinks.querySelectorAll('.nav-link').forEach(a => {
+    mobileLinks.querySelectorAll('.nav-link').forEach((a) => {
       a.addEventListener('click', (e) => {
         mobileNav.classList.add('hidden');
       });
@@ -315,7 +460,7 @@ function initEventListeners() {
 
   // Admin inline modal triggers (desktop + mobile)
   // Admin buttons removed - admin login now integrated in auth modal via "Staff? Use admin login" link
-  
+
   // Mobile regular login button
   const mobileAuthBtn = document.getElementById('btn-open-auth-mobile');
   if (mobileAuthBtn) {
@@ -326,8 +471,71 @@ function initEventListeners() {
     });
   }
 
+  // Topbar login button (header)
+  const topbarAuthBtn = document.getElementById('btn-open-auth-top');
+  if (topbarAuthBtn) {
+    topbarAuthBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const existing = document.getElementById('auth-choice-menu');
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      const menu = document.createElement('div');
+      menu.id = 'auth-choice-menu';
+      menu.style.position = 'absolute';
+      menu.style.background = '#fff';
+      menu.style.border = '1px solid rgba(0,0,0,0.12)';
+      menu.style.borderRadius = '10px';
+      menu.style.boxShadow = '0 14px 35px rgba(0,0,0,0.12)';
+      menu.style.padding = '10px';
+      menu.style.zIndex = '9999';
+      menu.style.minWidth = '200px';
+      menu.style.display = 'grid';
+      menu.style.gap = '8px';
+      menu.innerHTML = `
+        <button class="btn btn-secondary-glow" id="auth-choice-user" style="width:100%;">User Login</button>
+        <button class="btn btn-secondary" id="auth-choice-admin" style="width:100%;">Staff / Admin Login</button>
+      `;
+      document.body.appendChild(menu);
+
+      const rect = topbarAuthBtn.getBoundingClientRect();
+      menu.style.top = `${rect.bottom + window.scrollY + 8}px`;
+      menu.style.left = `${Math.max(8, rect.right + window.scrollX - menu.offsetWidth)}px`;
+
+      const closeMenu = () => {
+        if (menu.parentElement) menu.parentElement.removeChild(menu);
+        document.removeEventListener('click', outsideClickListener);
+      };
+
+      const outsideClickListener = (event) => {
+        if (!menu.contains(event.target) && event.target !== topbarAuthBtn) {
+          closeMenu();
+        }
+      };
+
+      document.getElementById('auth-choice-user')?.addEventListener('click', () => {
+        closeMenu();
+        authModal.open('buyer');
+      });
+      document.getElementById('auth-choice-admin')?.addEventListener('click', () => {
+        closeMenu();
+        authModal.open('admin');
+      });
+      setTimeout(() => document.addEventListener('click', outsideClickListener), 0);
+    });
+  }
+
+  // Initialize training register handlers (if present)
+  try {
+    initTrainingRegister();
+  } catch (e) {
+    /* ignore if not loaded yet */
+  }
+
   // Category card "Shop Now" buttons â€“ filter products and scroll to grid
-  document.querySelectorAll('.btn-category-shop').forEach(btn => {
+  document.querySelectorAll('.btn-category-shop').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       navigateToCategory(btn.getAttribute('data-filter-category'));
@@ -348,9 +556,12 @@ async function loadUser() {
     const user = await authApi.getMe();
     state.user = user;
     updateAuthHeaderUI();
+    try {
+      window.dispatchEvent(new CustomEvent('auth:changed', { detail: { token: state.token, user: state.user } }));
+    } catch (e) {}
     handleRouting(); // trigger routing refresh for access checks
   } catch (err) {
-    console.error("Auth verify error:", err);
+    showErrorToast(getApiErrorMessage(err));
     logout();
   }
 }
@@ -378,7 +589,9 @@ function toggleUserProfileDropdown() {
   closeUserProfileDropdown();
   if (isHidden) {
     dropdown.classList.remove('hidden');
-    document.getElementById('btn-open-profile')?.setAttribute('aria-expanded', 'true');
+    document
+      .getElementById('btn-open-profile')
+      ?.setAttribute('aria-expanded', 'true');
   }
 }
 
@@ -391,9 +604,9 @@ function updateAuthHeaderUI() {
   if (state.user) {
     const roleLabel = state.user.role.toUpperCase();
     const roleAction = state.user.role === 'admin'
-      ? `<button class="profile-dropdown-item" id="btn-open-admin-console"><i class="fa-solid fa-user-shield"></i> Admin Console</button>`
+      ? '<button class="profile-dropdown-item" id="btn-open-admin-console"><i class="fa-solid fa-user-shield"></i> Admin Console</button>'
       : state.user.role === 'grower'
-        ? `<button class="profile-dropdown-item" id="btn-open-track-orders"><i class="fa-solid fa-truck-fast"></i> Track Orders</button>`
+        ? '<button class="profile-dropdown-item" id="btn-open-track-orders"><i class="fa-solid fa-truck-fast"></i> Track Orders</button>'
         : '';
 
     profileSection.innerHTML = `
@@ -411,48 +624,62 @@ function updateAuthHeaderUI() {
       </div>
     `;
 
-    document.getElementById('btn-open-profile')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleUserProfileDropdown();
-    });
-    document.getElementById('btn-open-profile-modal')?.addEventListener('click', () => {
-      closeUserProfileDropdown();
-      profileModal.open();
-    });
-    document.getElementById('btn-open-admin-console')?.addEventListener('click', () => {
-      closeUserProfileDropdown();
-      window.location.href = '/admin.html';
-    });
-    document.getElementById('btn-open-track-orders')?.addEventListener('click', () => {
-      closeUserProfileDropdown();
-      window.location.hash = '#track';
-    });
-    document.getElementById('btn-open-my-orders')?.addEventListener('click', () => {
-      closeUserProfileDropdown();
-      window.location.hash = '#checkout';
-    });
-    document.getElementById('btn-user-logout')?.addEventListener('click', logout);
+    document
+      .getElementById('btn-open-profile')
+      ?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleUserProfileDropdown();
+      });
+    document
+      .getElementById('btn-open-profile-modal')
+      ?.addEventListener('click', () => {
+        closeUserProfileDropdown();
+        profileModal.open();
+      });
+    document
+      .getElementById('btn-open-admin-console')
+      ?.addEventListener('click', () => {
+        closeUserProfileDropdown();
+        window.location.href = '/admin.html';
+      });
+    document
+      .getElementById('btn-open-track-orders')
+      ?.addEventListener('click', () => {
+        closeUserProfileDropdown();
+        window.location.hash = '#track';
+      });
+    document
+      .getElementById('btn-open-my-orders')
+      ?.addEventListener('click', () => {
+        closeUserProfileDropdown();
+        window.location.hash = '#checkout';
+      });
+    document
+      .getElementById('btn-user-logout')
+      ?.addEventListener('click', logout);
 
     // Toggle navigation visibilities
+    navTrack.style.display = 'inline-flex';
     if (state.user.role === 'admin') {
-      navTrack.style.display = 'inline-flex';
       navAdmin.style.display = 'inline-flex';
       if (navAdminEntry) navAdminEntry.style.display = 'none';
     } else {
-      navTrack.style.display = state.user.role === 'grower' ? 'inline-flex' : 'none';
       navAdmin.style.display = 'none';
       if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
     }
   } else {
-    profileSection.innerHTML = `
-      <button class="btn btn-secondary-glow" id="btn-open-auth">
-        <i class="fa-solid fa-user-astronaut"></i> Log In
-      </button>
-    `;
-    document.getElementById('btn-open-auth').addEventListener('click', () => authModal.open('buyer'));
+    profileSection.innerHTML = '';
     navTrack.style.display = 'none';
     navAdmin.style.display = 'none';
     if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
+    const topbarAuth = document.getElementById('btn-open-auth-top');
+    if (topbarAuth) topbarAuth.style.display = 'inline-flex';
+  }
+
+  // Hide topbar login when user is logged in
+  if (state.user) {
+    const topbarAuth = document.getElementById('btn-open-auth-top');
+    if (topbarAuth) topbarAuth.style.display = 'none';
   }
 }
 
@@ -465,7 +692,7 @@ async function fetchProducts() {
     state.products = products;
     renderProducts(state.products);
   } catch (err) {
-    console.error("Products fetch error:", err);
+    showErrorToast(getApiErrorMessage(err));
     document.getElementById('product-grid').innerHTML = `
       <div class="grid-skeleton">
         <i class="fa-solid fa-triangle-exclamation loader-icon" style="color: var(--color-danger)"></i>
@@ -475,64 +702,79 @@ async function fetchProducts() {
   }
 }
 
+function _formatCurrency(n) {
+  return `₹${Number(n).toFixed(2)}`;
+}
+
+function _getStockMeta(stock) {
+  if (stock > 10) return { label: 'Available', variant: 'available' };
+  if (stock > 5) return { label: 'Limited Stocks', variant: 'limited' };
+  return { label: 'Few Available', variant: 'few' };
+}
+
 function renderProducts(productsList) {
   const grid = document.getElementById('product-grid');
-  
-  if (!productsList.length) {
+  if (!grid) return;
+
+  if (!productsList || productsList.length === 0) {
     grid.innerHTML = `
       <div class="grid-skeleton">
         <i class="fa-solid fa-magnifying-glass loader-icon"></i>
-        <p>No compatible genetics match your search criteria.</p>
+        <p>No products found.</p>
       </div>
     `;
     return;
   }
 
-  grid.innerHTML = productsList.map((prod, idx) => {
-    // Label translations
-    const catLabel = prod.category === 'spawn' ? 'Spawn & Seeds' : 'Mushroom';
-    const hasMrp = prod.mrp_price && prod.mrp_price > prod.price;
-    const discountPct = hasMrp ? Math.round((1 - prod.price / prod.mrp_price) * 100) : 0;
-    
-    return `
-      <div class="product-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
-        <div class="product-img-wrapper">
-          <img src="${prod.image_url}" alt="${prod.name}" loading="lazy">
-          <div class="product-tags">
-            <span class="tag tag-difficulty ${prod.difficulty.toLowerCase()}">${prod.difficulty}</span>
-          </div>
-          <span class="product-gst-badge">${prod.gst_rate}% GST</span>
-          ${hasMrp ? `<span class="product-discount-badge" style="position:absolute;top:10px;right:10px;">${discountPct}% OFF</span>` : ''}
-        </div>
-        <div class="product-info">
-          <span class="product-category-lbl">${catLabel}</span>
-          <h3>${prod.name}</h3>
-          <p class="product-desc">${prod.description}</p>
-          <div class="product-card-footer">
-            <div class="product-price-wrap">
-              <span class="product-price">₹${prod.price.toFixed(2)}</span>
-              ${hasMrp ? `<span class="product-mrp">₹${prod.mrp_price.toFixed(2)}</span>` : ''}
-            </div>
-            <button class="btn-card-add" data-id="${prod.id}">
-              <i class="fa-solid fa-cart-plus"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  const html = productsList
+    .map((prod, idx) => {
+      const catLabel = prod.category === 'spawn' ? 'Spawn & Seeds' : 'Mushroom';
+      const hasMrp = prod.mrp_price && prod.mrp_price > prod.price;
+      const discountPct = hasMrp
+        ? Math.round((1 - prod.price / prod.mrp_price) * 100)
+        : 0;
+      const stockMeta = _getStockMeta(prod.stock);
 
-  // Stagger reveal animation trigger
+      return `
+        <div class="product-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
+          <div class="product-img-wrapper">
+            <img src="${prod.image_url}" alt="${prod.name}" loading="lazy">
+            <span class="product-gst-badge">${prod.gst_rate}% GST</span>
+            <span class="tag tag-stock tag-stock-${stockMeta.variant}">${stockMeta.label}</span>
+            ${hasMrp ? `<span class="product-discount-badge" style="position:absolute;top:10px;right:10px;">${discountPct}% OFF</span>` : ''}
+          </div>
+          <div class="product-info">
+            <span class="product-category-lbl">${catLabel}</span>
+            <h3>${prod.name}</h3>
+            <p class="product-desc">${prod.description}</p>
+            <div class="product-card-footer">
+              <div class="product-price-wrap">
+                <span class="product-price">${_formatCurrency(prod.price)}</span>
+                ${hasMrp ? `<span class="product-mrp">${_formatCurrency(prod.mrp_price)}</span>` : ''}
+              </div>
+              <button class="btn-card-add" data-id="${prod.id}">
+                <i class="fa-solid fa-cart-plus"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  grid.innerHTML = html;
+
+  // reveal animation
   requestAnimationFrame(() => {
     setTimeout(() => {
-      document.querySelectorAll('.product-grid .product-card').forEach(card => {
-        card.classList.add('revealed');
-      });
+      grid
+        .querySelectorAll('.product-card')
+        .forEach((card) => card.classList.add('revealed'));
     }, 50);
   });
 
-  // Add click events for product modals and add buttons
-  document.querySelectorAll('.product-card').forEach(card => {
+  // interactions
+  grid.querySelectorAll('.product-card').forEach((card) => {
     card.addEventListener('click', (e) => {
       if (e.target.closest('.btn-card-add')) return;
       const id = card.getAttribute('data-id');
@@ -540,11 +782,10 @@ function renderProducts(productsList) {
     });
   });
 
-  document.querySelectorAll('.btn-card-add').forEach(btn => {
+  grid.querySelectorAll('.btn-card-add').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const id = btn.getAttribute('data-id');
-      addToCart(id);
+      addToCart(btn.getAttribute('data-id'));
     });
   });
 }
@@ -556,12 +797,13 @@ function filterProducts() {
   let filtered = state.products;
 
   if (selectedCat && selectedCat !== 'all') {
-    filtered = filtered.filter(p => p.category === selectedCat);
+    filtered = filtered.filter((p) => p.category === selectedCat);
   }
 
   if (query.trim() !== '') {
-    filtered = filtered.filter(p =>
-      p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query)
+    filtered = filtered.filter(
+      (p) => p.name.toLowerCase().includes(query)
+        || p.description.toLowerCase().includes(query),
     );
   }
 
@@ -574,14 +816,14 @@ function navigateToCategory(category) {
   if (!document.getElementById('shop-page').classList.contains('active')) {
     window.location.hash = '#shop';
   }
-  
+
   state.activeCategory = category;
 
   // Update active filter tab
-  document.querySelectorAll('#product-filters-row .cat-btn').forEach(b => {
+  document.querySelectorAll('#product-filters-row .cat-btn').forEach((b) => {
     b.classList.toggle('active', b.getAttribute('data-category') === category);
   });
-  
+
   filterProducts();
 
   // Scroll to products section
@@ -599,22 +841,25 @@ function updateSearchSuggestions(query) {
     dd.classList.add('hidden');
     return;
   }
-  
-  const matches = state.products.filter(p =>
-    p.name.toLowerCase().includes(query.toLowerCase()) ||
-    p.description.toLowerCase().includes(query.toLowerCase())
-  ).slice(0, 6);
-  
+
+  const matches = state.products
+    .filter(
+      (p) => p.name.toLowerCase().includes(query.toLowerCase())
+        || p.description.toLowerCase().includes(query.toLowerCase()),
+    )
+    .slice(0, 6);
+
   if (!matches.length) {
     dd.innerHTML = `<div class="suggestions-empty"><i class="fa-solid fa-magnifying-glass"></i> No products found for "${query}"</div>`;
     dd.classList.remove('hidden');
     return;
   }
-  
-  dd.innerHTML = matches.map(p => {
-    const hasMrp = p.mrp_price && p.mrp_price > p.price;
-    const catLabel = p.category === 'spawn' ? 'Spawn' : 'Mushroom';
-    return `
+
+  dd.innerHTML = matches
+    .map((p) => {
+      const hasMrp = p.mrp_price && p.mrp_price > p.price;
+      const catLabel = p.category === 'spawn' ? 'Spawn' : 'Mushroom';
+      return `
       <div class="suggestion-item" data-id="${p.id}">
         <img src="${p.image_url}" alt="${p.name}">
         <div class="suggestion-item-info">
@@ -627,11 +872,12 @@ function updateSearchSuggestions(query) {
         <span class="suggestion-item-cat">${catLabel}</span>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
   dd.classList.remove('hidden');
-  
+
   // Wire click events
-  dd.querySelectorAll('.suggestion-item').forEach(item => {
+  dd.querySelectorAll('.suggestion-item').forEach((item) => {
     item.addEventListener('click', () => {
       const id = item.getAttribute('data-id');
       dd.classList.add('hidden');
@@ -655,10 +901,10 @@ async function openProductDetails(id) {
 
   try {
     const res = await fetch(`${API_BASE}/products/${id}`);
-    if (!res.ok) throw new Error("Failed to load details");
-    
+    if (!res.ok) throw new Error('Failed to load details');
+
     const product = await res.json();
-    
+
     let metaHTML = '';
     if (product.growthMetadata && Object.keys(product.growthMetadata).length) {
       const meta = product.growthMetadata;
@@ -714,10 +960,14 @@ async function openProductDetails(id) {
         <h3>${product.name}</h3>
         <div class="detail-price-wrap">
           <span class="detail-price">₹${product.price.toFixed(2)}</span>
-          ${product.mrp_price && product.mrp_price > product.price ? `
+          ${
+  product.mrp_price && product.mrp_price > product.price
+    ? `
             <span class="detail-mrp">₹${product.mrp_price.toFixed(2)}</span>
             <span class="detail-discount-badge">${Math.round((1 - product.price / product.mrp_price) * 100)}% OFF</span>
-          ` : ''}
+          `
+    : ''
+}
         </div>
         <p style="font-size: 0.95rem; color: var(--color-text-muted); line-height: 1.6;">${product.description}</p>
         
@@ -733,9 +983,8 @@ async function openProductDetails(id) {
       addToCart(product.id);
       modal.classList.remove('open');
     });
-
   } catch (err) {
-    body.innerHTML = `<p style="color: var(--color-danger); text-align:center; padding: 2rem;">Error retrieving specimen record.</p>`;
+    body.innerHTML = '<p style="color: var(--color-danger); text-align:center; padding: 2rem;">Error retrieving specimen record.</p>';
   }
 }
 
@@ -746,12 +995,15 @@ function toggleCartDrawer(open) {
   const drawer = document.getElementById('cart-drawer');
   const overlay = document.getElementById('cart-drawer-overlay');
   const phoneInput = document.getElementById('checkout-delivery-phone');
-  
+
   if (open) {
     drawer.classList.add('open');
     overlay.classList.add('open');
     if (phoneInput && state.user) {
-      const phoneValue = state.user.whatsapp_number || state.user.whatsappNumber || state.user.phone || '';
+      const phoneValue = state.user.whatsapp_number
+        || state.user.whatsappNumber
+        || state.user.phone
+        || '';
       if (!phoneInput.value && phoneValue) phoneInput.value = phoneValue;
     }
   } else {
@@ -763,19 +1015,26 @@ function toggleCartDrawer(open) {
 function addToCart(productId) {
   // Ensure a lightweight guest profile exists for anonymous users so they have a profile page
   if (!state.user) {
-    const guest = { id: 'guest_' + Date.now(), fullName: 'Guest User', email: '', whatsappNumber: '', role: 'buyer', loginMethod: 'guest' };
+    const guest = {
+      id: `guest_${Date.now()}`,
+      fullName: 'Guest User',
+      email: '',
+      whatsappNumber: '',
+      role: 'buyer',
+      loginMethod: 'guest',
+    };
     saveUserProfile(guest);
     updateAuthHeaderUI();
   }
 
-  const existing = state.cart.find(item => item.id === productId);
+  const existing = state.cart.find((item) => item.id === productId);
   let addedItem;
-  
+
   if (existing) {
     existing.quantity += 1;
     addedItem = existing;
   } else {
-    const product = state.products.find(p => p.id === productId);
+    const product = state.products.find((p) => p.id === productId);
     if (!product) return;
     const newItem = {
       id: product.id,
@@ -783,7 +1042,7 @@ function addToCart(productId) {
       price: product.price,
       image_url: product.image_url,
       gst_rate: product.gst_rate,
-      quantity: 1
+      quantity: 1,
     };
     state.cart.push(newItem);
     addedItem = newItem;
@@ -820,18 +1079,20 @@ function showAddedToCartPopup(item) {
     toggleCartDrawer(true);
     popup.remove();
   });
-  document.getElementById('popup-continue')?.addEventListener('click', () => popup.remove());
+  document
+    .getElementById('popup-continue')
+    ?.addEventListener('click', () => popup.remove());
   setTimeout(() => popup.remove(), 4200);
 }
 
 function changeQuantity(productId, delta) {
-  const item = state.cart.find(item => item.id === productId);
+  const item = state.cart.find((item) => item.id === productId);
   if (!item) return;
 
   item.quantity += delta;
-  
+
   if (item.quantity <= 0) {
-    state.cart = state.cart.filter(item => item.id !== productId);
+    state.cart = state.cart.filter((item) => item.id !== productId);
   }
 
   saveCart();
@@ -839,26 +1100,29 @@ function changeQuantity(productId, delta) {
 }
 
 function removeFromCart(productId) {
-  state.cart = state.cart.filter(item => item.id !== productId);
+  state.cart = state.cart.filter((item) => item.id !== productId);
   saveCart();
   updateCartUI();
 }
 
 function applyPromoCode() {
-  const input = document.getElementById('promo-input').value.toUpperCase().trim();
+  const input = document
+    .getElementById('promo-input')
+    .value.toUpperCase()
+    .trim();
   const feedback = document.getElementById('promo-message');
-  
+
   feedback.classList.add('hidden');
 
   if (input === 'SPORE10') {
     state.activePromo = 'SPORE10';
-    state.promoDiscountPct = 0.10;
+    state.promoDiscountPct = 0.1;
     feedback.textContent = 'Code SPORE10 Active (10% Off)!';
     feedback.style.color = 'var(--color-success)';
     feedback.classList.remove('hidden');
   } else if (input === 'SHROOM20') {
     state.activePromo = 'SHROOM20';
-    state.promoDiscountPct = 0.20;
+    state.promoDiscountPct = 0.2;
     feedback.textContent = 'Code SHROOM20 Active (20% Off)!';
     feedback.style.color = 'var(--color-success)';
     feedback.classList.remove('hidden');
@@ -880,7 +1144,7 @@ async function fetchShippingSettings() {
   try {
     const response = await fetch(`${API_BASE}/orders/shipping-settings`);
     const data = await response.json();
-    state.shippingCharge = Number(data.shipping_charge || 0);
+    state.shippingCharge = 0; // delivery is always free
     updateCartUI();
   } catch (err) {
     console.warn('Unable to load shipping charge:', err);
@@ -890,7 +1154,7 @@ async function fetchShippingSettings() {
 function updateCartUI() {
   const container = document.getElementById('cart-items-container');
   const countBadge = document.getElementById('cart-count');
-  
+
   const totalCount = state.cart.reduce((sum, item) => sum + item.quantity, 0);
   countBadge.textContent = totalCount;
 
@@ -912,36 +1176,39 @@ function updateCartUI() {
     return;
   }
 
-  container.innerHTML = state.cart.map(item => {
-    return `
+  container.innerHTML = state.cart
+    .map(
+      (cartItem) => `
       <div class="cart-item">
-        <img src="${item.image_url}" alt="${item.name}">
+        <img src="${cartItem.image_url}" alt="${cartItem.name}">
         <div class="cart-item-details">
-          <h4>${item.name}</h4>
-          <span class="cart-item-price">₹${item.price.toFixed(2)} <span style="font-size:0.75rem; color:var(--color-text-muted);">(${item.gst_rate}% GST)</span></span>
+          <h4>${cartItem.name}</h4>
+          <span class="cart-item-price">₹${cartItem.price.toFixed(2)} <span style="font-size:0.75rem; color:var(--color-text-muted);">(${cartItem.gst_rate}% GST)</span></span>
           <div class="cart-item-qty-row">
-            <button class="qty-btn" onclick="window.changeQty('${item.id}', -1)">-</button>
-            <span class="qty-val">${item.quantity}</span>
-            <button class="qty-btn" onclick="window.changeQty('${item.id}', 1)">+</button>
+            <button class="qty-btn" onclick="window.changeQty('${cartItem.id}', -1)">-</button>
+            <span class="qty-val">${cartItem.quantity}</span>
+            <button class="qty-btn" onclick="window.changeQty('${cartItem.id}', 1)">+</button>
           </div>
+          <div class="cart-item-shipping-note">Free shipping</div>
         </div>
-        <button class="btn-remove-item" onclick="window.removeCartItem('${item.id}')">
+        <button class="btn-remove-item" onclick="window.removeCartItem('${cartItem.id}')">
           <i class="fa-solid fa-trash-can"></i>
         </button>
       </div>
-    `;
-  }).join('');
+    `,
+    )
+    .join('');
 
   let subtotal = 0;
   let gstAmount = 0;
 
-  state.cart.forEach(item => {
+  state.cart.forEach((item) => {
     const lineSubtotal = item.price * item.quantity;
     subtotal += lineSubtotal;
     const lineDiscount = lineSubtotal * state.promoDiscountPct;
     const lineDiscountedSubtotal = lineSubtotal - lineDiscount;
     const lineGst = lineDiscountedSubtotal * (item.gst_rate / 100);
-    
+
     gstAmount += lineGst;
   });
 
@@ -958,13 +1225,11 @@ function updateCartUI() {
   const totalEl = document.getElementById('ledger-total');
 
   if (subtotalEl) subtotalEl.textContent = `₹${subtotal.toFixed(2)}`;
-  
+
   if (discountAmount > 0) {
     if (discountEl) discountEl.textContent = `-₹${discountAmount.toFixed(2)}`;
     if (discountRow) discountRow.classList.remove('hidden');
-  } else {
-    if (discountRow) discountRow.classList.add('hidden');
-  }
+  } else if (discountRow) discountRow.classList.add('hidden');
 
   if (shippingEl && shippingRow) {
     shippingEl.textContent = `₹${shippingCharge.toFixed(2)}`;
@@ -973,6 +1238,325 @@ function updateCartUI() {
 
   if (taxEl) taxEl.textContent = `₹${gstAmount.toFixed(2)}`;
   if (totalEl) totalEl.textContent = `₹${netTotal.toFixed(2)}`;
+}
+
+// ========================================================================
+// Training registration & courses
+// ========================================================================
+function initTrainingRegister() {
+  const form = document.getElementById('training-register-form');
+  if (!form) return;
+
+  const nameEl = document.getElementById('reg-fullname');
+  const roleEl = document.getElementById('reg-role');
+  const emailEl = document.getElementById('reg-email');
+  const phoneCountryEl = document.getElementById('reg-phone-country');
+  const phoneEl = document.getElementById('reg-phone');
+  const googleBtn = document.getElementById('reg-google');
+  const emailOtpBtn = document.getElementById('reg-email-otp');
+  const phoneOtpBtn = document.getElementById('reg-phone-otp');
+  const otpArea = document.getElementById('reg-otp-area');
+  const otpInput = document.getElementById('reg-otp');
+  const verifyBtn = document.getElementById('reg-verify-otp');
+  const cancelOtp = document.getElementById('reg-cancel-otp');
+  const errEl = document.getElementById('reg-error');
+
+  let pendingContact = null;
+  let pendingMethod = null;
+  let lastPhone = null;
+
+  function showError(msg) {
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.style.display = 'block';
+    }
+  }
+  function clearError() {
+    if (errEl) {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+  }
+
+  googleBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    // Reuse authModal Google flow which mocks OAuth; on success navigate to courses
+    authModal.open('grower', () => {
+      window.location.hash = '#training-courses';
+    });
+  });
+
+  emailOtpBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    clearError();
+    const email = (emailEl?.value || '').trim();
+    const name = (nameEl?.value || '').trim();
+    const trainingRole = roleEl?.value || 'trainee';
+    if (!email) return showError('Please provide an email.');
+    try {
+      emailOtpBtn.disabled = true;
+      emailOtpBtn.textContent = 'Sending…';
+      await authApi.requestOtp(email, 'grower', name);
+      // persist selected training role locally so courses page can use it even before login
+      localStorage.setItem('training_role', trainingRole);
+      pendingContact = email;
+      pendingMethod = 'email';
+      otpArea.style.display = 'block';
+    } catch (err) {
+      showError(err.message || 'Failed to send OTP');
+    } finally {
+      emailOtpBtn.disabled = false;
+      emailOtpBtn.textContent = 'Send Email OTP';
+    }
+  });
+
+  phoneOtpBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    clearError();
+    const phone = (phoneEl?.value || '').trim();
+    const country = phoneCountryEl?.value || '+91';
+    const name = (nameEl?.value || '').trim();
+    const trainingRole = roleEl?.value || 'trainee';
+    if (!phone) return showError('Please provide a phone number.');
+    try {
+      phoneOtpBtn.disabled = true;
+      phoneOtpBtn.textContent = 'Sending…';
+      const fullPhone = `${country}${phone}`;
+      const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
+      await authApi.requestOtp(
+        mockEmail,
+        'grower',
+        name || `User ${phone.slice(-4)}`,
+      );
+      localStorage.setItem('training_role', trainingRole);
+      pendingContact = mockEmail;
+      pendingMethod = 'phone';
+      lastPhone = fullPhone;
+      otpArea.style.display = 'block';
+      // Autofill local fields with phone value
+      if (phoneEl && !phoneEl.value) phoneEl.value = phone;
+    } catch (err) {
+      showError(err.message || 'Failed to send OTP');
+    } finally {
+      phoneOtpBtn.disabled = false;
+      phoneOtpBtn.textContent = 'Send Phone OTP';
+    }
+  });
+
+  verifyBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    clearError();
+    const code = (otpInput?.value || '').trim();
+    if (!code) return showError('Enter the 6-digit code');
+    try {
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = 'Verifying…';
+      const data = await authApi.verifyOtp(pendingContact, code, {
+        loginMethod: pendingMethod,
+        whatsappNumber: lastPhone,
+      });
+      if (data && data.token) {
+        saveAuth(data.token, data.user);
+        window.dispatchEvent(new Event('auth:changed'));
+        // Ensure required fields are filled from profile
+        if (data.user) {
+          if (nameEl && !nameEl.value && data.user.fullName) nameEl.value = data.user.fullName;
+          if (emailEl && !emailEl.value && data.user.email) emailEl.value = data.user.email;
+          if (
+            phoneEl
+            && !phoneEl.value
+            && (data.user.whatsappNumber || data.user.whatsapp_number)
+          ) phoneEl.value = data.user.whatsappNumber || data.user.whatsapp_number;
+        }
+        // Persist training role to user profile and local storage
+        const selRole = roleEl?.value || localStorage.getItem('training_role') || 'trainee';
+        try {
+          const updatedUser = { ...state.user, trainingRole: selRole };
+          saveUserProfile(updatedUser);
+        } catch (e) {
+          localStorage.setItem('training_role', selRole);
+        }
+        // Navigate to courses
+        window.location.hash = '#training-courses';
+      } else {
+        showError('Verification failed.');
+      }
+    } catch (err) {
+      showError(err.message || 'Verification failed');
+    } finally {
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify & Continue';
+    }
+  });
+
+  cancelOtp?.addEventListener('click', (e) => {
+    e.preventDefault();
+    otpArea.style.display = 'none';
+    otpInput.value = '';
+    pendingContact = null;
+    pendingMethod = null;
+    lastPhone = null;
+    clearError();
+  });
+}
+
+async function renderTrainingCourses() {
+  const list = document.getElementById('training-courses-list');
+  if (!list) return;
+  // Render role-specific plans above the trainings
+  const trainingRole = (state.user && state.user.trainingRole)
+    || localStorage.getItem('training_role')
+    || 'trainee';
+  const plansWrap = list.parentElement;
+  // Add welcome message at top
+  if (!document.getElementById('training-welcome-msg')) {
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.id = 'training-welcome-msg';
+    welcomeDiv.innerHTML = '<div style="text-align:center;margin-bottom:24px;padding:16px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:8px;color:#fff;"><h3 style="margin:0 0 8px;font-size:1.5rem;">Welcome to Sporekart Training & Courses</h3><p style="margin:0;font-size:0.95rem;">Learn, grow, and build your mushroom business with us</p></div>';
+    plansWrap.insertBefore(welcomeDiv, plansWrap.firstChild);
+  }
+
+  const plansContainerId = 'training-plans-container';
+  let plansContainer = document.getElementById(plansContainerId);
+  if (!plansContainer) {
+    plansContainer = document.createElement('div');
+    plansContainer.id = plansContainerId;
+    plansContainer.style.display = 'grid';
+    plansContainer.style.gridTemplateColumns = 'repeat(auto-fit,minmax(220px,1fr))';
+    plansContainer.style.gap = '12px';
+    plansWrap.insertBefore(plansContainer, list);
+  }
+  // Define plans per role
+  const plansByRole = {
+    trainee: [
+      {
+        title: 'Starter',
+        price: 'Free',
+        desc: 'Intro modules, community access',
+      },
+      {
+        title: 'Pro Trainee',
+        price: '₹2,499',
+        desc: 'Live workshops + certification',
+      },
+    ],
+    farmer: [
+      {
+        title: 'Field Ready',
+        price: '₹4,999',
+        desc: 'On-farm training + supply chain',
+      },
+      {
+        title: 'Scale Up',
+        price: '₹14,999',
+        desc: 'Business modelling + crop scaling',
+      },
+    ],
+    entrepreneur: [
+      {
+        title: 'Biz Launch',
+        price: '₹9,999',
+        desc: 'Market & product strategy',
+      },
+      {
+        title: 'Growth Partner',
+        price: '₹29,999',
+        desc: 'Mentorship + investor introductions',
+      },
+    ],
+  };
+  const plans = plansByRole[trainingRole] || plansByRole.trainee;
+  plansContainer.innerHTML = plans
+    .map(
+      (p) => `
+    <div class="plan-card" style="padding:12px;border-radius:8px;border:1px solid #eee;background:#fff;">
+      <h4 style="margin:0 0 6px;">${p.title}</h4>
+      <div style="font-weight:700;margin-bottom:6px;">${p.price}</div>
+      <div style="color:#4b5563;font-size:0.95rem;">${p.desc}</div>
+      <div style="margin-top:8px;"><button class="btn btn-primary btn-plan-choose">Choose</button></div>
+    </div>
+  `,
+    )
+    .join('');
+
+  plansContainer.querySelectorAll('.btn-plan-choose').forEach((b) => {
+    b.addEventListener('click', () => showSuccessToast('Plan selection saved. Admin will contact you.'));
+  });
+  list.innerHTML = '<div class="grid-skeleton"><i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...</div>';
+  try {
+    const trainings = await trainingApi.getTrainings();
+    const trainingRole = (state.user && state.user.trainingRole)
+      || localStorage.getItem('training_role')
+      || 'trainee';
+    const visibleTrainingsAll = Array.isArray(trainings) ? trainings : [];
+    const visibleTrainings = visibleTrainingsAll.filter(
+      (t) => !t.allowed_roles
+        || t.allowed_roles.length === 0
+        || (t.allowed_roles || []).includes(trainingRole),
+    );
+    if (!Array.isArray(visibleTrainings) || visibleTrainings.length === 0) {
+      list.innerHTML = '<div class="grid-skeleton">No trainings available at the moment.</div>';
+      return;
+    }
+
+    list.innerHTML = visibleTrainings
+      .map(
+        (t) => `
+      <div class="training-card" data-id="${t.id}" style="padding:12px;border-radius:8px;border:1px solid #eee;background:#fff;">
+        <img src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}" style="width:100%;height:160px;object-fit:cover;border-radius:6px;margin-bottom:8px;">
+        <h4>${t.title}</h4>
+        <p style="color:#4b5563;font-size:0.95rem;">${t.description || ''}</p>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <button class="btn btn-primary btn-enroll" data-id="${t.id}">Enroll</button>
+          <button class="btn btn-outline btn-shop-from-training">Shop Now</button>
+        </div>
+      </div>
+    `,
+      )
+      .join('');
+
+    list.querySelectorAll('.btn-enroll').forEach((b) => {
+      b.addEventListener('click', async (e) => {
+        const id = b.getAttribute('data-id');
+        if (!state.user) {
+          // Keep buyer login separate: open buyer login modal
+          authModal.open('buyer', () => {
+            window.location.hash = '#training-courses';
+          });
+          return;
+        }
+
+        try {
+          b.disabled = true;
+          b.textContent = 'Enrolling…';
+          const role = state.user.trainingRole
+            || localStorage.getItem('training_role')
+            || 'trainee';
+          const res = await trainingApi.enroll(id, { role });
+          showSuccessToast('Enrolled — admin will contact you.');
+        } catch (err) {
+          showErrorToast('Enrollment failed. Try again.');
+        } finally {
+          b.disabled = false;
+          b.textContent = 'Enroll';
+        }
+      });
+    });
+    // Add Shop Now button handler - requires login as buyer
+    list.querySelectorAll('.btn-shop-from-training').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (!state.user || state.user.role !== 'buyer') {
+          authModal.open('buyer', () => {
+            window.location.hash = '#shop';
+          });
+          return;
+        }
+        window.location.hash = '#shop';
+      });
+    });
+  } catch (err) {
+    list.innerHTML = '<div class="grid-skeleton">Failed to load trainings.</div>';
+  }
 }
 
 window.changeQty = changeQuantity;
@@ -1011,7 +1595,7 @@ async function handleCheckoutInitiation() {
 
   if (!state.user) {
     if (warning) {
-      warning.textContent = "⚠️ Please verify your identity to complete checkout.";
+      warning.textContent = '⚠️ Please verify your identity to complete checkout.';
       warning.classList.remove('hidden');
     }
     authModal.open('buyer', () => {
@@ -1022,7 +1606,7 @@ async function handleCheckoutInitiation() {
 
   if (state.user.role === 'grower') {
     if (warning) {
-      warning.textContent = "⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.";
+      warning.textContent = '⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.';
       warning.classList.remove('hidden');
     }
     return;
@@ -1036,8 +1620,13 @@ function showAddressModal() {
   const modal = document.createElement('div');
   modal.id = 'address-modal';
   modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.64);z-index:9999;padding:16px;';
-  const initialPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || (state.user?.whatsapp_number || state.user?.phone || '');
-  const initialName = document.getElementById('checkout-delivery-name')?.value.trim() || (state.user?.fullName || '');
+  const initialPhone = document.getElementById('checkout-delivery-phone')?.value.trim()
+    || state.user?.whatsapp_number
+    || state.user?.phone
+    || '';
+  const initialName = document.getElementById('checkout-delivery-name')?.value.trim()
+    || state.user?.fullName
+    || '';
   const initialPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
   const initialAddress = document.getElementById('checkout-delivery-address')?.value.trim() || '';
   modal.innerHTML = `
@@ -1066,81 +1655,115 @@ function showAddressModal() {
 
   document.body.appendChild(modal);
 
-  modal.querySelector('#modal-cancel')?.addEventListener('click', () => modal.remove());
-  modal.querySelector('#modal-continue')?.addEventListener('click', async () => {
-    const name = modal.querySelector('#modal-delivery-name')?.value.trim() || '';
-    const phone = modal.querySelector('#modal-delivery-phone')?.value.trim() || '';
-    const pincode = modal.querySelector('#modal-delivery-pincode')?.value.trim() || '';
-    const address = modal.querySelector('#modal-delivery-address')?.value.trim() || '';
-    const feedback = modal.querySelector('#modal-address-feedback');
-    if (feedback) {
-      feedback.style.display = 'none';
-      feedback.textContent = '';
-    }
-
-    if (!phone || phone.replace(/\D/g, '').length < 10 || phone.replace(/\D/g, '').length > 15) {
+  modal
+    .querySelector('#modal-cancel')
+    ?.addEventListener('click', () => modal.remove());
+  modal
+    .querySelector('#modal-continue')
+    ?.addEventListener('click', async () => {
+      const name = modal.querySelector('#modal-delivery-name')?.value.trim() || '';
+      const phone = modal.querySelector('#modal-delivery-phone')?.value.trim() || '';
+      const pincode = modal.querySelector('#modal-delivery-pincode')?.value.trim() || '';
+      const address = modal.querySelector('#modal-delivery-address')?.value.trim() || '';
+      const feedback = modal.querySelector('#modal-address-feedback');
       if (feedback) {
-        feedback.textContent = 'Enter a valid phone number (10-15 digits).';
-        feedback.style.display = 'block';
+        feedback.style.display = 'none';
+        feedback.textContent = '';
       }
-      return;
-    }
 
-    if (!/^[0-9]{6}$/.test(pincode)) {
-      if (feedback) {
-        feedback.textContent = 'Enter a valid 6-digit pincode.';
-        feedback.style.display = 'block';
+      if (
+        !phone
+        || phone.replace(/\D/g, '').length < 10
+        || phone.replace(/\D/g, '').length > 15
+      ) {
+        if (feedback) {
+          feedback.textContent = 'Enter a valid phone number (10-15 digits).';
+          feedback.style.display = 'block';
+        }
+        return;
       }
-      return;
-    }
 
-    if (!address) {
-      if (feedback) {
-        feedback.textContent = 'Delivery address is required.';
-        feedback.style.display = 'block';
+      if (!/^[0-9]{6}$/.test(pincode)) {
+        if (feedback) {
+          feedback.textContent = 'Enter a valid 6-digit pincode.';
+          feedback.style.display = 'block';
+        }
+        return;
       }
-      return;
-    }
 
-    // Name mandatory
-    if (!name) {
-      if (feedback) {
-        feedback.textContent = 'Full name is required for delivery.';
-        feedback.style.display = 'block';
+      if (!address) {
+        if (feedback) {
+          feedback.textContent = 'Delivery address is required.';
+          feedback.style.display = 'block';
+        }
+        return;
       }
-      return;
-    }
 
-    modal.remove();
-    const phoneInput = document.getElementById('checkout-delivery-phone');
-    const pincodeInput = document.getElementById('checkout-delivery-pincode');
-    const addressInput = document.getElementById('checkout-delivery-address');
-    if (phoneInput) phoneInput.value = phone;
-    if (pincodeInput) pincodeInput.value = pincode;
-    if (addressInput) addressInput.value = address;
+      // Name mandatory
+      if (!name) {
+        if (feedback) {
+          feedback.textContent = 'Full name is required for delivery.';
+          feedback.style.display = 'block';
+        }
+        return;
+      }
 
-    // Update user basic details with delivery info
-    if (!state.user) {
-      // create guest profile locally
-      const guest = { id: 'guest_' + Date.now(), fullName: name, email: '', whatsappNumber: phone, role: 'buyer', loginMethod: 'guest', defaultAddress: address, defaultPincode: pincode };
-      saveUserProfile(guest);
-      window.dispatchEvent(new Event('auth:changed'));
-    } else {
-      // update local state and attempt server update
-      const updated = Object.assign({}, state.user, { fullName: name, whatsappNumber: phone, defaultAddress: address, defaultPincode: pincode });
-      saveUserProfile(updated);
-      window.dispatchEvent(new Event('auth:changed'));
-      if (state.token) {
-        try {
-          await fetchWithAuth('/auth/me', { method: 'PUT', body: JSON.stringify({ fullName: name, whatsappNumber: phone, default_address: address, default_pincode: pincode }) });
-        } catch (err) {
-          console.warn('Failed to persist delivery details to server:', err.message || err);
+      modal.remove();
+      const phoneInput = document.getElementById('checkout-delivery-phone');
+      const pincodeInput = document.getElementById('checkout-delivery-pincode');
+      const addressInput = document.getElementById('checkout-delivery-address');
+      if (phoneInput) phoneInput.value = phone;
+      if (pincodeInput) pincodeInput.value = pincode;
+      if (addressInput) addressInput.value = address;
+
+      // Update user basic details with delivery info
+      if (!state.user) {
+        // create guest profile locally
+        const guest = {
+          id: `guest_${Date.now()}`,
+          fullName: name,
+          email: '',
+          whatsappNumber: phone,
+          role: 'buyer',
+          loginMethod: 'guest',
+          defaultAddress: address,
+          defaultPincode: pincode,
+        };
+        saveUserProfile(guest);
+        window.dispatchEvent(new Event('auth:changed'));
+      } else {
+        // update local state and attempt server update
+        const updated = {
+          ...state.user,
+          fullName: name,
+          whatsappNumber: phone,
+          defaultAddress: address,
+          defaultPincode: pincode,
+        };
+        saveUserProfile(updated);
+        window.dispatchEvent(new Event('auth:changed'));
+        if (state.token) {
+          try {
+            await fetchWithAuth('/auth/me', {
+              method: 'PUT',
+              body: JSON.stringify({
+                fullName: name,
+                whatsappNumber: phone,
+                default_address: address,
+                default_pincode: pincode,
+              }),
+            });
+          } catch (err) {
+            console.warn(
+              'Failed to persist delivery details to server:',
+              err.message || err,
+            );
+          }
         }
       }
-    }
 
-    window.location.hash = '#checkout';
-  });
+      window.location.hash = '#checkout';
+    });
 }
 
 function renderCheckoutPage() {
@@ -1157,8 +1780,8 @@ function renderCheckoutPage() {
     return;
   }
 
-  const lines = state.cart.map(item => {
-    const product = state.products.find(p => p.id === item.id) || {};
+  const lines = state.cart.map((item) => {
+    const product = state.products.find((p) => p.id === item.id) || {};
     return `
       <div class="checkout-summary-line">
         <span>${item.quantity}× ${product.name || 'Product'}</span>
@@ -1168,12 +1791,12 @@ function renderCheckoutPage() {
   });
 
   const subtotal = state.cart.reduce((total, item) => {
-    const product = state.products.find(p => p.id === item.id) || {};
-    return total + ((product.price || 0) * item.quantity);
+    const product = state.products.find((p) => p.id === item.id) || {};
+    return total + (product.price || 0) * item.quantity;
   }, 0);
   const gst = +(subtotal * 0.05).toFixed(2);
   const discount = state.activePromo ? 50 : 0;
-  const shipping = Number(state.shippingCharge || 0);
+  const shipping = 0;
   const total = subtotal + gst + shipping - discount;
 
   summaryContainer.innerHTML = `
@@ -1183,7 +1806,8 @@ function renderCheckoutPage() {
     <div class="checkout-summary-totals">
       <div><span>Subtotal</span><span>₹${subtotal.toFixed(2)}</span></div>
       <div><span>GST (5%)</span><span>₹${gst.toFixed(2)}</span></div>
-      <div><span>Shipping</span><span>₹${shipping.toFixed(2)}</span></div>
+      <div><span>Shipping</span><span>₹0.00</span></div>
+      <div class="checkout-summary-free-shipping">Free shipping applied</div>
       <div><span>Discount</span><span>₹${discount.toFixed(2)}</span></div>
       <div class="checkout-summary-total"><span>Total</span><strong>₹${total.toFixed(2)}</strong></div>
     </div>
@@ -1201,7 +1825,11 @@ async function handlePaymentContinue() {
     feedback.classList.add('hidden');
   }
 
-  if (!deliveryPhone || deliveryPhone.replace(/\D/g, '').length < 10 || deliveryPhone.replace(/\D/g, '').length > 15) {
+  if (
+    !deliveryPhone
+    || deliveryPhone.replace(/\D/g, '').length < 10
+    || deliveryPhone.replace(/\D/g, '').length > 15
+  ) {
     if (feedback) {
       feedback.textContent = 'Enter a valid delivery phone number (10-15 digits).';
       feedback.classList.remove('hidden');
@@ -1229,12 +1857,15 @@ async function handlePaymentContinue() {
     const data = await fetchWithAuth('/orders/checkout', {
       method: 'POST',
       body: JSON.stringify({
-        items: state.cart.map(item => ({ id: item.id, quantity: item.quantity })),
+        items: state.cart.map((item) => ({
+          id: item.id,
+          quantity: item.quantity,
+        })),
         promoCode: state.activePromo,
         delivery_phone: deliveryPhone,
         delivery_address: deliveryAddress,
-        delivery_pincode: deliveryPincode
-      })
+        delivery_pincode: deliveryPincode,
+      }),
     });
 
     toggleCartDrawer(false);
@@ -1242,38 +1873,41 @@ async function handlePaymentContinue() {
     const rzpDetails = data.razorpay;
     const orderRecord = data.order;
 
-    if (rzpDetails.keyId.includes('mockKey') || rzpDetails.keyId.includes('rzp_test_mock')) {
+    if (
+      rzpDetails.keyId.includes('mockKey')
+      || rzpDetails.keyId.includes('rzp_test_mock')
+    ) {
       showMockPaymentModal(rzpDetails, orderRecord);
     } else {
       const options = {
         key: rzpDetails.keyId,
         amount: rzpDetails.amount,
         currency: rzpDetails.currency,
-        name: "Sporekart Store",
-        description: "Fruiting Spore Seeds Checkout",
+        name: 'Sporekart Store',
+        description: 'Fruiting Spore Seeds Checkout',
         order_id: rzpDetails.orderId,
-        handler: async function (response) {
+        async handler(response) {
           await completeOrderPayment(
             response.razorpay_order_id,
             response.razorpay_payment_id,
-            response.razorpay_signature
+            response.razorpay_signature,
           );
         },
         prefill: {
           name: state.user.fullName,
           email: state.user.email,
-          contact: state.user.whatsappNumber || ""
+          contact: state.user.whatsappNumber || '',
         },
         theme: {
-          color: "#38b17b"
-        }
+          color: '#38b17b',
+        },
       };
 
       const rzp = new Razorpay(options);
       rzp.open();
     }
   } catch (err) {
-    console.error('Continue to payment failed:', err);
+    showErrorToast(getApiErrorMessage(err));
     if (feedback) {
       feedback.textContent = 'Unable to connect to payment service. Please try again later.';
       feedback.classList.remove('hidden');
@@ -1286,7 +1920,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
   document.getElementById('mock-payment-gateway-modal')?.remove();
 
   const amount = (rzpDetails.amount / 100).toFixed(2);
-  const orderId = rzpDetails.orderId;
+  const { orderId } = rzpDetails;
 
   const mockModal = document.createElement('div');
   mockModal.id = 'mock-payment-gateway-modal';
@@ -1336,27 +1970,61 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
           overflow-y:auto; padding:8px 0;
         ">
           ${[
-            { id:'upi',    icon:'fa-mobile-screen-button', label:'UPI',          badge:'Recommended' },
-            { id:'card',   icon:'fa-credit-card',          label:'Card',          badge:'' },
-            { id:'netbank',icon:'fa-building-columns',     label:'Net Banking',   badge:'' },
-            { id:'wallet', icon:'fa-wallet',               label:'Wallets',       badge:'' },
-            { id:'emi',    icon:'fa-calendar-days',        label:'EMI',           badge:'' },
-            { id:'cod',    icon:'fa-box-open',             label:'Cash on Delivery', badge:'' },
-          ].map((m,i) => `
+    {
+      id: 'upi',
+      icon: 'fa-mobile-screen-button',
+      label: 'UPI',
+      badge: 'Recommended',
+    },
+    {
+      id: 'card',
+      icon: 'fa-credit-card',
+      label: 'Card',
+      badge: '',
+    },
+    {
+      id: 'netbank',
+      icon: 'fa-building-columns',
+      label: 'Net Banking',
+      badge: '',
+    },
+    {
+      id: 'wallet',
+      icon: 'fa-wallet',
+      label: 'Wallets',
+      badge: '',
+    },
+    {
+      id: 'emi',
+      icon: 'fa-calendar-days',
+      label: 'EMI',
+      badge: '',
+    },
+    {
+      id: 'cod',
+      icon: 'fa-box-open',
+      label: 'Cash on Delivery',
+      badge: '',
+    },
+  ]
+    .map(
+      (m, i) => `
             <button class="pgw-tab-btn" data-tab="${m.id}" style="
-              width:100%; text-align:left; background:${i===0?'rgba(56,177,123,0.12)':'transparent'};
-              border:none; border-left:3px solid ${i===0?'#38b17b':'transparent'};
-              padding:12px 14px; cursor:pointer; color:${i===0?'#38b17b':'#94a3b8'};
+              width:100%; text-align:left; background:${i === 0 ? 'rgba(56,177,123,0.12)' : 'transparent'};
+              border:none; border-left:3px solid ${i === 0 ? '#38b17b' : 'transparent'};
+              padding:12px 14px; cursor:pointer; color:${i === 0 ? '#38b17b' : '#94a3b8'};
               display:flex; align-items:center; gap:10px; transition:all 0.18s;
               font-size:0.85rem; font-family:inherit;
             ">
               <i class="fa-solid ${m.icon}" style="width:16px;text-align:center;"></i>
               <div>
-                <div style="font-weight:${i===0?'600':'500'}">${m.label}</div>
+                <div style="font-weight:${i === 0 ? '600' : '500'}">${m.label}</div>
                 ${m.badge ? `<div style="font-size:0.65rem;color:#38b17b;margin-top:1px;">${m.badge}</div>` : ''}
               </div>
             </button>
-          `).join('')}
+          `,
+    )
+    .join('')}
           <div style="margin:12px 14px 0;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);font-size:0.68rem;color:#475569;display:flex;align-items:center;gap:6px;">
             <i class="fa-solid fa-shield-halved" style="color:#38b17b;"></i> 100% Secure
           </div>
@@ -1372,11 +2040,33 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             <!-- UPI Apps -->
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;">
               ${[
-                { name:'GPay',     color:'#4285F4', icon:'fa-google',      label:'Google Pay' },
-                { name:'PhonePe',  color:'#5F259F', icon:'fa-mobile',      label:'PhonePe' },
-                { name:'Paytm',    color:'#00BAF2', icon:'fa-p',           label:'Paytm' },
-                { name:'BHIM',     color:'#138808', icon:'fa-indian-rupee-sign', label:'BHIM' },
-              ].map(app => `
+    {
+      name: 'GPay',
+      color: '#4285F4',
+      icon: 'fa-google',
+      label: 'Google Pay',
+    },
+    {
+      name: 'PhonePe',
+      color: '#5F259F',
+      icon: 'fa-mobile',
+      label: 'PhonePe',
+    },
+    {
+      name: 'Paytm',
+      color: '#00BAF2',
+      icon: 'fa-p',
+      label: 'Paytm',
+    },
+    {
+      name: 'BHIM',
+      color: '#138808',
+      icon: 'fa-indian-rupee-sign',
+      label: 'BHIM',
+    },
+  ]
+    .map(
+      (app) => `
                 <button class="pgw-upi-app-btn" data-app="${app.name}" style="
                   background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
                   border-radius:10px; padding:12px 6px; text-align:center; cursor:pointer;
@@ -1387,7 +2077,9 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                   </div>
                   <div style="font-size:0.72rem;font-weight:500;">${app.label}</div>
                 </button>
-              `).join('')}
+              `,
+    )
+    .join('')}
             </div>
 
             <div style="text-align:center;color:#475569;font-size:0.78rem;margin-bottom:14px;">â€” or enter UPI ID â€”</div>
@@ -1422,9 +2114,13 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <!-- Accepted cards -->
             <div style="display:flex;gap:8px;margin-bottom:16px;">
-              ${['VISA','MC','AMEX','RuPay'].map(c => `
+              ${['VISA', 'MC', 'AMEX', 'RuPay']
+    .map(
+      (c) => `
                 <div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 10px;font-size:0.72rem;font-weight:700;color:#94a3b8;">${c}</div>
-              `).join('')}
+              `,
+    )
+    .join('')}
             </div>
 
             <div style="position:relative;margin-bottom:16px;">
@@ -1486,13 +2182,15 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;">
               ${[
-                { name:'SBI',    color:'#003087' },
-                { name:'HDFC',   color:'#004C97' },
-                { name:'ICICI',  color:'#B02A30' },
-                { name:'Axis',   color:'#800020' },
-                { name:'Kotak',  color:'#EE2424' },
-                { name:'PNB',    color:'#FF6600' },
-              ].map(b => `
+    { name: 'SBI', color: '#003087' },
+    { name: 'HDFC', color: '#004C97' },
+    { name: 'ICICI', color: '#B02A30' },
+    { name: 'Axis', color: '#800020' },
+    { name: 'Kotak', color: '#EE2424' },
+    { name: 'PNB', color: '#FF6600' },
+  ]
+    .map(
+      (b) => `
                 <button class="pgw-bank-btn" data-bank="${b.name}" style="
                   background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
                   border-radius:8px;padding:10px;text-align:center;cursor:pointer;
@@ -1503,7 +2201,9 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                   </div>
                   <div style="font-size:0.78rem;font-weight:600;">${b.name}</div>
                 </button>
-              `).join('')}
+              `,
+    )
+    .join('')}
             </div>
 
             <div style="margin-bottom:16px;">
@@ -1535,12 +2235,44 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
               ${[
-                { name:'Paytm Wallet',   bal:'₹2,450.00', icon:'fa-p',        color:'#00BAF2', id:'paytm' },
-                { name:'Amazon Pay',     bal:'₹800.00',   icon:'fa-amazon',    color:'#FF9900', id:'amazon' },
-                { name:'Mobikwik',       bal:'₹320.00',   icon:'fa-mobile',    color:'#E8174B', id:'mobikwik' },
-                { name:'Freecharge',     bal:'₹150.00',   icon:'fa-bolt',      color:'#E62272', id:'freecharge' },
-                { name:'Airtel Money',   bal:'₹1,200.00', icon:'fa-signal',    color:'#E40000', id:'airtel' },
-              ].map(w => `
+    {
+      name: 'Paytm Wallet',
+      bal: '₹2,450.00',
+      icon: 'fa-p',
+      color: '#00BAF2',
+      id: 'paytm',
+    },
+    {
+      name: 'Amazon Pay',
+      bal: '₹800.00',
+      icon: 'fa-amazon',
+      color: '#FF9900',
+      id: 'amazon',
+    },
+    {
+      name: 'Mobikwik',
+      bal: '₹320.00',
+      icon: 'fa-mobile',
+      color: '#E8174B',
+      id: 'mobikwik',
+    },
+    {
+      name: 'Freecharge',
+      bal: '₹150.00',
+      icon: 'fa-bolt',
+      color: '#E62272',
+      id: 'freecharge',
+    },
+    {
+      name: 'Airtel Money',
+      bal: '₹1,200.00',
+      icon: 'fa-signal',
+      color: '#E40000',
+      id: 'airtel',
+    },
+  ]
+    .map(
+      (w) => `
                 <button class="pgw-wallet-btn" data-wallet="${w.id}" style="
                   width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
                   border-radius:10px;padding:12px 16px;cursor:pointer;color:#e2e8f0;font-family:inherit;
@@ -1555,7 +2287,9 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                   </div>
                   <i class="fa-solid fa-chevron-right" style="color:#475569;font-size:0.8rem;"></i>
                 </button>
-              `).join('')}
+              `,
+    )
+    .join('')}
             </div>
 
             <button class="pgw-pay-btn" id="pgw-btn-pay-wallet" style="
@@ -1573,32 +2307,35 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
               ${[
-                { months:3,  rate:13, bank:'HDFC / ICICI / SBI' },
-                { months:6,  rate:14, bank:'All Major Cards' },
-                { months:9,  rate:15, bank:'HDFC / Axis / Kotak' },
-                { months:12, rate:15, bank:'All Major Cards' },
-                { months:18, rate:16, bank:'HDFC / ICICI' },
-                { months:24, rate:16, bank:'Select Cards' },
-              ].map((e,i) => {
-                const emi = ((rzpDetails.amount/100) * (e.rate/100/12)) / (1 - Math.pow(1 + e.rate/100/12, -e.months));
-                return `
+    { months: 3, rate: 13, bank: 'HDFC / ICICI / SBI' },
+    { months: 6, rate: 14, bank: 'All Major Cards' },
+    { months: 9, rate: 15, bank: 'HDFC / Axis / Kotak' },
+    { months: 12, rate: 15, bank: 'All Major Cards' },
+    { months: 18, rate: 16, bank: 'HDFC / ICICI' },
+    { months: 24, rate: 16, bank: 'Select Cards' },
+  ]
+    .map((e, i) => {
+      const emi = ((rzpDetails.amount / 100) * (e.rate / 100 / 12))
+                    / (1 - (1 + e.rate / 100 / 12) ** -e.months);
+      return `
                   <label style="
                     display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.04);
                     border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 16px;
                     cursor:pointer;transition:all 0.18s;
                   " class="pgw-emi-row">
-                    <input type="radio" name="pgw-emi" value="${e.months}" ${i===0?'checked':''} style="accent-color:#38b17b;">
+                    <input type="radio" name="pgw-emi" value="${e.months}" ${i === 0 ? 'checked' : ''} style="accent-color:#38b17b;">
                     <div style="flex:1;">
                       <div style="font-size:0.88rem;font-weight:600;">${e.months} Months EMI</div>
                       <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${e.bank} Â· ${e.rate}% p.a.</div>
                     </div>
                     <div style="text-align:right;">
                       <div style="font-size:0.95rem;font-weight:700;color:#fbbf24;">₹${emi.toFixed(0)}/mo</div>
-                      <div style="font-size:0.7rem;color:#475569;">Total ₹${(emi*e.months).toFixed(0)}</div>
+                      <div style="font-size:0.7rem;color:#475569;">Total ₹${(emi * e.months).toFixed(0)}</div>
                     </div>
                   </label>
                 `;
-              }).join('')}
+    })
+    .join('')}
             </div>
 
             <div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.25);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem;color:#fbbf24;">
@@ -1626,15 +2363,25 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
               ${[
-                { icon:'fa-box-open',    text:'Order confirmed immediately' },
-                { icon:'fa-truck-fast',  text:'Delivered in 2â€“5 business days' },
-                { icon:'fa-hand-holding-dollar', text:'Pay only when you receive' },
-                { icon:'fa-rotate-left', text:'Easy return policy' },
-              ].map(f => `
+    { icon: 'fa-box-open', text: 'Order confirmed immediately' },
+    {
+      icon: 'fa-truck-fast',
+      text: 'Delivered in 2â€“5 business days',
+    },
+    {
+      icon: 'fa-hand-holding-dollar',
+      text: 'Pay only when you receive',
+    },
+    { icon: 'fa-rotate-left', text: 'Easy return policy' },
+  ]
+    .map(
+      (f) => `
                 <div style="display:flex;align-items:center;gap:10px;font-size:0.82rem;color:#94a3b8;">
                   <i class="fa-solid ${f.icon}" style="color:#38b17b;width:18px;text-align:center;"></i>${f.text}
                 </div>
-              `).join('')}
+              `,
+    )
+    .join('')}
             </div>
 
             <div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem;color:#fbbf24;">
@@ -1675,19 +2422,23 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
   // â”€â”€ TAB SWITCHING â”€â”€
   function switchTab(tabId) {
-    mockModal.querySelectorAll('.pgw-tab-btn').forEach(btn => {
+    mockModal.querySelectorAll('.pgw-tab-btn').forEach((btn) => {
       const active = btn.dataset.tab === tabId;
-      btn.style.background    = active ? 'rgba(56,177,123,0.12)' : 'transparent';
-      btn.style.borderLeft    = active ? '3px solid #38b17b'     : '3px solid transparent';
-      btn.style.color         = active ? '#38b17b'               : '#94a3b8';
+      btn.style.background = active ? 'rgba(56,177,123,0.12)' : 'transparent';
+      btn.style.borderLeft = active
+        ? '3px solid #38b17b'
+        : '3px solid transparent';
+      btn.style.color = active ? '#38b17b' : '#94a3b8';
       btn.querySelector('div').style.fontWeight = active ? '600' : '500';
     });
-    mockModal.querySelectorAll('.pgw-panel').forEach(p => p.style.display = 'none');
+    mockModal
+      .querySelectorAll('.pgw-panel')
+      .forEach((p) => (p.style.display = 'none'));
     const panel = document.getElementById(`pgw-panel-${tabId}`);
     if (panel) panel.style.display = 'block';
   }
 
-  mockModal.querySelectorAll('.pgw-tab-btn').forEach(btn => {
+  mockModal.querySelectorAll('.pgw-tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     btn.addEventListener('mouseenter', () => {
       if (!btn.classList.contains('active-tab')) btn.style.background = 'rgba(56,177,123,0.06)';
@@ -1699,9 +2450,9 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
   });
 
   // â”€â”€ UPI App buttons â”€â”€
-  mockModal.querySelectorAll('.pgw-upi-app-btn').forEach(btn => {
+  mockModal.querySelectorAll('.pgw-upi-app-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      mockModal.querySelectorAll('.pgw-upi-app-btn').forEach(b => {
+      mockModal.querySelectorAll('.pgw-upi-app-btn').forEach((b) => {
         b.style.border = '1px solid rgba(255,255,255,0.1)';
         b.style.background = 'rgba(255,255,255,0.04)';
       });
@@ -1711,21 +2462,23 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
   });
 
   // â”€â”€ UPI Verify â”€â”€
-  document.getElementById('pgw-upi-verify-btn')?.addEventListener('click', () => {
-    const upiId = document.getElementById('pgw-upi-id').value.trim();
-    if (upiId) {
-      const verified = document.getElementById('pgw-upi-verified');
-      if (verified) {
-        verified.style.display = 'block';
-        verified.innerHTML = `<i class="fa-solid fa-circle-check"></i> UPI ID verified â€” ${upiId}`;
+  document
+    .getElementById('pgw-upi-verify-btn')
+    ?.addEventListener('click', () => {
+      const upiId = document.getElementById('pgw-upi-id').value.trim();
+      if (upiId) {
+        const verified = document.getElementById('pgw-upi-verified');
+        if (verified) {
+          verified.style.display = 'block';
+          verified.innerHTML = `<i class="fa-solid fa-circle-check"></i> UPI ID verified â€” ${upiId}`;
+        }
       }
-    }
-  });
+    });
 
   // â”€â”€ Bank highlight â”€â”€
-  mockModal.querySelectorAll('.pgw-bank-btn').forEach(btn => {
+  mockModal.querySelectorAll('.pgw-bank-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      mockModal.querySelectorAll('.pgw-bank-btn').forEach(b => {
+      mockModal.querySelectorAll('.pgw-bank-btn').forEach((b) => {
         b.style.border = '1px solid rgba(255,255,255,0.1)';
         b.style.background = 'rgba(255,255,255,0.04)';
       });
@@ -1735,9 +2488,9 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
   });
 
   // â”€â”€ Wallet highlight â”€â”€
-  mockModal.querySelectorAll('.pgw-wallet-btn').forEach(btn => {
+  mockModal.querySelectorAll('.pgw-wallet-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      mockModal.querySelectorAll('.pgw-wallet-btn').forEach(b => {
+      mockModal.querySelectorAll('.pgw-wallet-btn').forEach((b) => {
         b.style.border = '1px solid rgba(255,255,255,0.1)';
         b.style.background = 'rgba(255,255,255,0.04)';
       });
@@ -1753,10 +2506,10 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
     // Show processing state
     const orig = btn.innerHTML;
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
     btn.disabled = true;
 
-    await new Promise(r => setTimeout(r, 1500)); // Simulate network delay
+    await new Promise((r) => setTimeout(r, 1500)); // Simulate network delay
 
     mockModal.remove();
     const mockPaymentId = `pay_mock_${Math.random().toString(36).substr(2, 9)}`;
@@ -1765,7 +2518,14 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
   }
 
   // â”€â”€ Wire all pay buttons â”€â”€
-  ['pgw-btn-pay-upi','pgw-btn-pay-card','pgw-btn-pay-netbank','pgw-btn-pay-wallet','pgw-btn-pay-emi','pgw-btn-pay-cod'].forEach(id => {
+  [
+    'pgw-btn-pay-upi',
+    'pgw-btn-pay-card',
+    'pgw-btn-pay-netbank',
+    'pgw-btn-pay-wallet',
+    'pgw-btn-pay-emi',
+    'pgw-btn-pay-cod',
+  ].forEach((id) => {
     document.getElementById(id)?.addEventListener('click', () => doPayment(id));
   });
 
@@ -1776,7 +2536,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
   });
 
   // â”€â”€ Outside click to cancel â”€â”€
-  mockModal.addEventListener('click', e => {
+  mockModal.addEventListener('click', (e) => {
     if (e.target === mockModal) {
       mockModal.remove();
       showSuccessToast('âš ï¸ Payment cancelled. Your cart is still saved.');
@@ -1792,8 +2552,8 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       body: JSON.stringify({
         razorpay_order_id: orderId,
         razorpay_payment_id: paymentId,
-        razorpay_signature: signature
-      })
+        razorpay_signature: signature,
+      }),
     });
 
     const data = await res.json();
@@ -1814,19 +2574,32 @@ async function completeOrderPayment(orderId, paymentId, signature) {
 
       // Show success notification
       showSuccessToast('ðŸŽ‰ Order placed successfully! Payment confirmed.');
-      
+
+      // Notify other tabs (admin) that orders have been updated
+      try {
+        const bcOrders = new BroadcastChannel('spore-orders');
+        bcOrders.postMessage({ type: 'orders:updated', orderId: data.order && data.order.id ? data.order.id : null });
+      } catch (e) {
+        // ignore if BroadcastChannel isn't available
+      }
+
       // Admin and Growers can track orders; Buyers go back to shop
-      if (state.user && (state.user.role === 'admin' || state.user.role === 'grower')) {
+      if (
+        state.user
+        && (state.user.role === 'admin' || state.user.role === 'grower')
+      ) {
         window.location.hash = `#track-${data.order.id}`;
       } else {
         window.location.hash = '#shop';
       }
     } else {
-      alert('Payment verification failed: ' + (data.error || 'Unknown error'));
+      showErrorToast(data.error || 'Payment verification failed.');
     }
   } catch (err) {
-    console.error("Verification error:", err);
-    alert("Connection error occurred while confirming payment status.");
+    showErrorToast(
+      getApiErrorMessage(err)
+        || 'Connection error occurred while confirming payment status.',
+    );
   }
 }
 
@@ -1838,7 +2611,7 @@ async function fetchOrders() {
 
   try {
     const res = await fetch(`${API_BASE}/orders/my-orders`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
+      headers: { Authorization: `Bearer ${state.token}` },
     });
 
     if (res.ok) {
@@ -1846,27 +2619,35 @@ async function fetchOrders() {
       renderOrdersSidebar();
     }
   } catch (err) {
-    console.error("Fetch orders failed:", err);
+    showErrorToast(getApiErrorMessage(err));
   }
 }
 
 function renderOrdersSidebar() {
   const list = document.getElementById('orders-list');
-  
+
   if (!state.orders.length) {
-    list.innerHTML = `<p class="no-orders">No active runs found. Purchase cultures or spawn to activate incubator tracking!</p>`;
+    list.innerHTML = '<p class="no-orders">No active runs found. Purchase cultures or spawn to activate incubator tracking!</p>';
     return;
   }
 
-  const sorted = [...state.orders].sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  const sorted = [...state.orders].sort(
+    (a, b) => new Date(b.created_at) - new Date(a.created_at),
+  );
 
-  list.innerHTML = sorted.map(order => {
-    const activeClass = state.activeTrackingId === order.id ? 'active' : '';
-    const dateFormatted = new Date(order.created_at).toLocaleDateString('en-IN', {
-      day: 'numeric', month: 'short', year: 'numeric'
-    });
-    
-    return `
+  list.innerHTML = sorted
+    .map((order) => {
+      const activeClass = state.activeTrackingId === order.id ? 'active' : '';
+      const dateFormatted = new Date(order.created_at).toLocaleDateString(
+        'en-IN',
+        {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        },
+      );
+
+      return `
       <div class="order-sidebar-card ${activeClass}" data-id="${order.id}">
         <div class="order-card-header">
           <span class="order-id-lbl">RUN-${order.id.substring(0, 8).toUpperCase()}</span>
@@ -1874,11 +2655,13 @@ function renderOrdersSidebar() {
         </div>
         <div class="order-card-date">${dateFormatted}</div>
         <div class="order-card-total">₹${order.total.toFixed(2)} (${order.items.length} culture${order.items.length > 1 ? 's' : ''})</div>
+        ${order.delivery_status === 'cancelled' && order.cancel_reason ? `<div class="order-card-reason">Reason: ${order.cancel_reason}</div>` : ''}
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
-  document.querySelectorAll('.order-sidebar-card').forEach(card => {
+  document.querySelectorAll('.order-sidebar-card').forEach((card) => {
     card.addEventListener('click', () => {
       const id = card.getAttribute('data-id');
       window.location.hash = `#track-${id}`;
@@ -1891,7 +2674,7 @@ function startTrackingPoll(orderId) {
 
   const panelEmpty = document.getElementById('tracking-details-panel');
   const viewActive = document.getElementById('tracker-active-view');
-  
+
   panelEmpty.classList.remove('empty');
   viewActive.classList.remove('hidden');
 
@@ -1905,15 +2688,15 @@ function startTrackingPoll(orderId) {
 async function pollTrackingData(orderId) {
   try {
     const res = await fetch(`${API_BASE}/orders/${orderId}/track`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
+      headers: { Authorization: `Bearer ${state.token}` },
     });
 
-    if (!res.ok) throw new Error("Order details unavailable");
+    if (!res.ok) throw new Error('Order details unavailable');
 
     const track = await res.json();
     renderTrackingDetails(track);
   } catch (err) {
-    console.error("Poll tracking error:", err);
+    console.error('Poll tracking error:', err);
     document.getElementById('tracker-active-view').innerHTML = `
       <p style="color:var(--color-danger); text-align:center; padding: 2rem;">Cultivation logs could not be loaded.</p>
     `;
@@ -1923,17 +2706,20 @@ async function pollTrackingData(orderId) {
 function renderTrackingDetails(track) {
   const container = document.getElementById('tracker-active-view');
   const dateStr = new Date(track.timestamp).toLocaleTimeString();
-  
-  const timelineHTML = track.timeline.map(checkpoint => {
-    const doneClass = checkpoint.done ? 'done' : '';
-    const icon = checkpoint.done ? '<i class="fa-solid fa-circle-check" style="color:var(--color-primary);"></i>' : '<i class="fa-regular fa-circle" style="color:var(--color-text-muted);"></i>';
-    
-    let timeLabel = '';
-    if (checkpoint.time && checkpoint.done) {
-      timeLabel = `<span style="font-size:0.7rem; color:var(--color-text-muted); margin-left: auto;">${new Date(checkpoint.time).toLocaleTimeString()}</span>`;
-    }
-    
-    return `
+
+  const timelineHTML = track.timeline
+    .map((checkpoint) => {
+      const doneClass = checkpoint.done ? 'done' : '';
+      const icon = checkpoint.done
+        ? '<i class="fa-solid fa-circle-check" style="color:var(--color-primary);"></i>'
+        : '<i class="fa-regular fa-circle" style="color:var(--color-text-muted);"></i>';
+
+      let timeLabel = '';
+      if (checkpoint.time && checkpoint.done) {
+        timeLabel = `<span style="font-size:0.7rem; color:var(--color-text-muted); margin-left: auto;">${new Date(checkpoint.time).toLocaleTimeString()}</span>`;
+      }
+
+      return `
       <div class="checkpoint ${doneClass}">
         <span class="checkpoint-node"></span>
         <div style="display:flex; align-items:center; gap: 0.5rem; width:100%;">
@@ -1943,15 +2729,19 @@ function renderTrackingDetails(track) {
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
-  const canCancel = !['shipped', 'delivered', 'cancelled'].includes(track.deliveryStatus);
+  const canCancel = !['shipped', 'delivered', 'cancelled'].includes(
+    track.deliveryStatus,
+  );
+  const cancelReason = track.cancelReason || '';
 
   container.innerHTML = `
     <div class="tracker-details-header">
       <div>
         <h3>Mycelium Incubator Log</h3>
-        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0,8).toUpperCase()} | Stage: <span class="order-status-badge ${track.deliveryStatus}">${track.deliveryStatus}</span></p>
+        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0, 8).toUpperCase()} | Stage: <span class="order-status-badge ${track.deliveryStatus}">${track.deliveryStatus}</span></p>
       </div>
       <span style="font-size:0.75rem; color:var(--color-text-muted);">Sync time: ${dateStr}</span>
     </div>
@@ -1987,6 +2777,34 @@ function renderTrackingDetails(track) {
       ${timelineHTML}
     </div>
 
+    <div class="tracker-cancel-section">
+      ${
+  track.deliveryStatus === 'cancelled'
+    ? `
+        <div class="tracker-cancelled-note">
+          <strong>Cancellation reason:</strong> ${cancelReason || 'Not provided'}
+        </div>
+      `
+    : `
+        <div class="input-field">
+          <label for="cancel-reason-select">Reason for cancellation</label>
+          <select id="cancel-reason-select">
+            <option value="">Select reason</option>
+            <option value="Delivery cost is high">Delivery cost is high</option>
+            <option value="Not interested in product">Not interested in product</option>
+            <option value="Not available on the expected delivery date">Not available on the expected delivery date</option>
+            <option value="Taking too much time to deliver">Taking too much time to deliver</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="input-field hidden" id="cancel-reason-other-wrap">
+          <label for="cancel-reason-other">Please specify your reason</label>
+          <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
+        </div>
+      `
+}
+    </div>
+
     <div class="tracker-details-actions">
       <button class="btn btn-secondary" onclick="window.viewInvoice('${track.orderId}')">
         <i class="fa-solid fa-file-invoice-dollar"></i> Generate Tax Invoice
@@ -1998,7 +2816,7 @@ function renderTrackingDetails(track) {
     </div>
   `;
 
-  document.querySelectorAll('.order-sidebar-card').forEach(card => {
+  document.querySelectorAll('.order-sidebar-card').forEach((card) => {
     if (card.getAttribute('data-id') === track.orderId) {
       card.classList.add('active');
       const badge = card.querySelector('.order-status-badge');
@@ -2010,19 +2828,51 @@ function renderTrackingDetails(track) {
       card.classList.remove('active');
     }
   });
+
+  const reasonSelect = document.getElementById('cancel-reason-select');
+  const otherWrap = document.getElementById('cancel-reason-other-wrap');
+  if (reasonSelect && otherWrap) {
+    reasonSelect.addEventListener('change', () => {
+      if (reasonSelect.value === 'Other') {
+        otherWrap.classList.remove('hidden');
+      } else {
+        otherWrap.classList.add('hidden');
+      }
+    });
+  }
 }
 
 async function cancelOrder(orderId) {
-  const confirmation = confirm('Cancel this order? This will stop processing if it has not shipped yet.');
+  const confirmation = confirm(
+    'Cancel this order? This will stop processing if it has not shipped yet.',
+  );
   if (!confirmation) return;
 
   try {
+    const reasonSelect = document.getElementById('cancel-reason-select');
+    const otherInput = document.getElementById('cancel-reason-other');
+    let reason = reasonSelect ? reasonSelect.value : '';
+
+    if (!reason) {
+      showErrorToast('Please choose a cancellation reason.');
+      return;
+    }
+
+    if (reason === 'Other') {
+      reason = otherInput?.value.trim() || '';
+      if (!reason) {
+        showErrorToast('Please enter your cancellation reason.');
+        return;
+      }
+    }
+
     const res = await fetch(`${API_BASE}/orders/${orderId}/cancel`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.token}`
-      }
+        Authorization: `Bearer ${state.token}`,
+      },
+      body: JSON.stringify({ reason }),
     });
 
     if (!res.ok) {
@@ -2030,22 +2880,21 @@ async function cancelOrder(orderId) {
       throw new Error(error.error || 'Unable to cancel order');
     }
 
-    showSuccessToast('✅ Order cancellation request submitted. Refreshing tracking...');
+    showSuccessToast(
+      '✅ Order cancellation request submitted. Refreshing tracking...',
+    );
     await pollTrackingData(orderId);
   } catch (err) {
-    console.error('Cancel order failed:', err);
-    if (typeof showErrorToast === 'function') {
-      showErrorToast('Unable to cancel order at this time.');
-    } else {
-      alert('Unable to cancel order at this time.');
-    }
+    showErrorToast(
+      getApiErrorMessage(err) || 'Unable to cancel order at this time.',
+    );
   }
 }
 
 async function viewInvoice(orderId) {
   const modal = document.getElementById('invoice-modal');
   const paper = document.getElementById('invoice-paper');
-  
+
   paper.innerHTML = `
     <div style="display:flex; justify-content:center; align-items:center; padding: 4rem;">
       <i class="fa-solid fa-spinner fa-spin loader-icon"></i>
@@ -2055,33 +2904,36 @@ async function viewInvoice(orderId) {
 
   try {
     const res = await fetch(`${API_BASE}/orders/${orderId}/invoice`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
+      headers: { Authorization: `Bearer ${state.token}` },
     });
 
-    if (!res.ok) throw new Error("Invoice loading failed");
+    if (!res.ok) throw new Error('Invoice loading failed');
 
     const inv = await res.json();
     renderInvoicePaper(inv);
   } catch (err) {
-    paper.innerHTML = `<p style="color:var(--color-danger); text-align:center; padding:2rem;">Invoice could not be fetched.</p>`;
+    paper.innerHTML = '<p style="color:var(--color-danger); text-align:center; padding:2rem;">Invoice could not be fetched.</p>';
   }
 }
 
 function renderInvoicePaper(inv) {
   const paper = document.getElementById('invoice-paper');
   const dateFormatted = new Date(inv.invoiceDate).toLocaleDateString('en-IN', {
-    day: 'numeric', month: 'long', year: 'numeric'
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
   });
 
-  const itemsRows = inv.items.map((item, idx) => {
-    const rate = item.price;
-    const qty = item.quantity;
-    const lineDiscount = item.discountAmount;
-    const taxableValue = (rate * qty) - lineDiscount;
-    const cgst = item.gstAmount / 2;
-    const sgst = item.gstAmount / 2;
-    
-    return `
+  const itemsRows = inv.items
+    .map((item, idx) => {
+      const rate = item.price;
+      const qty = item.quantity;
+      const lineDiscount = item.discountAmount;
+      const taxableValue = rate * qty - lineDiscount;
+      const cgst = item.gstAmount / 2;
+      const sgst = item.gstAmount / 2;
+
+      return `
       <tr>
         <td class="text-center">${idx + 1}</td>
         <td><strong>${item.name}</strong><br><span style="font-size:0.75rem; color:#6c757d;">GST Rate: ${item.gstRate}%</span></td>
@@ -2093,14 +2945,16 @@ function renderInvoicePaper(inv) {
         <td class="text-right">₹${item.total.toFixed(2)}</td>
       </tr>
     `;
-  }).join('');
+    })
+    .join('');
 
   const slabs = ['slab5', 'slab12', 'slab18'];
-  const gstLedgerHTML = slabs.map(slab => {
-    const rates = { slab5: '5%', slab12: '12%', slab18: '18%' };
-    const data = inv.gstSummary[slab];
-    if (data.taxable === 0) return '';
-    return `
+  const gstLedgerHTML = slabs
+    .map((slab) => {
+      const rates = { slab5: '5%', slab12: '12%', slab18: '18%' };
+      const data = inv.gstSummary[slab];
+      if (data.taxable === 0) return '';
+      return `
       <tr>
         <td>GST @ ${rates[slab]}</td>
         <td class="text-right">₹${data.taxable.toFixed(2)}</td>
@@ -2109,9 +2963,13 @@ function renderInvoicePaper(inv) {
         <td class="text-right">₹${data.totalGst.toFixed(2)}</td>
       </tr>
     `;
-  }).filter(row => row !== '').join('');
+    })
+    .filter((row) => row !== '')
+    .join('');
 
-  const activePromoCode = inv.totals.promoCode ? `<span style="font-size:0.8rem; font-weight:600; color:#2a9d8f;">(Code ${inv.totals.promoCode} Applied)</span>` : '';
+  const activePromoCode = inv.totals.promoCode
+    ? `<span style="font-size:0.8rem; font-weight:600; color:#2a9d8f;">(Code ${inv.totals.promoCode} Applied)</span>`
+    : '';
 
   paper.innerHTML = `
     <div class="invoice-header-grid">
@@ -2213,20 +3071,22 @@ function renderInvoicePaper(inv) {
 
   const shareText = `Hello Sporekart, check my paid invoice ${inv.invoiceNumber} for ₹${inv.totals.total.toFixed(2)}. I'm tracking my spawn growth at http://localhost:3000/#track-${inv.invoiceNumber.split('-')[1].toLowerCase()}`;
   const whatsappUrl = `https://wa.me/${inv.buyer.phone || '918049913822'}?text=${encodeURIComponent(shareText)}`;
-  
+
   const waBtn = document.getElementById('btn-whatsapp-invoice');
   waBtn.onclick = () => window.open(whatsappUrl, '_blank');
 }
 
 function whatsappQuickMessage(orderId) {
-  const order = state.orders.find(o => o.id === orderId);
+  const order = state.orders.find((o) => o.id === orderId);
   if (!order) return;
 
-  const orderNum = `RUN-${order.id.substring(0,8).toUpperCase()}`;
-  const orderItemsStr = order.items.map(i => `${i.name} (x${i.quantity})`).join(', ');
-  
+  const orderNum = `RUN-${order.id.substring(0, 8).toUpperCase()}`;
+  const orderItemsStr = order.items
+    .map((i) => `${i.name} (x${i.quantity})`)
+    .join(', ');
+
   const text = `Hi, I am tracking my Sporekart Run ${orderNum} [${orderItemsStr}]. Mycelium incubator status is: ${order.delivery_status.toUpperCase()}. Live updates at: http://localhost:3000/#track-${order.id}`;
-  
+
   const userWhatsapp = state.user ? state.user.whatsappNumber : '';
   const finalWhatsappNumber = userWhatsapp || '918049913822';
 
@@ -2243,20 +3103,24 @@ async function fetchCategories() {
   try {
     const response = await fetch(`${API_BASE}/categories`);
     const categories = await response.json();
-    
+
     _adminCategories = categories;
-    
+
     // Update shop category nav
     const categoryNav = document.getElementById('category-nav');
     if (categoryNav) {
-      categoryNav.innerHTML = categories.map(cat => 
-        `<button class="cat-btn" data-category="${cat.id}">${cat.name}</button>`
-      ).join('');
-      
+      categoryNav.innerHTML = categories
+        .map(
+          (cat) => `<button class="cat-btn" data-category="${cat.id}">${cat.name}</button>`,
+        )
+        .join('');
+
       // Re-attach event listeners for category filtering
-      document.querySelectorAll('.cat-btn').forEach(btn => {
+      document.querySelectorAll('.cat-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-          document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+          document
+            .querySelectorAll('.cat-btn')
+            .forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
           state.activeCategory = btn.dataset.category;
           filterProducts(btn.dataset.category);
@@ -2268,18 +3132,20 @@ async function fetchCategories() {
     // Populate desktop dropdown menu for Shop by Category
     populateCategoryDropdown(categories);
   } catch (error) {
-    console.error('Failed to fetch categories:', error);
+    showErrorToast(getApiErrorMessage(error));
   }
 }
 
 function populateCategoryDropdown(categories) {
   const dd = document.getElementById('cat-dropdown-menu');
   if (!dd) return;
-  dd.innerHTML = categories.map(cat => {
-    return `<a href="#" class="cat-dd-item" data-category="${cat.id}"><i class="fa-solid fa-seedling"></i><span>${cat.name}</span></a>`;
-  }).join('');
+  dd.innerHTML = categories
+    .map(
+      (cat) => `<a href="#" class="cat-dd-item" data-category="${cat.id}"><i class="fa-solid fa-seedling"></i><span>${cat.name}</span></a>`,
+    )
+    .join('');
 
-  dd.querySelectorAll('.cat-dd-item').forEach(a => {
+  dd.querySelectorAll('.cat-dd-item').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const cat = a.getAttribute('data-category');
@@ -2302,19 +3168,25 @@ function renderMobileCategoryNav(categories) {
       <span>All</span>
     </button>
   `;
-  const catItems = categories.map(cat => `
+  const catItems = categories
+    .map(
+      (cat) => `
     <button class="mob-cat-btn" data-category="${cat.id}" id="mob-cat-${cat.id}">
       <i class="fa-solid fa-seedling"></i>
       <span>${cat.name}</span>
     </button>
-  `).join('');
+  `,
+    )
+    .join('');
 
   inner.innerHTML = allItem + catItems;
 
   // Attach click events
-  inner.querySelectorAll('.mob-cat-btn').forEach(btn => {
+  inner.querySelectorAll('.mob-cat-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      inner.querySelectorAll('.mob-cat-btn').forEach(b => b.classList.remove('active'));
+      inner
+        .querySelectorAll('.mob-cat-btn')
+        .forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       navigateToCategory(btn.getAttribute('data-category'));
     });
@@ -2333,14 +3205,18 @@ function populateCategorySelects(categories) {
       });
     }
     // Remove existing dynamic category buttons (keep 'all')
-    filtersRow.querySelectorAll('.cat-btn:not([data-category="all"])').forEach(b => b.remove());
-    categories.forEach(cat => {
+    filtersRow
+      .querySelectorAll('.cat-btn:not([data-category="all"])')
+      .forEach((b) => b.remove());
+    categories.forEach((cat) => {
       const btn = document.createElement('button');
       btn.className = 'cat-btn';
       btn.setAttribute('data-category', cat.id);
       btn.innerHTML = `<i class="fa-solid fa-seedling"></i> ${cat.name}`;
       btn.addEventListener('click', () => {
-        filtersRow.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+        filtersRow
+          .querySelectorAll('.cat-btn')
+          .forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         state.activeCategory = cat.id;
         filterProducts();
@@ -2355,9 +3231,14 @@ function initThreeJS() {
   if (!canvas) return;
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000,
+  );
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
-  
+
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x000000, 0.1);
   camera.position.z = 3;
@@ -2387,7 +3268,7 @@ function initThreeJS() {
     transparent: true,
     opacity: 0.8,
     blending: THREE.AdditiveBlending,
-    depthWrite: false
+    depthWrite: false,
   });
 
   const sporeCloud1 = new THREE.Points(geometry, material);
@@ -2417,7 +3298,7 @@ function initThreeJS() {
     transparent: true,
     opacity: 0.85,
     blending: THREE.AdditiveBlending,
-    depthWrite: false
+    depthWrite: false,
   });
 
   const sporeCloud2 = new THREE.Points(geometry2, material2);
@@ -2429,7 +3310,7 @@ function initThreeJS() {
     color: 0x38b17b,
     wireframe: true,
     transparent: true,
-    opacity: 0.25
+    opacity: 0.25,
   });
   const nucleus = new THREE.Mesh(coreGeo, coreMat);
   scene.add(nucleus);
@@ -2437,7 +3318,7 @@ function initThreeJS() {
   // Interactive Drag Control
   let isDragging = false;
   let previousMousePosition = { x: 0, y: 0 };
-  let dragRotation = { x: 0, y: 0 };
+  const dragRotation = { x: 0, y: 0 };
 
   const handlePointerDown = (e) => {
     isDragging = true;
@@ -2448,13 +3329,13 @@ function initThreeJS() {
 
   const handlePointerMove = (e) => {
     if (!isDragging) return;
-    
+
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
     const deltaMove = {
       x: clientX - previousMousePosition.x,
-      y: clientY - previousMousePosition.y
+      y: clientY - previousMousePosition.y,
     };
 
     dragRotation.y += deltaMove.x * 0.007;
@@ -2478,15 +3359,19 @@ function initThreeJS() {
 
   // Scroll linkage Parallax
   let scrollTargetY = 0;
-  window.addEventListener('scroll', () => {
-    scrollTargetY = window.scrollY;
-  }, { passive: true });
+  window.addEventListener(
+    'scroll',
+    () => {
+      scrollTargetY = window.scrollY;
+    },
+    { passive: true },
+  );
 
   // Window Resize
   const handleResize = () => {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    
+
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
 
@@ -2532,17 +3417,17 @@ function initScrollReveal() {
     document.querySelector('.category-filters-row'),
     document.getElementById('calculator-anchor'),
     document.querySelector('.tracker-layout'),
-    document.querySelector('.calc-header')
-  ].filter(el => el !== null);
+    document.querySelector('.calc-header'),
+  ].filter((el) => el !== null);
 
   const observerOptions = {
     root: null,
     rootMargin: '0px',
-    threshold: 0.1
+    threshold: 0.1,
   };
 
   const observer = new IntersectionObserver((entries, obs) => {
-    entries.forEach(entry => {
+    entries.forEach((entry) => {
       if (entry.isIntersecting) {
         entry.target.classList.add('revealed');
         obs.unobserve(entry.target);
@@ -2550,26 +3435,24 @@ function initScrollReveal() {
     });
   }, observerOptions);
 
-  targets.forEach(target => {
+  targets.forEach((target) => {
     target.classList.add('reveal-element');
     observer.observe(target);
   });
 }
 
 // Placeholder for showSuccessToast (if not defined elsewhere)
-function showSuccessToast(message) {
-  console.log('âœ“ ' + message);
-  // In production, this would show a toast notification
-}
+// Use shared toast helpers from utils/notify.js
 
 // Window functions for global access
 function copyInvoiceLink(token) {
   if (!token) return;
   const invoiceUrl = `${window.location.origin}/api/orders/share/${token}`;
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(invoiceUrl)
-      .then(() => alert('Invoice share link copied to clipboard.'))
-      .catch(() => alert('Could not copy invoice link.'));
+    navigator.clipboard
+      .writeText(invoiceUrl)
+      .then(() => showSuccessToast('Invoice share link copied to clipboard.'))
+      .catch(() => showErrorToast('Could not copy invoice link.'));
   } else {
     const textarea = document.createElement('textarea');
     textarea.value = invoiceUrl;
@@ -2577,10 +3460,11 @@ function copyInvoiceLink(token) {
     textarea.select();
     document.execCommand('copy');
     textarea.remove();
-    alert('Invoice share link copied to clipboard.');
+    showSuccessToast('Invoice share link copied to clipboard.');
   }
 }
 
 window.viewInvoice = viewInvoice;
 window.whatsappQuickMessage = whatsappQuickMessage;
 window.copyInvoiceLink = copyInvoiceLink;
+window.cancelOrder = cancelOrder;

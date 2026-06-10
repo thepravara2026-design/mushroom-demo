@@ -25,14 +25,20 @@ test('findById returns seeded buyer user', async () => {
 
 test('create, update, remove lifecycle', async () => {
   const userRepo = require('../src/repositories/userRepository');
-  const payload = { id: 'test-user-1', email: 'test1@example.com', full_name: 'Test One' };
+  const payload = {
+    id: 'test-user-1',
+    email: 'test1@example.com',
+    full_name: 'Test One',
+  };
 
   const { data: created, error: createErr } = await userRepo.create(payload);
   expect(createErr).toBeNull();
   expect(created).toBeDefined();
   expect(created.email).toBe(payload.email);
 
-  const { data: updated, error: upErr } = await userRepo.update('test-user-1', { full_name: 'Test One Updated' });
+  const { data: updated, error: upErr } = await userRepo.update('test-user-1', {
+    full_name: 'Test One Updated',
+  });
   expect(upErr).toBeNull();
   expect(updated.full_name).toBe('Test One Updated');
 

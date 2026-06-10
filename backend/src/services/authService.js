@@ -1,7 +1,7 @@
-const db = require('../config/db');
-const userRepo = require('../repositories/userRepository');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const db = require('../config/db');
+const userRepo = require('../repositories/userRepository');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
 
@@ -9,32 +9,31 @@ const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
 const otpStore = new Map();
 
 class AuthService {
-  
   /**
    * Generates a 6-digit OTP and simulates sending it via Email/SMS.
    */
   async generateAndSendOTP(email, role, fullName) {
     const emailLower = email.toLowerCase();
-    
+
     // For simulation, always use 123456 as the OTP, or generate a random one
     // We'll generate a random one and log it, but also accept 123456 as a backdoor for easy testing
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
 
     otpStore.set(emailLower, {
       otp: generatedOtp,
       expiresAt,
       role: role || 'buyer',
-      fullName: fullName || 'Mushroom Enthusiast'
+      fullName: fullName || 'Mushroom Enthusiast',
     });
 
-    console.log(`\n======================================================`);
-    console.log(`✉️  SIMULATED EMAIL/SMS NOTIFICATION`);
+    console.log('\n======================================================');
+    console.log('✉️  SIMULATED EMAIL/SMS NOTIFICATION');
     console.log(`To: ${emailLower}`);
     console.log(`Message: Your Sporekart login OTP is ${generatedOtp}.`);
-    console.log(`(For testing, '123456' will also always work).`);
-    console.log(`======================================================\n`);
+    console.log("(For testing, '123456' will also always work).");
+    console.log('======================================================\n');
 
     return { success: true, message: `OTP sent successfully to ${emailLower}` };
   }
@@ -47,7 +46,9 @@ class AuthService {
     const record = otpStore.get(emailLower);
 
     if (!record) {
-      throw new Error('No OTP request found for this email. Please request a new OTP.');
+      throw new Error(
+        'No OTP request found for this email. Please request a new OTP.',
+      );
     }
 
     if (Date.now() > record.expiresAt) {
@@ -75,7 +76,7 @@ class AuthService {
         email: emailLower,
         full_name: record.fullName,
         whatsapp_number: whatsappNumber || '',
-        role: record.role
+        role: record.role,
       };
       if (loginMethod) insertPayload.login_method = loginMethod;
 
@@ -98,9 +99,9 @@ class AuthService {
 
     // Generate JWT token
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role }, 
-      JWT_SECRET, 
-      { expiresIn: '7d' }
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' },
     );
 
     return {
@@ -110,8 +111,8 @@ class AuthService {
         email: user.email,
         fullName: user.full_name,
         whatsappNumber: user.whatsapp_number || '',
-        role: user.role
-      }
+        role: user.role,
+      },
     };
   }
 
@@ -131,7 +132,11 @@ class AuthService {
       throw err;
     }
 
-    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' },
+    );
 
     return {
       token,
@@ -139,13 +144,17 @@ class AuthService {
         id: user.id,
         email: user.email,
         fullName: user.full_name,
-        role: user.role
-      }
+        role: user.role,
+      },
     };
   }
 
   async getUserById(userId) {
-    const { data: user, error } = await db.from('users').select('*').eq('id', userId).single();
+    const { data: user, error } = await db
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
     if (error || !user) {
       const err = new Error('User not found.');
       err.status = 404;
@@ -170,13 +179,25 @@ class AuthService {
     if (typeof updates.defaultAddress === 'string') payload.default_address = updates.defaultAddress.trim();
     if (typeof updates.defaultPincode === 'string') payload.default_pincode = updates.defaultPincode.trim();
 
-    if (current.login_method === 'phone' && payload.whatsapp_number && payload.whatsapp_number !== current.whatsapp_number) {
-      const err = new Error('Phone number cannot be changed for phone-verified accounts.');
+    if (
+      current.login_method === 'phone'
+      && payload.whatsapp_number
+      && payload.whatsapp_number !== current.whatsapp_number
+    ) {
+      const err = new Error(
+        'Phone number cannot be changed for phone-verified accounts.',
+      );
       err.status = 400;
       throw err;
     }
-    if (current.login_method === 'google' && payload.email && payload.email !== current.email) {
-      const err = new Error('Email cannot be changed for accounts created via Google sign-in.');
+    if (
+      current.login_method === 'google'
+      && payload.email
+      && payload.email !== current.email
+    ) {
+      const err = new Error(
+        'Email cannot be changed for accounts created via Google sign-in.',
+      );
       err.status = 400;
       throw err;
     }
@@ -187,7 +208,10 @@ class AuthService {
       throw err;
     }
 
-    const { data: updated, error: upErr } = await userRepo.update(userId, payload);
+    const { data: updated, error: upErr } = await userRepo.update(
+      userId,
+      payload,
+    );
     if (upErr) {
       const err = new Error(upErr.message);
       err.status = 500;
@@ -201,7 +225,6 @@ class AuthService {
     if (reason) console.log(`Account deletion requested for ${userId}: ${reason}`);
     return { success: true };
   }
-
 }
 
 module.exports = new AuthService();

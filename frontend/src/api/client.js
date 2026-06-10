@@ -1,1 +1,6 @@
-export { fetchWithAuth, API_BASE } from './http.js';
+export {
+  fetchWithAuth,
+  API_BASE,
+
+  getApiErrorMessage,
+} from './http.js';

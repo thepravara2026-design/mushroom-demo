@@ -1,13 +1,17 @@
 import { state, saveAuth, clearAuth } from './utils/state.js';
 import { authApi } from './api/authApi.js';
-import { API_BASE, fetchWithAuth } from './api/client.js';
+import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
+import { trainingApi } from './api/trainingApi.js';
+import { showErrorToast, showSuccessToast } from './utils/notify.js';
 
 window.state = state;
 
 let _adminProducts = [];
 let _adminCategories = [];
+let _adminTrainings = [];
 let pendingCategoryEditId = null;
 let adminOrdersCache = [];
+let productImagePreviewValid = false;
 
 const loginPanel = document.getElementById('admin-login-panel');
 const dashboard = document.getElementById('admin-dashboard');
@@ -26,6 +30,15 @@ const saveCatBtn = document.getElementById('btn-admin-save-cat');
 const productForm = document.getElementById('form-admin-add-product');
 const productIdDisplay = document.getElementById('admin-prod-id-display');
 const productImageUrl = document.getElementById('admin-prod-image-url');
+// Training DOM elements
+const trainForm = document.getElementById('form-admin-add-training');
+const trainEditId = document.getElementById('admin-train-edit-id');
+const trainTitle = document.getElementById('admin-train-title');
+const trainCategory = document.getElementById('admin-train-category');
+const trainDesc = document.getElementById('admin-train-desc');
+const trainImage = document.getElementById('admin-train-image');
+const trainContent = document.getElementById('admin-train-content');
+const trainListWrap = document.getElementById('admin-trainings-list');
 const productImageBrowse = document.getElementById('admin-prod-image-browse');
 const productImageFile = document.getElementById('admin-prod-image-file');
 const categoryUidInput = document.getElementById('admin-cat-uid');
@@ -34,9 +47,73 @@ const categoryImageBrowse = document.getElementById('admin-cat-image-browse');
 const categoryImageFile = document.getElementById('admin-cat-image-file');
 const categoryImagePreview = document.getElementById('admin-cat-image-preview');
 const shippingChargeInput = document.getElementById('admin-shipping-charge');
-const saveShippingChargeBtn = document.getElementById('admin-save-shipping-charge');
+const saveShippingChargeBtn = document.getElementById(
+  'admin-save-shipping-charge',
+);
 let bcCategories = null;
-try { bcCategories = new BroadcastChannel('spore-categories'); } catch(e) { bcCategories = null; }
+try {
+  bcCategories = new BroadcastChannel('spore-categories');
+} catch (e) {
+  bcCategories = null;
+}
+let bcProducts = null;
+try {
+  bcProducts = new BroadcastChannel('spore-products');
+} catch (e) {
+  bcProducts = null;
+}
+let bcOrders = null;
+try {
+  bcOrders = new BroadcastChannel('spore-orders');
+  bcOrders.addEventListener('message', (ev) => {
+    if (ev?.data?.type === 'orders:updated') {
+      fetchAdminOrders();
+      if (ev?.data?.orderId) {
+        showSuccessToast(`Order ${ev.data.orderId} updated`);
+      } else {
+        showSuccessToast('Order update received');
+      }
+    }
+  });
+} catch (e) {
+  bcOrders = null;
+}
+
+// Connect to server-sent events for cross-browser order notifications
+let adminEs = null;
+
+function initAdminSse() {
+  try {
+    if (!state || !state.token) return;
+    if (adminEs) return; // already initialized
+    const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
+    adminEs = new EventSource(esUrl);
+    adminEs.addEventListener('order:updated', (ev) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        const order = payload.order;
+        if (state.user && state.user.role === 'admin') {
+          fetchAdminOrders();
+          if (order) {
+            const status = order.delivery_status || order.status || 'updated';
+            showSuccessToast(`Order ${order.id} updated (${status})`);
+          } else {
+            showSuccessToast('Order update received');
+          }
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    });
+    adminEs.addEventListener('error', () => {
+      // noop; BroadcastChannel remains as fallback
+    });
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+window.addEventListener('auth:changed', () => initAdminSse());
 
 function showLoginPanel() {
   loginPanel.classList.remove('hidden');
@@ -52,12 +129,25 @@ function showDashboard() {
   }
 
   fetchDashboardData().then(() => {
+    // Initialize SSE once dashboard data and user context are ready
+    initAdminSse();
+
     if (pendingCategoryEditId) {
       activateAdminTab('categories');
       adminEditCategory(pendingCategoryEditId);
       pendingCategoryEditId = null;
     }
   });
+}
+
+async function fetchDashboardData() {
+  // Load core admin data in parallel
+  await Promise.all([
+    fetchAdminInventory(),
+    fetchAdminOrders(),
+    fetchAdminCategories(),
+    fetchAdminTrainings().catch(() => {}),
+  ]);
 }
 
 function renderAuthError(message) {
@@ -69,227 +159,23 @@ function clearAuthError() {
   loginError.textContent = '';
   loginError.classList.add('hidden');
 }
-
-function closeAdminActionMenu() {
-  adminActionMenu?.classList.add('hidden');
-}
-
-function toggleAdminActionMenu(event) {
-  event.stopPropagation();
-  adminActionMenu?.classList.toggle('hidden');
-}
-
-function handleAdminViewShop() {
-  window.location.href = '/';
-}
-
-function bindAdminEvents() {
-  loginForm?.addEventListener('submit', handleAdminLogin);
-  btnViewShop?.addEventListener('click', handleAdminViewShop);
-  btnLogout?.addEventListener('click', handleAdminLogout);
-  adminActionMenuBtn?.addEventListener('click', toggleAdminActionMenu);
-  document.addEventListener('click', (event) => {
-    const isInsideMenu = event.target.closest?.('#admin-action-menu') || event.target.closest?.('#admin-action-menu-btn');
-    if (!isInsideMenu) closeAdminActionMenu();
-  });
-  resetFormBtn?.addEventListener('click', resetAdminForm);
-  resetCatBtn?.addEventListener('click', resetAdminCatForm);
-  saveCatBtn?.addEventListener('click', handleAdminSaveCategory);
-  categoryImageUrl?.addEventListener('input', updateCategoryImagePreview);
-  categoryImageBrowse?.addEventListener('click', () => {
-    categoryImageFile?.click();
-  });
-  categoryImageFile?.addEventListener('change', () => {
-    updateCategoryImagePreview();
-  });
-  productImageUrl?.addEventListener('input', updateImagePreview);
-  productImageBrowse?.addEventListener('click', () => {
-    productImageFile?.click();
-  });
-  productImageFile?.addEventListener('change', () => {
-    updateImagePreview();
-  });
-  document.getElementById('admin-prod-category')?.addEventListener('change', updateProductIdDisplay);
-  productForm?.addEventListener('submit', handleAdminAddProduct);
-  saveShippingChargeBtn?.addEventListener('click', handleAdminSaveShippingCharge);
-
-  document.querySelectorAll('.admin-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      activateAdminTab(tab.dataset.tab);
-      if (tab.dataset.tab === 'orders') {
-        fetchAdminOrders();
-      }
-    });
-  });
-
-  document.getElementById('admin-search-prod')?.addEventListener('input', renderAdminInventory);
-  document.getElementById('admin-filter-cat')?.addEventListener('change', renderAdminInventory);
-  document.getElementById('admin-filter-type')?.addEventListener('change', event => {
-    renderAdminFilterValueControl(event.target.value);
-    applyAdminOrderFilters();
-  });
-  document.getElementById('admin-filter-clear')?.addEventListener('click', clearAdminOrderFilters);
-}
-
-async function initAdminPage() {
-  bindAdminEvents();
-  parseAdminHashEdit();
-
-  if (state.token && state.user?.role === 'admin') {
-    showDashboard();
-    return;
-  }
-
-  if (state.token) {
-    try {
-      const user = await authApi.getMe();
-      state.user = user;
-      if (user.role === 'admin') {
-        showDashboard();
-        return;
-      }
-    } catch (err) {
-      clearAuth();
-    }
-  }
-
-  showLoginPanel();
-}
-
-async function handleAdminLogin(event) {
-  event.preventDefault();
-  clearAuthError();
-
-  const email = document.getElementById('admin-auth-email').value.trim();
-  const password = document.getElementById('admin-auth-password').value;
-
-  if (!email || !password) {
-    renderAuthError('Please provide both email and password.');
-    return;
-  }
-
-  try {
-    const data = await authApi.adminLogin(email, password);
-    saveAuth(data.token, data.user);
-    if (data.user.role !== 'admin') {
-      renderAuthError('You are not authorized for admin access.');
-      clearAuth();
-      return;
-    }
-    clearAuthError();
-    state.user = data.user;
-    showDashboard();
-  } catch (err) {
-    renderAuthError(err.message || 'Login failed.');
-  }
-}
-
-function handleAdminLogout() {
-  clearAuth();
-  window.location.href = '/';
-}
-
-function activateAdminTab(tabName) {
-  document.querySelectorAll('.admin-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName));
-  document.querySelectorAll('.admin-tab-content').forEach(content => content.classList.toggle('active', content.id === `admin-content-${tabName}`));
-}
-
-async function fetchDashboardData() {
-  await Promise.all([fetchCategories(), fetchAdminInventory(), fetchAdminOrders(), fetchAdminCategories(), fetchShippingSettings()]);
-}
-
-async function fetchShippingSettings() {
-  try {
-    const res = await fetch(`${API_BASE}/orders/shipping-settings`);
-    if (!res.ok) throw new Error('Unable to load shipping settings');
-    const data = await res.json();
-    if (shippingChargeInput) {
-      shippingChargeInput.value = Number(data.shipping_charge || 0).toFixed(0);
-    }
-  } catch (error) {
-    console.warn('Shipping settings fetch failed:', error);
-  }
-}
-
-async function handleAdminSaveShippingCharge() {
-  if (!shippingChargeInput) return;
-  const charge = Number(shippingChargeInput.value);
-  if (Number.isNaN(charge) || charge < 0) {
-    alert('Please enter a valid non-negative shipping charge.');
-    return;
-  }
-
-  try {
-    const res = await fetch(`${API_BASE}/orders/shipping-settings`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.token}`
-      },
-      body: JSON.stringify({ shipping_charge: charge })
-    });
-
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.error || 'Unable to save shipping charge');
-    }
-
-    const data = await res.json();
-    alert(`Shipping charge updated to ₹${Number(data.shipping_charge || 0).toFixed(0)}.`);
-  } catch (err) {
-    console.error('Save shipping charge failed:', err);
-    alert(err.message || 'Failed to save shipping charge.');
-  }
-}
-
-async function fetchCategories() {
-  try {
-    const res = await fetch(`${API_BASE}/categories`);
-    if (!res.ok) throw new Error('Failed to load categories');
-    const categories = await res.json();
-    _adminCategories = categories;
-    populateCategorySelects(categories);
-  } catch (err) {
-    console.error('Admin categories fetch failed', err);
-  }
-}
-
-function populateCategorySelects(categories) {
-  const filterSelect = document.getElementById('admin-filter-cat');
-  if (filterSelect) {
-    filterSelect.innerHTML = `<option value="all">All Categories</option>` + categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  }
-
-  const productCategory = document.getElementById('admin-prod-category');
-  if (productCategory) {
-    productCategory.innerHTML = `<option value="">Select category</option>` + categories
-      .map(c => `<option value="${c.id}" data-category-uid="${c.category_id || c.categoryId || ''}">${c.name}</option>`)
-      .join('');
-    updateProductIdDisplay();
-  }
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function generateCategoryUid() {
-  const existingIds = _adminCategories
-    .map(c => c.category_id || c.categoryId)
-    .filter(Boolean)
-    .map(uid => {
-      const match = String(uid).match(/^spore-(\d+)$/);
-      return match ? parseInt(match[1], 10) : 0;
-    });
-  const maxValue = existingIds.length ? Math.max(...existingIds) : 0;
-  return `spore-${String(maxValue + 1).padStart(6, '0')}`;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const prefix = 'spore-';
+  const randomNumber = String(Math.floor(Math.random() * 900000) + 100000);
+  return `${prefix}${randomNumber}`;
 }
 
 function generateProductId(categoryUid) {
   if (!categoryUid) return '';
   const existingIds = _adminProducts
-    .filter(p => p.category === document.getElementById('admin-prod-category')?.value)
-    .map(p => {
+    .filter(
+      (p) => p.category === document.getElementById('admin-prod-category')?.value,
+    )
+    .map((p) => {
       const regex = new RegExp(`^${escapeRegExp(categoryUid)}-pid-(\\d+)$`);
       const match = String(p.id).match(regex);
       return match ? parseInt(match[1], 10) : 0;
@@ -307,7 +193,6 @@ function updateProductIdDisplay() {
   const categoryUid = selectedOption?.dataset?.categoryUid || '';
   productIdDisplay.value = categoryUid ? generateProductId(categoryUid) : '';
 }
-
 
 function updateCategoryImagePreview() {
   if (!categoryImagePreview) return;
@@ -327,22 +212,27 @@ function updateCategoryImagePreview() {
   // If URL is provided, try to preload it and handle errors
   if (url) {
     // Normalize protocol-less URLs (e.g. example.com/image.jpg or //cdn.com/img.png)
-    if (url.startsWith('//')) url = 'https:' + url;
-    else if (!/^https?:\/\//i.test(url) && url.indexOf('.') !== -1) url = 'https://' + url;
+    if (url.startsWith('//')) url = `https:${url}`;
+    else if (!/^https?:\/\//i.test(url) && url.indexOf('.') !== -1) url = `https://${url}`;
+
+    categoryImagePreview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
 
     const img = new Image();
     let handled = false;
     img.onload = () => {
-      if (handled) return; handled = true;
+      if (handled) return;
+      handled = true;
       categoryImagePreview.innerHTML = `<img src="${url}" alt="Preview">`;
     };
     img.onerror = () => {
-      if (handled) return; handled = true;
+      if (handled) return;
+      handled = true;
       categoryImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image from URL</span>';
     };
     // Start loading
-    try { img.src = url; }
-    catch (e) {
+    try {
+      img.src = url;
+    } catch (e) {
       categoryImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
     }
     return;
@@ -350,6 +240,74 @@ function updateCategoryImagePreview() {
 
   // Default placeholder
   categoryImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span>Category image preview</span>';
+}
+
+function renderUploadPreview(preview, file, url, label) {
+  if (!preview) return;
+
+  if (file) {
+    const reader = new FileReader();
+    preview.dataset.previewValid = 'false';
+    reader.onload = () => {
+      preview.innerHTML = `<img src="${reader.result}" alt="Preview">`;
+      preview.dataset.previewValid = 'true';
+      productImagePreviewValid = true;
+    };
+    reader.onerror = () => {
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Unable to read image file</span>';
+      preview.dataset.previewValid = 'false';
+      productImagePreviewValid = false;
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
+
+  if (url) {
+    if (url.startsWith('//')) {
+      url = `https:${url}`;
+    } else if (
+      !/^https?:\/\//i.test(url)
+      && !/^data:/i.test(url)
+      && !/^blob:/i.test(url)
+      && url.indexOf('.') !== -1
+    ) {
+      url = `https://${url}`;
+    }
+
+    preview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
+    preview.dataset.previewValid = 'false';
+    productImagePreviewValid = false;
+
+    const img = new Image();
+    let handled = false;
+    img.onload = () => {
+      if (handled) return;
+      handled = true;
+      preview.innerHTML = `<img src="${url}" alt="Preview">`;
+      preview.dataset.previewValid = 'true';
+      productImagePreviewValid = true;
+    };
+    img.onerror = () => {
+      if (handled) return;
+      handled = true;
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image from URL. Use a direct image URL (jpg, png, webp, or data URL) or upload a local image file.</span>';
+      preview.dataset.previewValid = 'false';
+      productImagePreviewValid = false;
+    };
+
+    try {
+      img.src = url;
+    } catch (e) {
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
+      preview.dataset.previewValid = 'false';
+      productImagePreviewValid = false;
+    }
+    return;
+  }
+
+  preview.innerHTML = `<i class="fa-solid fa-image"></i><span>${label}</span>`;
+  preview.dataset.previewValid = 'false';
+  productImagePreviewValid = false;
 }
 
 async function readFileAsDataUrl(file) {
@@ -377,9 +335,9 @@ async function fetchAdminInventory() {
     if (statProducts) statProducts.textContent = products.length;
     renderAdminInventory();
   } catch (err) {
-    console.error('Admin inventory fetch error:', err);
+    showErrorToast(getApiErrorMessage(err));
     if (grid) {
-      grid.innerHTML = `<p style="color:#e74c3c; padding:1rem;">Failed to synchronize active inventory directory.</p>`;
+      grid.innerHTML = '<p style="color:#e74c3c; padding:1rem;">Failed to synchronize active inventory directory.</p>';
     }
   }
 }
@@ -388,12 +346,14 @@ function renderAdminInventory() {
   const grid = document.getElementById('admin-inventory-grid');
   if (!grid) return;
 
-  const query = (document.getElementById('admin-search-prod')?.value || '').toLowerCase();
+  const query = (
+    document.getElementById('admin-search-prod')?.value || ''
+  ).toLowerCase();
   const category = document.getElementById('admin-filter-cat')?.value || 'all';
 
   let products = _adminProducts;
-  if (category !== 'all') products = products.filter(p => p.category === category);
-  if (query) products = products.filter(p => `${p.name} ${p.description}`.toLowerCase().includes(query));
+  if (category !== 'all') products = products.filter((p) => p.category === category);
+  if (query) products = products.filter((p) => `${p.name} ${p.description}`.toLowerCase().includes(query));
 
   if (!products.length) {
     grid.innerHTML = '<div class="admin-loading">No products found.</div>';
@@ -402,13 +362,24 @@ function renderAdminInventory() {
 
   grid.innerHTML = `
     <div class="admin-product-grid">
-      ${products.map(p => {
-        const stockClass = p.stock === 0 ? 'out-stock' : p.stock < 20 ? 'low-stock' : 'in-stock';
-        const stockLabel = p.stock === 0 ? 'Out of Stock' : p.stock < 20 ? `Low: ${p.stock}` : `${p.stock} units`;
-        const categoryObj = _adminCategories.find(c => c.id === p.category);
-        const categoryName = categoryObj ? categoryObj.name : 'Unknown';
-        const categoryId = categoryObj ? (categoryObj.category_id || categoryObj.categoryId || '') : '';
-        return `
+      ${products
+    .map((p) => {
+      const stockClass = p.stock === 0
+        ? 'out-stock'
+        : p.stock < 20
+          ? 'low-stock'
+          : 'in-stock';
+      const stockLabel = p.stock === 0
+        ? 'Out of Stock'
+        : p.stock < 20
+          ? `Low: ${p.stock}`
+          : `${p.stock} units`;
+      const categoryObj = _adminCategories.find((c) => c.id === p.category);
+      const categoryName = categoryObj ? categoryObj.name : 'Unknown';
+      const categoryId = categoryObj
+        ? categoryObj.category_id || categoryObj.categoryId || ''
+        : '';
+      return `
           <div class="admin-product-card" data-id="${p.id}">
             <div class="admin-card-meta">
               <img src="${p.image_url}" alt="${p.name}">
@@ -444,13 +415,14 @@ function renderAdminInventory() {
             </div>
           </div>
         `;
-      }).join('')}
+    })
+    .join('')}
     </div>
   `;
 }
 
 function adminEditProduct(productId) {
-  const product = _adminProducts.find(item => item.id === productId);
+  const product = _adminProducts.find((item) => item.id === productId);
   if (!product) return;
   activateAdminTab('add-product');
 
@@ -467,7 +439,10 @@ function adminEditProduct(productId) {
   if (productImageFile) productImageFile.value = '';
 
   const preview = document.getElementById('admin-img-preview');
-  if (preview) preview.innerHTML = `<img src="${product.image_url}" alt="Preview">`;
+  if (preview) {
+    preview.innerHTML = `<img src="${product.image_url}" alt="Preview">`;
+    productImagePreviewValid = true;
+  }
 
   const label = document.getElementById('admin-submit-label');
   if (label) label.textContent = 'Update Product';
@@ -487,15 +462,21 @@ async function handleAdminAddProduct(event) {
   const mrp_price = document.getElementById('admin-prod-mrp').value;
   const gst_rate = document.getElementById('admin-prod-gst').value;
   const stock = document.getElementById('admin-prod-stock').value;
-  const selectedCategoryUid = document.getElementById('admin-prod-category')?.selectedOptions?.[0]?.dataset?.categoryUid || '';
+  const selectedCategoryUid = document.getElementById('admin-prod-category')?.selectedOptions?.[0]
+    ?.dataset?.categoryUid || '';
   let productId = productIdDisplay?.value.trim() || '';
   const productImageUrlValue = productImageUrl?.value.trim() || '';
   const imageFile = productImageFile?.files?.[0];
   let image_url = productImageUrlValue;
 
   try {
-    const expectedPrefix = selectedCategoryUid ? `${selectedCategoryUid}-pid-` : '';
-    if (!productId || (expectedPrefix && !productId.startsWith(expectedPrefix))) {
+    const expectedPrefix = selectedCategoryUid
+      ? `${selectedCategoryUid}-pid-`
+      : '';
+    if (
+      !productId
+      || (expectedPrefix && !productId.startsWith(expectedPrefix))
+    ) {
       productId = generateProductId(selectedCategoryUid);
       if (productIdDisplay) productIdDisplay.value = productId;
     }
@@ -513,7 +494,15 @@ async function handleAdminAddProduct(event) {
     }
 
     const method = editId ? 'PUT' : 'POST';
-    const url = editId ? `${API_BASE}/products/${editId}` : `${API_BASE}/products`;
+    const url = editId
+      ? `${API_BASE}/products/${editId}`
+      : `${API_BASE}/products`;
+    if (!productImagePreviewValid) {
+      feedback.textContent = 'Please provide a valid product image preview. Upload a local image file or paste a direct image URL (e.g. ending with .jpg, .png, .webp) that loads successfully, not a Google share page or HTML link.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
     const body = {
       name,
       category,
@@ -522,7 +511,7 @@ async function handleAdminAddProduct(event) {
       mrp_price: numericMrp,
       gst_rate: parseInt(gst_rate, 10),
       stock: parseInt(stock, 10),
-      image_url
+      image_url,
     };
     if (!editId) {
       body.id = productId;
@@ -530,14 +519,26 @@ async function handleAdminAddProduct(event) {
 
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify(body)
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.token}`,
+      },
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (res.ok) {
-      showSuccessToast(editId ? '✅ Product updated successfully!' : '✅ Product published successfully!');
+      showSuccessToast(
+        editId
+          ? '✅ Product updated successfully!'
+          : '✅ Product published successfully!',
+      );
       resetAdminForm();
       fetchAdminInventory();
+      try {
+        bcProducts?.postMessage({ type: 'products:updated' });
+      } catch (e) {
+        /* ignore */
+      }
       activateAdminTab('products');
     } else {
       feedback.textContent = data.error || 'Failed to save product.';
@@ -551,19 +552,18 @@ async function handleAdminAddProduct(event) {
 
 async function fetchAdminOrders() {
   const list = document.getElementById('admin-orders-list');
-  if (list) list.innerHTML = `<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading orders...</div>`;
+  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading orders...</div>';
   try {
-    const res = await fetch(`${API_BASE}/orders/all-orders`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-    if (!res.ok) throw new Error('Failed to load orders');
-    const orders = await res.json();
+    const orders = await fetchWithAuth('/orders/all-orders');
+    if (!Array.isArray(orders)) {
+      throw new Error('Invalid orders response');
+    }
     if (statOrders) statOrders.textContent = orders.length;
     adminOrdersCache = orders;
     renderAdminOrders(orders);
   } catch (err) {
-    console.error('Fetch admin orders error:', err);
-    if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;"><i class="fa-solid fa-triangle-exclamation"></i> Could not load orders.</div>';
+    showErrorToast(getApiErrorMessage(err));
+    if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;"></div>';
   }
 }
 
@@ -580,36 +580,55 @@ function renderAdminOrders(orders) {
     pending: 'Pending',
     processing: 'Processing',
     shipped: 'Shipped',
-    delivered: 'Delivered'
+    delivered: 'Delivered',
   };
 
-  wrap.innerHTML = orders.map(o => {
-    const date = new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-    const customerName = o.customer_name || o.user_email || 'Customer';
-    const phone = o.delivery_phone || 'Not specified';
-    const address = o.delivery_address || 'Address not provided';
-    const itemRows = Array.isArray(o.items) ? o.items.map(item => `
+  wrap.innerHTML = orders
+    .map((o) => {
+      const date = new Date(o.created_at).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+      const customerName = o.customer_name || o.user_email || 'Customer';
+      const phone = o.delivery_phone || 'Not specified';
+      const address = o.delivery_address || 'Address not provided';
+      const itemRows = Array.isArray(o.items)
+        ? o.items
+          .map(
+            (item) => `
           <li>${item.name} × ${item.quantity}</li>
-        `).join('') : '';
-    const productDisplay = o.items && o.items.length > 1 ? `
+        `,
+          )
+          .join('')
+        : '';
+      const productDisplay = o.items && o.items.length > 1
+        ? `
       <details class="admin-order-items">
         <summary>${o.items.length} products</summary>
         <ul>${itemRows}</ul>
       </details>
-    ` : `
+    `
+        : `
       <div class="admin-order-items-single">${itemRows}</div>
     `;
 
-    const currentStage = statusSteps.indexOf(o.delivery_status || 'pending');
-    const progressSteps = statusSteps.map((step, index) => `
+      const currentStage = statusSteps.indexOf(o.delivery_status || 'pending');
+      const progressSteps = statusSteps
+        .map(
+          (step, index) => `
       <div class="admin-progress-step ${step} ${index <= currentStage ? 'active' : ''}">
         <span>${statusLabels[step]}</span>
       </div>
       ${index < statusSteps.length - 1 ? '<div class="admin-progress-connector"></div>' : ''}
-    `).join('');
-    const invoiceLink = o.invoice_token ? `${window.location.origin}/api/orders/share/${o.invoice_token}` : '';
+    `,
+        )
+        .join('');
+      const invoiceLink = o.invoice_token
+        ? `${window.location.origin}/api/orders/share/${o.invoice_token}`
+        : '';
 
-    return `
+      return `
       <div class="admin-order-card">
         <div class="admin-order-card-header">
           <div>
@@ -632,12 +651,16 @@ function renderAdminOrders(orders) {
 
           <div class="admin-order-card-section admin-order-actions-panel">
             <div class="admin-order-section-title">Shipment status</div>
-            ${o.delivery_status === 'cancelled' ? `
+            ${
+  o.delivery_status === 'cancelled'
+    ? `
               <div class="admin-order-cancelled-note">
                 <div class="admin-order-cancelled-label">Cancelled</div>
+                <div class="admin-order-cancelled-subtitle">Cancelled by ${o.cancelled_by === 'admin' ? 'admin' : 'user'}</div>
                 <div class="admin-order-cancelled-reason">${o.cancel_reason || 'Reason not provided'}</div>
               </div>
-            ` : `
+            `
+    : `
               <select class="admin-ship-select" onchange="window.adminUpdateShipping('${o.id}', this.value)">
                 <option value="pending" ${o.delivery_status === 'pending' ? 'selected' : ''}>Pending</option>
                 <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''}>Processing</option>
@@ -657,19 +680,24 @@ function renderAdminOrders(orders) {
                 <input id="admin-cancel-other-${o.id}" type="text" placeholder="Specify cancel reason" class="admin-cancel-other" style="display:none;">
                 <button class="btn btn-danger admin-cancel-btn" onclick="window.adminCancelOrder('${o.id}')">Cancel order</button>
               </div>
-            `}
+            `
+}
             <div class="admin-order-summary-block">
               <div><span>Order total</span><strong>₹${o.total.toFixed(2)}</strong></div>
               <div><span>Payment mode</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
               <div><span>Transaction</span><strong>${o.transaction_id || o.razorpay_payment_id || 'Pending'}</strong></div>
               <div><span>Customer</span><strong>${customerName}</strong></div>
             </div>
-            ${invoiceLink ? `
+            ${
+  invoiceLink
+    ? `
               <div class="admin-order-summary-block" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="btn btn-secondary" onclick="window.open('${invoiceLink}','_blank')">Open Invoice</button>
                 <button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy Link</button>
               </div>
-            ` : ''}
+            `
+    : ''
+}
           </div>
         </div>
 
@@ -686,21 +714,25 @@ function renderAdminOrders(orders) {
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 }
 
 async function adminUpdateShipping(orderId, status) {
   try {
     const res = await fetch(`${API_BASE}/orders/${orderId}/status`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify({ delivery_status: status })
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.token}`,
+      },
+      body: JSON.stringify({ delivery_status: status }),
     });
     if (!res.ok) throw new Error('Failed');
     showSuccessToast(`📦 Shipment status updated to "${status}"`);
     fetchAdminOrders();
   } catch (err) {
-    alert('Failed to update shipping status.');
+    showErrorToast('Failed to update shipping status.');
   }
 }
 
@@ -786,7 +818,10 @@ function renderAdminFilterValueControl(filterType) {
   container.innerHTML = html;
   const input = document.getElementById('admin-filter-value-input');
   if (input) {
-    input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', applyAdminOrderFilters);
+    input.addEventListener(
+      input.tagName === 'SELECT' ? 'change' : 'input',
+      applyAdminOrderFilters,
+    );
   }
 }
 
@@ -804,25 +839,37 @@ function applyAdminOrderFilters() {
     return;
   }
 
-  const filtered = adminOrdersCache.filter(order => {
+  const filtered = adminOrdersCache.filter((order) => {
     const changedAt = new Date(order.updated_at || order.created_at);
     const normalizedValue = value.toLowerCase();
 
     switch (filterType) {
       case 'modified_date':
-        return value ? changedAt.toDateString() === new Date(value).toDateString() : true;
+        return value
+          ? changedAt.toDateString() === new Date(value).toDateString()
+          : true;
       case 'year':
         return value ? String(changedAt.getFullYear()) === value : true;
       case 'month':
-        return value ? String(changedAt.getMonth() + 1).padStart(2, '0') === value : true;
+        return value
+          ? String(changedAt.getMonth() + 1).padStart(2, '0') === value
+          : true;
       case 'order_id':
         return value ? order.id.toLowerCase().includes(normalizedValue) : true;
       case 'phone':
-        return value ? (order.delivery_phone || '').replace(/\D/g, '').includes(value.replace(/\D/g, '')) : true;
+        return value
+          ? (order.delivery_phone || '')
+            .replace(/\D/g, '')
+            .includes(value.replace(/\D/g, ''))
+          : true;
       case 'status':
         return value ? order.delivery_status === value : true;
       case 'payment_method':
-        const method = (order.payment_method || (order.razorpay_order_id ? 'Razorpay' : 'Pending') || '').toLowerCase();
+        const method = (
+          order.payment_method
+          || (order.razorpay_order_id ? 'Razorpay' : 'Pending')
+          || ''
+        ).toLowerCase();
         return value ? method === normalizedValue : true;
       default:
         return true;
@@ -843,19 +890,21 @@ function clearAdminOrderFilters() {
 }
 
 async function adminCancelOrder(orderId) {
-  const reasonSelect = document.getElementById(`admin-cancel-reason-${orderId}`);
+  const reasonSelect = document.getElementById(
+    `admin-cancel-reason-${orderId}`,
+  );
   if (!reasonSelect) return;
 
   let reason = reasonSelect.value;
   if (!reason) {
-    alert('Please select a cancellation reason.');
+    showErrorToast('Please select a cancellation reason.');
     return;
   }
 
   if (reason === 'Other') {
     const otherText = document.getElementById(`admin-cancel-other-${orderId}`);
     if (!otherText || !otherText.value.trim()) {
-      alert('Please specify a cancellation reason.');
+      showErrorToast('Please specify a cancellation reason.');
       return;
     }
     reason = otherText.value.trim();
@@ -868,9 +917,9 @@ async function adminCancelOrder(orderId) {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.token}`
+        Authorization: `Bearer ${state.token}`,
       },
-      body: JSON.stringify({ reason })
+      body: JSON.stringify({ reason }),
     });
 
     if (!res.ok) {
@@ -881,17 +930,21 @@ async function adminCancelOrder(orderId) {
     showSuccessToast('❌ Order cancelled successfully.');
     fetchAdminOrders();
   } catch (err) {
-    alert(err.message || 'Failed to cancel order.');
+    showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
   }
 }
 
 async function adminDeleteProduct(productId) {
-  if (!confirm('Are you sure you want to permanently delete this product from the inventory?')) return;
+  if (
+    !confirm(
+      'Are you sure you want to permanently delete this product from the inventory?',
+    )
+  ) return;
 
   try {
     const res = await fetch(`${API_BASE}/products/${productId}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${state.token}` }
+      headers: { Authorization: `Bearer ${state.token}` },
     });
 
     if (res.ok) {
@@ -899,11 +952,10 @@ async function adminDeleteProduct(productId) {
       fetchAdminInventory();
     } else {
       const data = await res.json();
-      alert(data.error || 'Failed to remove item.');
+      showErrorToast(data.error || 'Failed to remove item.');
     }
   } catch (err) {
-    console.error('Admin delete product error:', err);
-    alert('Server communication error.');
+    showErrorToast(getApiErrorMessage(err) || 'Server communication error.');
   }
 }
 
@@ -913,12 +965,148 @@ async function fetchAdminCategories() {
   try {
     const res = await fetch(`${API_BASE}/categories`);
     if (!res.ok) throw new Error('Failed to load categories');
-    const categories = await res.json();
+    const response = await res.json();
+    // API returns {success: true, data: [...]} - extract the data array
+    const categories = Array.isArray(response) ? response : (response.data || []);
     _adminCategories = categories;
     resetAdminCatForm();
     renderAdminCategoriesList(categories);
   } catch (err) {
     if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;">Failed to load categories.</div>';
+  }
+}
+
+// =====================
+// Trainings (Admin)
+// =====================
+async function fetchAdminTrainings() {
+  const list = document.getElementById('admin-trainings-list');
+  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...</div>';
+  try {
+    const trainings = await trainingApi.getTrainings();
+    _adminTrainings = trainings || [];
+    renderAdminTrainings();
+    return trainings;
+  } catch (err) {
+    if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;">Failed to load trainings.</div>';
+    return [];
+  }
+}
+
+function renderAdminTrainings() {
+  const list = document.getElementById('admin-trainings-list');
+  if (!list) return;
+  if (!_adminTrainings || !_adminTrainings.length) {
+    list.innerHTML = '<div class="admin-loading">No trainings available.</div>';
+    return;
+  }
+  list.innerHTML = _adminTrainings
+    .map(
+      (t) => `
+    <div class="admin-training-row" data-id="${t.id}">
+      <div style="display:flex;gap:12px;align-items:center;">
+        <img src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;">
+        <div>
+          <strong>${t.title}</strong>
+          <div style="font-size:0.9rem;color:#475569">${t.category} · ${t.description || ''}</div>
+        </div>
+      </div>
+      <div class="admin-row-actions">
+        <button class="btn-admin-edit" onclick="window.adminEditTraining('${t.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="btn-admin-delete" onclick="window.adminDeleteTraining('${t.id}')"><i class="fa-solid fa-trash"></i></button>
+      </div>
+    </div>
+  `,
+    )
+    .join('');
+}
+
+async function handleAdminSaveTraining(event) {
+  event.preventDefault();
+  const editId = document.getElementById('admin-train-edit-id').value;
+  const title = (
+    document.getElementById('admin-train-title').value || ''
+  ).trim();
+  const category = (
+    document.getElementById('admin-train-category').value || ''
+  ).trim();
+  const description = (
+    document.getElementById('admin-train-desc').value || ''
+  ).trim();
+  const image_url = (
+    document.getElementById('admin-train-image').value || ''
+  ).trim();
+  const content_url = (
+    document.getElementById('admin-train-content').value || ''
+  ).trim();
+  // collect allowed roles
+  const allowed = [];
+  if (document.getElementById('admin-train-role-trainee')?.checked) allowed.push('trainee');
+  if (document.getElementById('admin-train-role-farmer')?.checked) allowed.push('farmer');
+  if (document.getElementById('admin-train-role-entrepreneur')?.checked) allowed.push('entrepreneur');
+
+  if (!title) {
+    showErrorToast('Title is required');
+    return;
+  }
+
+  try {
+    if (editId) {
+      await trainingApi.updateTraining(editId, {
+        title,
+        category,
+        description,
+        image_url,
+        content_url,
+        allowed_roles: allowed,
+      });
+      showSuccessToast('Training updated');
+    } else {
+      await trainingApi.createTraining({
+        title,
+        category,
+        description,
+        image_url,
+        content_url,
+        allowed_roles: allowed,
+      });
+      showSuccessToast('Training created');
+    }
+    document.getElementById('admin-train-edit-id').value = '';
+    document.getElementById('admin-train-title').value = '';
+    document.getElementById('admin-train-desc').value = '';
+    document.getElementById('admin-train-image').value = '';
+    document.getElementById('admin-train-content').value = '';
+    fetchAdminTrainings();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to save training');
+  }
+}
+
+function adminEditTraining(id) {
+  const t = _adminTrainings.find((x) => x.id === id);
+  if (!t) return;
+  document.getElementById('admin-train-edit-id').value = t.id;
+  document.getElementById('admin-train-title').value = t.title || '';
+  document.getElementById('admin-train-category').value = t.category || '';
+  document.getElementById('admin-train-desc').value = t.description || '';
+  document.getElementById('admin-train-image').value = t.image_url || '';
+  document.getElementById('admin-train-content').value = t.content_url || '';
+  // set allowed roles
+  const allowed = t.allowed_roles || [];
+  document.getElementById('admin-train-role-trainee').checked = allowed.includes('trainee');
+  document.getElementById('admin-train-role-farmer').checked = allowed.includes('farmer');
+  document.getElementById('admin-train-role-entrepreneur').checked = allowed.includes('entrepreneur');
+}
+
+async function adminDeleteTraining(id) {
+  if (!confirm('Delete this training? This action cannot be undone.')) return;
+  try {
+    await trainingApi.deleteTraining(id);
+    showSuccessToast('Training deleted');
+    fetchAdminTrainings();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to delete training');
   }
 }
 
@@ -930,7 +1118,9 @@ function renderAdminCategoriesList(categories) {
     return;
   }
 
-  list.innerHTML = categories.map(cat => `
+  list.innerHTML = categories
+    .map(
+      (cat) => `
     <div class="admin-cat-row" data-id="${cat.id}">
       <div class="admin-cat-info">
         <span class="admin-cat-uid">${cat.category_id || cat.categoryId || 'spore-000000'}</span>
@@ -943,12 +1133,29 @@ function renderAdminCategoriesList(categories) {
         <button class="btn-admin-delete" onclick="window.adminDeleteCategory('${cat.id}')"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
+
+  populateAdminCategorySelect(categories);
+}
+
+function populateAdminCategorySelect(categories) {
+  const select = document.getElementById('admin-prod-category');
+  if (!select) return;
+  select.innerHTML = categories
+    .map(
+      (cat) => `
+    <option value="${cat.id}" data-category-uid="${cat.category_id || cat.categoryId || ''}">${cat.name}</option>
+  `,
+    )
+    .join('');
+  updateProductIdDisplay();
 }
 
 function adminEditCategory(catId) {
   activateAdminTab('categories');
-  const category = _adminCategories.find(c => c.id === catId);
+  const category = _adminCategories.find((c) => c.id === catId);
   if (!category) return;
 
   document.getElementById('admin-edit-cat-id').value = category.id;
@@ -1017,7 +1224,11 @@ function resetAdminCatForm() {
 async function handleAdminSaveCategory() {
   const feedback = document.getElementById('admin-cat-feedback');
   const editId = document.getElementById('admin-edit-cat-id').value;
-  const id = document.getElementById('admin-cat-id').value.trim().toLowerCase().replace(/\s+/g, '-');
+  const id = document
+    .getElementById('admin-cat-id')
+    .value.trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-');
   let categoryId = categoryUidInput?.value.trim() || generateCategoryUid();
   const name = document.getElementById('admin-cat-name').value.trim();
   const description = document.getElementById('admin-cat-desc').value.trim();
@@ -1049,9 +1260,15 @@ async function handleAdminSaveCategory() {
 
   // Client-side uniqueness checks: slug (id), name, and category UID must be unique
   if (_adminCategories && _adminCategories.length) {
-    const slugConflict = _adminCategories.some(c => c.id === id && c.id !== editId);
-    const nameConflict = _adminCategories.some(c => (c.name || '').toLowerCase() === name.toLowerCase() && c.id !== editId);
-    const uidConflict = _adminCategories.some(c => ((c.category_id || c.categoryId) === categoryId) && c.id !== editId);
+    const slugConflict = _adminCategories.some(
+      (c) => c.id === id && c.id !== editId,
+    );
+    const nameConflict = _adminCategories.some(
+      (c) => (c.name || '').toLowerCase() === name.toLowerCase() && c.id !== editId,
+    );
+    const uidConflict = _adminCategories.some(
+      (c) => (c.category_id || c.categoryId) === categoryId && c.id !== editId,
+    );
 
     if (slugConflict || nameConflict || uidConflict) {
       const parts = [];
@@ -1062,7 +1279,12 @@ async function handleAdminSaveCategory() {
       if (uidConflict) {
         // regenerate UID until unique
         let attempts = 0;
-        while ((_adminCategories.some(c => ((c.category_id || c.categoryId) === categoryId) && c.id !== editId)) && attempts < 20) {
+        while (
+          _adminCategories.some(
+            (c) => (c.category_id || c.categoryId) === categoryId && c.id !== editId,
+          )
+          && attempts < 20
+        ) {
           categoryId = generateCategoryUid();
           attempts += 1;
         }
@@ -1071,7 +1293,7 @@ async function handleAdminSaveCategory() {
 
       if (slugConflict || nameConflict) {
         if (feedback) {
-          feedback.textContent = parts.join(' · ') + '.';
+          feedback.textContent = `${parts.join(' · ')}.`;
           feedback.classList.remove('hidden');
           feedback.style.color = 'var(--color-danger)';
         }
@@ -1086,30 +1308,47 @@ async function handleAdminSaveCategory() {
     }
 
     const method = editId ? 'PUT' : 'POST';
-    const url = editId ? `${API_BASE}/categories/${editId}` : `${API_BASE}/categories`;
+    const url = editId
+      ? `${API_BASE}/categories/${editId}`
+      : `${API_BASE}/categories`;
     const body = editId
       ? { name, description, image_url: imageUrl }
-      : { category_id: categoryId, id, name, description, image_url: imageUrl };
+      : {
+        category_id: categoryId,
+        id,
+        name,
+        description,
+        image_url: imageUrl,
+      };
 
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify(body)
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.token}`,
+      },
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (res.ok) {
-      showSuccessToast(editId ? `✅ Category "${name}" updated!` : `✅ Category "${name}" created!`);
+      showSuccessToast(
+        editId
+          ? `✅ Category "${name}" updated!`
+          : `✅ Category "${name}" created!`,
+      );
       resetAdminCatForm();
       fetchAdminCategories();
       fetchCategories();
       // Notify other tabs (landing page) to refresh categories
-      try { bcCategories?.postMessage({ type: 'categories:updated' }); } catch (e) { /* ignore */ }
-    } else {
-      if (feedback) {
-        feedback.textContent = data.error || 'Failed to save category.';
-        feedback.classList.remove('hidden');
-        feedback.style.color = 'var(--color-danger)';
+      try {
+        bcCategories?.postMessage({ type: 'categories:updated' });
+      } catch (e) {
+        /* ignore */
       }
+    } else if (feedback) {
+      feedback.textContent = data.error || 'Failed to save category.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
     }
   } catch (err) {
     if (feedback) {
@@ -1126,7 +1365,7 @@ async function adminDeleteCategory(catId) {
   try {
     const res = await fetch(`${API_BASE}/categories/${catId}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${state.token}` }
+      headers: { Authorization: `Bearer ${state.token}` },
     });
 
     if (!res.ok) {
@@ -1138,7 +1377,7 @@ async function adminDeleteCategory(catId) {
     fetchAdminCategories();
     fetchCategories();
   } catch (err) {
-    alert(err.message || 'Unable to delete category.');
+    showErrorToast(getApiErrorMessage(err) || 'Unable to delete category.');
   }
 }
 
@@ -1148,6 +1387,7 @@ function resetAdminForm() {
   if (productIdDisplay) productIdDisplay.value = '';
   if (productImageUrl) productImageUrl.value = '';
   if (productImageFile) productImageFile.value = '';
+  productImagePreviewValid = false;
   const label = document.getElementById('admin-submit-label');
   if (label) label.textContent = 'Publish Product';
   const preview = document.getElementById('admin-img-preview');
@@ -1159,53 +1399,84 @@ function resetAdminForm() {
 
 function updateImagePreview() {
   const preview = document.getElementById('admin-img-preview');
+  if (!preview) return;
   const file = productImageFile?.files?.[0];
-  const url = productImageUrl?.value.trim();
-  renderUploadPreview(preview, file, url, 'Image preview');
-}
+  let url = productImageUrl?.value.trim();
 
-function showSuccessToast(message) {
-  const existing = document.getElementById('spk-success-toast');
-  if (existing) existing.remove();
-
-  const toast = document.createElement('div');
-  toast.id = 'spk-success-toast';
-  toast.style.cssText = `
-    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
-    background: #1a5c38; color: #fff; padding: 16px 28px;
-    border-radius: 12px; font-size: 0.95rem; font-weight: 600;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.25); z-index: 9999;
-    display: flex; align-items: center; gap: 10px;
-    animation: toastIn 0.3s ease;
-  `;
-  toast.textContent = message;
-
-  if (!document.getElementById('toast-keyframes')) {
-    const style = document.createElement('style');
-    style.id = 'toast-keyframes';
-    style.textContent = `@keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`;
-    document.head.appendChild(style);
+  // If a local file is selected, preview it (file takes precedence)
+  if (file) {
+    const reader = new FileReader();
+    preview.dataset.previewValid = 'false';
+    reader.onload = () => {
+      preview.innerHTML = `<img src="${reader.result}" alt="Preview">`;
+      preview.dataset.previewValid = 'true';
+      productImagePreviewValid = true;
+    };
+    reader.onerror = () => {
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Unable to read image file</span>';
+      preview.dataset.previewValid = 'false';
+      productImagePreviewValid = false;
+    };
+    reader.readAsDataURL(file);
+    return;
   }
 
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  // Handle URL (including data: and protocol-less URLs)
+  if (url) {
+    if (url.startsWith('//')) url = `https:${url}`;
+    else if (
+      !/^https?:\/\//i.test(url)
+      && !/^data:/i.test(url)
+      && !/^blob:/i.test(url)
+      && url.indexOf('.') !== -1
+    ) url = `https://${url}`;
+
+    preview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
+    preview.dataset.previewValid = 'false';
+    productImagePreviewValid = false;
+
+    const img = new Image();
+    let handled = false;
+    img.onload = () => {
+      if (handled) return;
+      handled = true;
+      preview.innerHTML = `<img src="${url}" alt="Preview">`;
+      preview.dataset.previewValid = 'true';
+      productImagePreviewValid = true;
+    };
+    img.onerror = () => {
+      if (handled) return;
+      handled = true;
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image from URL. Use a direct image URL (jpg, png, webp, or data URL) or upload a local image file.</span>';
+      preview.dataset.previewValid = 'false';
+      productImagePreviewValid = false;
+    };
+
+    try {
+      img.src = url;
+    } catch (e) {
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
+      preview.dataset.previewValid = 'false';
+      productImagePreviewValid = false;
+    }
+    return;
+  }
+
+  preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+  preview.dataset.previewValid = 'false';
+  productImagePreviewValid = false;
 }
 
-window.adminEditProduct = adminEditProduct;
-window.adminDeleteProduct = adminDeleteProduct;
-window.adminUpdateShipping = adminUpdateShipping;
-window.adminToggleCancelReason = adminToggleCancelReason;
-window.adminCancelOrder = adminCancelOrder;
-window.adminEditCategory = adminEditCategory;
-window.adminDeleteCategory = adminDeleteCategory;
+// Using shared toast helpers from ./utils/notify.js
 
 function copyInvoiceLink(token) {
   if (!token) return;
   const invoiceUrl = `${window.location.origin}/api/orders/share/${token}`;
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(invoiceUrl)
-      .then(() => alert('Invoice share link copied to clipboard.'))
-      .catch(() => alert('Could not copy invoice link.'));
+    navigator.clipboard
+      .writeText(invoiceUrl)
+      .then(() => showSuccessToast('Invoice share link copied to clipboard.'))
+      .catch(() => showErrorToast('Could not copy invoice link.'));
   } else {
     const textarea = document.createElement('textarea');
     textarea.value = invoiceUrl;
@@ -1213,9 +1484,129 @@ function copyInvoiceLink(token) {
     textarea.select();
     document.execCommand('copy');
     textarea.remove();
-    alert('Invoice share link copied to clipboard.');
+    showSuccessToast('Invoice share link copied to clipboard.');
   }
 }
 window.copyInvoiceLink = copyInvoiceLink;
+
+function activateAdminTab(tabName) {
+  document.querySelectorAll('.admin-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  document.querySelectorAll('.admin-tab-content').forEach((content) => {
+    content.classList.toggle(
+      'active',
+      content.id === `admin-content-${tabName}`,
+    );
+  });
+}
+
+function initAdminPage() {
+  // Tab clicks
+  document.querySelectorAll('.admin-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activateAdminTab(btn.dataset.tab);
+    });
+  });
+
+  // Login handler
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAuthError();
+      const email = document.getElementById('admin-auth-email').value.trim();
+      const password = document
+        .getElementById('admin-auth-password')
+        .value.trim();
+      try {
+        const res = await authApi.adminLogin(email, password);
+        if (res && res.token) {
+          saveAuth(res.token, res.user);
+          showDashboard();
+        }
+      } catch (err) {
+        renderAuthError(err.message || 'Login failed');
+      }
+    });
+  }
+
+  // Logout
+  if (btnLogout) {
+    btnLogout.addEventListener('click', () => {
+      clearAuth();
+      showLoginPanel();
+    });
+  }
+  if (btnViewShop) btnViewShop.addEventListener('click', () => (window.location.href = '/'));
+  
+  // Admin action menu toggle
+  if (adminActionMenuBtn && adminActionMenu) {
+    adminActionMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      adminActionMenu.classList.toggle('hidden');
+    });
+    
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!adminActionMenuBtn.contains(e.target) && !adminActionMenu.contains(e.target)) {
+        adminActionMenu.classList.add('hidden');
+      }
+    });
+  }
+
+  // Product form
+  if (productForm) productForm.addEventListener('submit', handleAdminAddProduct);
+  if (resetFormBtn) resetFormBtn.addEventListener('click', resetAdminForm);
+
+  // Category handlers
+  if (saveCatBtn) saveCatBtn.addEventListener('click', handleAdminSaveCategory);
+  if (resetCatBtn) resetCatBtn.addEventListener('click', resetAdminCatForm);
+
+  // Training form
+  if (trainForm) trainForm.addEventListener('submit', handleAdminSaveTraining);
+  const resetTrainBtn = document.getElementById('btn-admin-reset-train');
+  if (resetTrainBtn) {
+    resetTrainBtn.addEventListener('click', () => {
+      document.getElementById('admin-train-edit-id').value = '';
+      document.getElementById('admin-train-title').value = '';
+      document.getElementById('admin-train-desc').value = '';
+      document.getElementById('admin-train-image').value = '';
+      document.getElementById('admin-train-content').value = '';
+    });
+  }
+
+  // Product/category image preview wiring
+  if (productImageBrowse) productImageBrowse.addEventListener('click', () => productImageFile?.click());
+  if (categoryImageBrowse) categoryImageBrowse.addEventListener('click', () => categoryImageFile?.click());
+  if (productImageFile) productImageFile.addEventListener('change', updateImagePreview);
+  if (productImageUrl) {
+    productImageUrl.addEventListener('input', () => {
+      if (productImageFile?.files?.length) {
+        productImageFile.value = '';
+      }
+      updateImagePreview();
+    });
+  }
+  if (categoryImageFile) categoryImageFile.addEventListener('change', updateCategoryImagePreview);
+  if (categoryImageUrl) categoryImageUrl.addEventListener('input', updateCategoryImagePreview);
+
+  // Expose globals
+  window.adminEditProduct = adminEditProduct;
+  window.adminDeleteProduct = adminDeleteProduct;
+  window.adminUpdateShipping = adminUpdateShipping;
+  window.adminToggleCancelReason = adminToggleCancelReason;
+  window.adminCancelOrder = adminCancelOrder;
+  window.adminEditCategory = adminEditCategory;
+  window.adminDeleteCategory = adminDeleteCategory;
+  window.adminEditTraining = adminEditTraining;
+  window.adminDeleteTraining = adminDeleteTraining;
+
+  // Initialize UI state
+  if (state.token && state.user) {
+    showDashboard();
+  } else {
+    showLoginPanel();
+  }
+}
 
 initAdminPage();

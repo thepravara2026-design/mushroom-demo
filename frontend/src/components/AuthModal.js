@@ -1,29 +1,32 @@
 import { authApi } from '../api/authApi.js';
 import { saveAuth, state } from '../utils/state.js';
+import { showErrorToast } from '../utils/notify.js';
 
 export class AuthModal {
   constructor() {
     this.modal = document.getElementById('auth-modal');
 
     // Views
-    this.methodView  = document.getElementById('auth-method-view');
-    this.phoneView   = document.getElementById('auth-phone-view');
+    this.methodView = document.getElementById('auth-method-view');
+    this.phoneView = document.getElementById('auth-phone-view');
     this.requestView = document.getElementById('auth-request-view');
-    this.verifyView  = document.getElementById('auth-verify-view');
-    this.adminPasswordView = document.getElementById('auth-admin-password-view');
+    this.verifyView = document.getElementById('auth-verify-view');
+    this.adminPasswordView = document.getElementById(
+      'auth-admin-password-view',
+    );
 
     // Forms
-    this.formRequest      = document.getElementById('form-request-otp');
-    this.formVerify       = document.getElementById('form-verify-otp');
+    this.formRequest = document.getElementById('form-request-otp');
+    this.formVerify = document.getElementById('form-verify-otp');
     this.formPhoneRequest = document.getElementById('form-request-phone-otp');
-    this.formAdminLogin   = document.getElementById('form-admin-login');
+    this.formAdminLogin = document.getElementById('form-admin-login');
 
     // Inputs
-    this.emailInput  = document.getElementById('auth-email');
-    this.otpInput    = document.getElementById('auth-otp');
-    this.nameField   = document.getElementById('auth-name-field');
-    this.nameInput   = document.getElementById('auth-fullname');
-    this.phoneInput  = document.getElementById('auth-phone');
+    this.emailInput = document.getElementById('auth-email');
+    this.otpInput = document.getElementById('auth-otp');
+    this.nameField = document.getElementById('auth-name-field');
+    this.nameInput = document.getElementById('auth-fullname');
+    this.phoneInput = document.getElementById('auth-phone');
     this.phoneCountry = document.getElementById('auth-phone-country');
     this.phoneNameField = document.getElementById('auth-phone-name-field');
     this.adminEmailInput = document.getElementById('admin-email');
@@ -31,8 +34,8 @@ export class AuthModal {
 
     // Error containers
     this.requestError = document.getElementById('request-error');
-    this.verifyError  = document.getElementById('verify-error');
-    this.phoneError   = document.getElementById('phone-request-error');
+    this.verifyError = document.getElementById('verify-error');
+    this.phoneError = document.getElementById('phone-request-error');
     this.adminLoginError = document.getElementById('admin-login-error');
 
     // Gating state
@@ -46,38 +49,56 @@ export class AuthModal {
 
   bindEvents() {
     // Close button
-    document.getElementById('btn-close-auth')?.addEventListener('click', () => this.close());
+    document
+      .getElementById('btn-close-auth')
+      ?.addEventListener('click', () => this.close());
 
     // Method selector buttons
-    document.getElementById('btn-auth-google')?.addEventListener('click', () => this.handleGoogleLogin());
-    document.getElementById('btn-auth-phone')?.addEventListener('click', () => this.showPhoneView());
-    document.getElementById('btn-auth-email')?.addEventListener('click', () => this.showEmailView());
+    document
+      .getElementById('btn-auth-google')
+      ?.addEventListener('click', () => this.handleGoogleLogin());
+    document
+      .getElementById('btn-auth-phone')
+      ?.addEventListener('click', () => this.showPhoneView());
+    document
+      .getElementById('btn-auth-email')
+      ?.addEventListener('click', () => this.showEmailView());
 
     // Admin password login
-    document.getElementById('link-admin-password')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      this.showAdminPasswordView();
-    });
+    document
+      .getElementById('link-admin-password')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.showAdminPasswordView();
+      });
 
-    document.getElementById('link-back-admin')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      this.showMethodView();
-    });
+    document
+      .getElementById('link-back-admin')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.showMethodView();
+      });
 
     // Back navigation
-    document.getElementById('link-back-method-phone')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      this.showMethodView();
-    });
-    document.getElementById('link-back-method-email')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      this.showMethodView();
-    });
-    document.getElementById('link-back-request')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (this.activeMethod === 'phone') this.showPhoneView();
-      else this.showEmailView();
-    });
+    document
+      .getElementById('link-back-method-phone')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.showMethodView();
+      });
+    document
+      .getElementById('link-back-method-email')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.showMethodView();
+      });
+    document
+      .getElementById('link-back-request')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.activeMethod === 'phone') this.showPhoneView();
+        else this.showEmailView();
+      });
 
     // Email OTP form
     this.formRequest?.addEventListener('submit', async (e) => {
@@ -149,9 +170,16 @@ export class AuthModal {
       else backBtn.classList.remove('hidden');
     }
 
-    // Default to method view for buyer/grower, can switch to admin password via link
+    if (role === 'admin') {
+      titleEl.textContent = 'Admin Portal Access';
+    } else if (role === 'grower') {
+      titleEl.textContent = 'Grower Portal Access';
+    }
+
     if (role === 'grower') {
       this.showEmailView();
+    } else if (role === 'admin') {
+      this.showAdminPasswordView();
     } else {
       this.showMethodView();
     }
@@ -240,23 +268,27 @@ export class AuthModal {
     if (!document.getElementById('spin-kf')) {
       const s = document.createElement('style');
       s.id = 'spin-kf';
-      s.textContent = `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+      s.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
       document.head.appendChild(s);
     }
 
     // Use a faster mock OAuth response time for better UX
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 800));
 
     // Mock successful Google user
     const mockGoogleUser = {
       email: 'googleuser@gmail.com',
       fullName: 'Google User',
-      role: this.currentRole
+      role: this.currentRole,
     };
 
     try {
       // Send to backend using email OTP flow (backend creates user if not exists)
-      await authApi.requestOtp(mockGoogleUser.email, this.currentRole, mockGoogleUser.fullName);
+      await authApi.requestOtp(
+        mockGoogleUser.email,
+        this.currentRole,
+        mockGoogleUser.fullName,
+      );
 
       // Auto-verify with the universal code '123456'
       const data = await authApi.verifyOtp(mockGoogleUser.email, '123456');
@@ -268,7 +300,7 @@ export class AuthModal {
     } catch (err) {
       this.removeGoogleOverlay(overlay);
       this.showMethodView();
-      alert('Google login simulation failed. Try Email OTP instead.');
+      showErrorToast('Google login simulation failed. Try Email OTP instead.');
     }
   }
 
@@ -282,7 +314,9 @@ export class AuthModal {
     const phone = this.phoneInput?.value.trim();
     const country = this.phoneCountry?.value || '+91';
     const fullPhone = `${country}${phone}`;
-    const fullName = document.getElementById('auth-phone-fullname')?.value.trim();
+    const fullName = document
+      .getElementById('auth-phone-fullname')
+      ?.value.trim();
 
     if (!phone || phone.length < 8) {
       if (this.phoneError) {
@@ -293,18 +327,25 @@ export class AuthModal {
     }
 
     const btn = this.formPhoneRequest?.querySelector('button');
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending OTP…'; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Sending OTP…';
+    }
 
     try {
       // Use phone as email for backend (mock: phone@phone.sporekart)
-        const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
-      await authApi.requestOtp(mockEmail, this.currentRole, fullName || `User ${phone.slice(-4)}`);
+      const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
+      await authApi.requestOtp(
+        mockEmail,
+        this.currentRole,
+        fullName || `User ${phone.slice(-4)}`,
+      );
       this.phoneError?.classList.add('hidden');
 
       // Store mock email for verification step
       this._mockPhoneEmail = mockEmail;
-        // Also store last phone (human-readable) to attach to user after verification
-        this._lastPhone = fullPhone;
+      // Also store last phone (human-readable) to attach to user after verification
+      this._lastPhone = fullPhone;
       this.showVerifyView(fullPhone);
     } catch (err) {
       if (this.phoneError) {
@@ -312,7 +353,10 @@ export class AuthModal {
         this.phoneError.classList.remove('hidden');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Send OTP';
+      }
     }
   }
 
@@ -321,7 +365,10 @@ export class AuthModal {
     const fullName = this.nameInput?.value.trim();
 
     const btn = this.formRequest?.querySelector('button');
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+    }
 
     try {
       await authApi.requestOtp(email, this.currentRole, fullName);
@@ -333,7 +380,10 @@ export class AuthModal {
         this.requestError.classList.remove('hidden');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Get Access Code'; }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Get Access Code';
+      }
     }
   }
 
@@ -350,7 +400,10 @@ export class AuthModal {
     }
 
     const btn = this.formAdminLogin?.querySelector('button');
-    if (btn) { btn.disabled = true; btn.textContent = 'Logging in…'; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Logging in…';
+    }
 
     try {
       const data = await authApi.adminLogin(email, password);
@@ -365,7 +418,10 @@ export class AuthModal {
         this.adminLoginError.classList.remove('hidden');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Login'; }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Login';
+      }
     }
   }
 
@@ -374,14 +430,20 @@ export class AuthModal {
 
     // Determine contact to verify against
     const contact = this.activeMethod === 'phone'
-      ? (this._mockPhoneEmail || this.emailInput?.value.trim())
-      : (this.emailInput?.value.trim());
+      ? this._mockPhoneEmail || this.emailInput?.value.trim()
+      : this.emailInput?.value.trim();
 
     const btn = this.formVerify?.querySelector('button');
-    if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Verifying…';
+    }
 
     try {
-      const data = await authApi.verifyOtp(contact, otpCode, { loginMethod: this.activeMethod, whatsappNumber: this._lastPhone });
+      const data = await authApi.verifyOtp(contact, otpCode, {
+        loginMethod: this.activeMethod,
+        whatsappNumber: this._lastPhone,
+      });
       // Mark login method so profile UI can honor immutability rules
       data.user = data.user || {};
       data.user.loginMethod = this.activeMethod || 'email';
@@ -399,12 +461,20 @@ export class AuthModal {
         this.verifyError.classList.remove('hidden');
       }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Verify & Login'; }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Verify & Login';
+      }
     }
   }
 
-  _show(el) { if (el) el.classList.remove('hidden'); }
-  _hide(el) { if (el) el.classList.add('hidden'); }
+  _show(el) {
+    if (el) el.classList.remove('hidden');
+  }
+
+  _hide(el) {
+    if (el) el.classList.add('hidden');
+  }
 }
 
 // Lazy singleton
@@ -416,5 +486,5 @@ export const authModal = {
   },
   close: () => {
     if (_authModalInstance) _authModalInstance.close();
-  }
+  },
 };

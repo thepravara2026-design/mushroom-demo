@@ -1,12 +1,26 @@
 const db = require('../config/db');
 
 async function findByEmail(email) {
-  const { data, error } = await db.from('users').select('*').eq('email', email).single();
+  const { data, error } = await db
+    .from('users')
+    .select('*')
+    .eq('email', email)
+    .single();
+  if (error && error.message === 'No rows found') {
+    return { data: null, error: null };
+  }
   return { data, error };
 }
 
 async function findById(id) {
-  const { data, error } = await db.from('users').select('*').eq('id', id).single();
+  const { data, error } = await db
+    .from('users')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error && error.message === 'No rows found') {
+    return { data: null, error: null };
+  }
   return { data, error };
 }
 
@@ -16,7 +30,11 @@ async function create(payload) {
 }
 
 async function update(id, updates) {
-  const { data, error } = await db.from('users').update(updates).eq('id', id).single();
+  const { data, error } = await db
+    .from('users')
+    .update(updates)
+    .eq('id', id)
+    .single();
   return { data, error };
 }
 
@@ -31,4 +49,10 @@ async function remove(id) {
   return { data: existing, error: null };
 }
 
-module.exports = { findByEmail, findById, create, update, remove };
+module.exports = {
+  findByEmail,
+  findById,
+  create,
+  update,
+  remove,
+};

@@ -1,0 +1,54 @@
+{
+  "env": {
+    "node": true,
+    "browser": true,
+    "es2021": true,
+    "jest": true
+  },
+  "extends": ["airbnb-base"],
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "rules": {
+    "no-console": "warn",
+    "consistent-return": "warn",
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "func-names": "off",
+    "object-shorthand": "warn",
+    "prefer-arrow-callback": "warn",
+    "no-param-reassign": ["warn", { "props": false }],
+    "import/no-unresolved": ["error", { "ignore": ["^@"] }],
+    "import/extensions": ["error", "ignorePackages", { "js": "always" }],
+    "no-use-before-define": ["warn", { "functions": false, "classes": true, "variables": true }],
+    "camelcase": "off",
+    "no-restricted-globals": "off",
+    "no-nested-ternary": "warn",
+    "no-underscore-dangle": "off",
+    "import/named": "off",
+    "import/prefer-default-export": "off",
+    "no-promise-executor-return": "off",
+    "no-return-assign": "off",
+    "no-shadow": "off",
+    "class-methods-use-this": "off",
+    "no-case-declarations": "off",
+    "no-loop-func": "off",
+    "max-len": ["warn", { "code": 120 }]
+    ,"no-await-in-loop": "off",
+    "prefer-destructuring": "off",
+    "no-undef": "off"
+  },
+  "globals": {
+    "THREE": "readonly",
+    "Razorpay": "readonly"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**/*.js", "**/*.test.js"],
+      "rules": {
+        "no-unused-expressions": "off",
+        "func-names": "off"
+      }
+    }
+  ]
+}

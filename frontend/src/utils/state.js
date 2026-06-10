@@ -8,7 +8,7 @@ export const state = {
   promoDiscountPct: 0,
   shippingCharge: 0,
   activeTrackingId: null,
-  activeCategory: 'all'
+  activeCategory: 'all',
 };
 
 export function saveAuth(token, user) {
@@ -20,6 +20,11 @@ export function saveAuth(token, user) {
   } else {
     localStorage.removeItem('jwt_token');
     localStorage.removeItem('user_data');
+  }
+  try {
+    window.dispatchEvent(new CustomEvent('auth:changed', { detail: { token, user } }));
+  } catch (e) {
+    /* ignore */
   }
 }
 

@@ -8,7 +8,7 @@ const puppeteer = require('puppeteer');
     }
     const browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    
+
     // Ensure artifacts dir
     const ART_DIR = process.env.E2E_ARTIFACTS_DIR || './e2e-artifacts';
     const fs = require('fs');
@@ -16,9 +16,13 @@ const puppeteer = require('puppeteer');
 
     // Intercept requests and abort known external assets to avoid flaky network failures
     await page.setRequestInterception(true);
-    page.on('request', req => {
+    page.on('request', (req) => {
       const url = req.url();
-      const blockedHosts = ['checkout-static-next.razorpay.com', 'checkout.razorpay.com', 'cdn.razorpay.com'];
+      const blockedHosts = [
+        'checkout-static-next.razorpay.com',
+        'checkout.razorpay.com',
+        'cdn.razorpay.com',
+      ];
       try {
         const u = new URL(url);
         if (blockedHosts.includes(u.hostname)) {
@@ -36,22 +40,25 @@ const puppeteer = require('puppeteer');
     });
 
     // Capture console logs and errors to a file
-    const consoleLogPath = require('path').join(ART_DIR, 'puppeteer-console.log');
+    const consoleLogPath = require('path').join(
+      ART_DIR,
+      'puppeteer-console.log',
+    );
     const consoleStream = fs.createWriteStream(consoleLogPath, { flags: 'a' });
 
-    page.on('console', msg => {
+    page.on('console', (msg) => {
       const text = `BROWSER ${msg.type().toUpperCase()}: ${msg.text()}\n`;
       console.log(text.trim());
       consoleStream.write(text);
     });
 
-    page.on('pageerror', error => {
+    page.on('pageerror', (error) => {
       const text = `BROWSER PAGE ERROR: ${error.message}\n`;
       console.error(text.trim());
       consoleStream.write(text);
     });
 
-    page.on('requestfailed', request => {
+    page.on('requestfailed', (request) => {
       const failure = request.failure() || {};
       const text = `BROWSER REQUEST FAILED: ${request.url()} - ${failure.errorText || 'unknown'}\n`;
       console.error(text.trim());
@@ -77,6 +84,6 @@ const puppeteer = require('puppeteer');
     consoleStream.end();
     console.log('Browser test completed.');
   } catch (error) {
-    console.error("Test script failed:", error);
+    console.error('Test script failed:', error);
   }
 })();
