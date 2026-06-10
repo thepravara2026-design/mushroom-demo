@@ -2006,14 +2006,19 @@ button {
 .profile-modal-card {
   width: 100%;
   max-width: 1040px;
+  max-height: calc(100vh - 40px);
   background: var(--white);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-y: auto;
   box-shadow: var(--shadow-xl);
   border: 1px solid rgba(30, 58, 36, 0.08);
 }
 
-/* subtle entrance animation and responsive tweaks */
+.modal-overlay,
+.modal-overlay.open {
+  overflow-y: auto;
+}
+
 .profile-modal-card {
   transform: translateY(8px) scale(0.985);
   opacity: 0;
