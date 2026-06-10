@@ -16,21 +16,25 @@ const mockStore = {
   users: [],
   categories: [
     {
+      category_id: "spore-000001",
       id: "fresh",
       name: "Fresh Mushrooms",
       description: "Handpicked & hygienically packed for best taste"
     },
     {
+      category_id: "spore-000002",
       id: "dry",
       name: "Dry Mushrooms",
       description: "100% natural & sun-dried for rich nutrition"
     },
     {
+      category_id: "spore-000003",
       id: "spawn",
       name: "Spawn Seeds",
       description: "High quality spawn for better yield"
     },
     {
+      category_id: "spore-000004",
       id: "kits",
       name: "Mushroom Kits",
       description: "Ready-to-grow mushroom fruiting kits"
@@ -144,6 +148,12 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 65
+    }
+  ],
+  settings: [
+    {
+      key: 'shipping_charge',
+      value: 50
     }
   ],
   orders: []

@@ -1,13 +1,11 @@
-// SPOREKART CLIENT CONTROLLER
-import { state, saveAuth, clearAuth, saveCart } from './utils/state.js';
+import { state, saveAuth, clearAuth, saveCart, saveUserProfile } from './utils/state.js';
 import { authModal } from './components/AuthModal.js';
+import { profileModal } from './components/ProfileModal.js';
 import { authApi } from './api/authApi.js';
 import { API_BASE, fetchWithAuth } from './api/client.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
-
-
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadUser();
   fetchProducts();
   fetchCategories(); // Load categories for nav + admin
+  fetchShippingSettings();
   updateCartUI();
   initThreeJS();
   initScrollReveal();
@@ -22,9 +21,54 @@ document.addEventListener('DOMContentLoaded', () => {
   // If hash is present, route to it
   handleRouting();
 
-  // Routing — must be inside DOMContentLoaded so DOM is available
+  // Routing â€” must be inside DOMContentLoaded so DOM is available
   window.addEventListener('hashchange', handleRouting);
 });
+
+// Listen for category updates from admin (cross-tab)
+try {
+  const bc = new BroadcastChannel('spore-categories');
+  bc.addEventListener('message', (ev) => {
+    if (ev?.data?.type === 'categories:updated') {
+      fetchCategories();
+    }
+  });
+} catch (err) {
+  // BroadcastChannel might not be supported; ignore
+}
+
+function renderCategoryGrid(categories) {
+  const grid = document.getElementById('category-grid');
+  if (!grid) return;
+  const isAdmin = state.user?.role === 'admin';
+  grid.innerHTML = categories.map(cat => `
+    <div class="category-card" data-filter-category="${cat.id}">
+      ${isAdmin ? `<button class="category-admin-edit-btn" data-edit-category="${cat.id}" title="Edit category"><i class="fa-solid fa-pen"></i></button>` : ''}
+      <div class="category-img-wrap">
+        <img src="${cat.image_url || '/images/product_fresh.png'}" alt="${cat.name}">
+      </div>
+      <h3>${cat.name}</h3>
+      <p>${cat.description || ''}</p>
+      <button class="btn-category-shop" data-filter-category="${cat.id}">Shop Now <i class="fa-solid fa-arrow-right"></i></button>
+    </div>
+  `).join('');
+
+  // Ensure category card buttons navigate to filtered shop
+  grid.querySelectorAll('.btn-category-shop').forEach(btn => {
+    btn.addEventListener('click', () => {
+      navigateToCategory(btn.getAttribute('data-filter-category'));
+    });
+  });
+
+  if (isAdmin) {
+    grid.querySelectorAll('.category-admin-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const catId = btn.getAttribute('data-edit-category');
+        window.location.href = `/admin.html#categories?edit=${encodeURIComponent(catId)}`;
+      });
+    });
+  }
+}
 
 function handleRouting() {
   const hash = window.location.hash || '#shop';
@@ -33,6 +77,7 @@ function handleRouting() {
   const navAdmin = document.getElementById('btn-nav-admin');
   
   const pageShop = document.getElementById('shop-page');
+  const pageCheckout = document.getElementById('checkout-page');
   const pageTrack = document.getElementById('tracker-page');
   const pageAdmin = document.getElementById('admin-page');
   
@@ -44,13 +89,31 @@ function handleRouting() {
   navAdmin.classList.remove('active');
   
   pageShop.classList.remove('active');
+  if (pageCheckout) pageCheckout.classList.remove('active');
   pageTrack.classList.remove('active');
-  pageAdmin.classList.remove('active');
+  if (pageAdmin) pageAdmin.classList.remove('active');
 
   if (hash === '#shop' || hash === '') {
     navShop.classList.add('active');
     pageShop.classList.add('active');
     if (heroSection) heroSection.classList.remove('hidden');
+  } else if (hash === '#checkout') {
+    if (!state.user) {
+      authModal.open('buyer', () => {
+        window.location.hash = '#checkout';
+      });
+      return;
+    }
+
+    if (state.user.role === 'grower') {
+      if (heroSection) heroSection.classList.remove('hidden');
+      window.location.hash = '#shop';
+      return;
+    }
+
+    if (heroSection) heroSection.classList.add('hidden');
+    if (pageCheckout) pageCheckout.classList.add('active');
+    renderCheckoutPage();
   } else if (hash.startsWith('#track')) {
     // Access validation for tracking/grower portal
     if (!state.user || (state.user.role !== 'grower' && state.user.role !== 'admin')) {
@@ -72,25 +135,10 @@ function handleRouting() {
       state.activeTrackingId = match[1];
       startTrackingPoll(match[1]);
     }
-  } else if (hash === '#admin') {
-    // Access validation for admin console
-    if (!state.user || state.user.role !== 'admin') {
-      window.location.hash = '#shop';
-      return;
-    }
-
-    navAdmin.classList.add('active');
-    pageAdmin.classList.add('active');
-    if (heroSection) heroSection.classList.add('hidden');
-    fetchAdminInventory();
-    fetchAdminOrders();
-    fetchAdminCategories();
-  } else if (hash === '#admin-login') {
-    // Hidden Isolated Admin Route
-    const adminLoginModal = document.getElementById('admin-login-modal');
-    if (adminLoginModal) adminLoginModal.classList.add('open');
+  } else {
     navShop.classList.add('active');
     pageShop.classList.add('active');
+    if (heroSection) heroSection.classList.remove('hidden');
   }
 }
 
@@ -99,7 +147,19 @@ function handleRouting() {
 // ==========================================================================
 function initEventListeners() {
   // Navigation Routing Links
-  document.getElementById('btn-nav-shop').addEventListener('click', () => window.location.hash = '#shop');
+  // Category dropdown toggle (opens category menu and keeps shop routing available)
+  const btnNavShop = document.getElementById('btn-nav-shop');
+  if (btnNavShop) {
+    btnNavShop.addEventListener('click', (e) => {
+      e.preventDefault();
+      const dd = document.getElementById('cat-dropdown-menu');
+      if (!dd) return;
+      dd.classList.toggle('hidden');
+      dd.setAttribute('aria-hidden', dd.classList.contains('hidden'));
+      // Also ensure shop page is visible
+      window.location.hash = '#shop';
+    });
+  }
   
   document.getElementById('btn-nav-track').addEventListener('click', (e) => {
     e.preventDefault();
@@ -123,12 +183,6 @@ function initEventListeners() {
     });
   }
 
-  document.getElementById('btn-nav-admin').addEventListener('click', () => {
-    if (state.user && state.user.role === 'admin') {
-      window.location.hash = '#admin';
-    }
-  });
-
   document.getElementById('nav-logo').addEventListener('click', (e) => {
     e.preventDefault();
     window.location.hash = '#shop';
@@ -142,30 +196,6 @@ function initEventListeners() {
     handleRouting();
   });
 
-  // Admin isolated login form
-  document.getElementById('form-admin-auth')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const em = document.getElementById('admin-auth-email').value;
-    const pw = document.getElementById('admin-auth-password').value;
-    try {
-      const data = await authApi.adminLogin(em, pw);
-      saveAuth(data.token, data.user);
-      document.getElementById('admin-login-modal').classList.remove('open');
-      window.location.hash = '#admin';
-      window.dispatchEvent(new Event('auth:changed'));
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-  
-  document.getElementById('btn-close-admin-login')?.addEventListener('click', () => {
-    document.getElementById('admin-login-modal').classList.remove('open');
-    window.location.hash = '#shop';
-  });
-
-  // Admin Module Submissions
-  document.getElementById('form-admin-add-product').addEventListener('submit', handleAdminAddProduct);
-
   // Cart Slide Out Drawer
   document.getElementById('btn-open-cart').addEventListener('click', () => toggleCartDrawer(true));
   document.getElementById('btn-close-cart').addEventListener('click', () => toggleCartDrawer(false));
@@ -175,7 +205,24 @@ function initEventListeners() {
   document.getElementById('btn-apply-promo').addEventListener('click', applyPromoCode);
 
   // Checkout
-  document.getElementById('btn-checkout').addEventListener('click', handleCheckoutInitiation);
+  const btnCheckout = document.getElementById('btn-checkout');
+  if (btnCheckout) {
+    btnCheckout.addEventListener('click', handleCheckoutInitiation);
+  }
+
+  const btnPaymentContinue = document.getElementById('btn-payment-continue');
+  if (btnPaymentContinue) {
+    btnPaymentContinue.addEventListener('click', handlePaymentContinue);
+  }
+
+  const btnChangeCart = document.getElementById('btn-change-cart');
+  if (btnChangeCart) {
+    btnChangeCart.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.hash = '#shop';
+      toggleCartDrawer(true);
+    });
+  }
 
   // Calculator
   document.getElementById('btn-calculate-substrate').addEventListener('click', calculateSubstrateMix);
@@ -202,16 +249,21 @@ function initEventListeners() {
     });
   }
 
-  // Close suggestions on outside click
+  // Close suggestions and profile dropdown on outside click
   document.addEventListener('click', (e) => {
     const wrap = document.getElementById('topbar-search-wrap');
     if (wrap && !wrap.contains(e.target)) {
       const dd = document.getElementById('search-suggestions-dropdown');
       if (dd) dd.classList.add('hidden');
     }
+
+    const profileArea = document.getElementById('user-profile-section');
+    if (profileArea && !profileArea.contains(e.target)) {
+      closeUserProfileDropdown();
+    }
   });
 
-  // Category filter button toggles – scoped to the visible product filters row only
+  // Category filter button toggles â€“ scoped to the visible product filters row only
   document.querySelectorAll('#product-filters-row .cat-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#product-filters-row .cat-btn').forEach(b => b.classList.remove('active'));
@@ -237,68 +289,51 @@ function initEventListeners() {
     });
   });
 
-  // Category card "Shop Now" buttons – filter products and scroll to grid
+  // Mobile menu toggles
+  const btnMobile = document.getElementById('btn-mobile-menu');
+  const mobileNav = document.getElementById('mobile-nav');
+  const btnMobileClose = document.getElementById('btn-mobile-close');
+  if (btnMobile && mobileNav) {
+    btnMobile.addEventListener('click', () => {
+      mobileNav.classList.remove('hidden');
+    });
+  }
+  if (btnMobileClose && mobileNav) {
+    btnMobileClose.addEventListener('click', () => mobileNav.classList.add('hidden'));
+  }
+  // Clone main nav links into mobile nav
+  const mainLinks = document.getElementById('main-nav-links');
+  const mobileLinks = document.getElementById('mobile-nav-links');
+  if (mainLinks && mobileLinks) {
+    mobileLinks.innerHTML = mainLinks.innerHTML;
+    mobileLinks.querySelectorAll('.nav-link').forEach(a => {
+      a.addEventListener('click', (e) => {
+        mobileNav.classList.add('hidden');
+      });
+    });
+  }
+
+  // Admin inline modal triggers (desktop + mobile)
+  // Admin buttons removed - admin login now integrated in auth modal via "Staff? Use admin login" link
+  
+  // Mobile regular login button
+  const mobileAuthBtn = document.getElementById('btn-open-auth-mobile');
+  if (mobileAuthBtn) {
+    mobileAuthBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      mobileNav.classList.add('hidden');
+      authModal.open('buyer');
+    });
+  }
+
+  // Category card "Shop Now" buttons â€“ filter products and scroll to grid
   document.querySelectorAll('.btn-category-shop').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       navigateToCategory(btn.getAttribute('data-filter-category'));
     });
   });
-
-  // Admin tab switching
-  document.querySelectorAll('.admin-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.admin-tab-content').forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const contentId = `admin-content-${tab.dataset.tab}`;
-      const content = document.getElementById(contentId);
-      if (content) content.classList.add('active');
-
-      // Lazy load orders if switching to orders tab
-      if (tab.dataset.tab === 'orders') fetchAdminOrders();
-    });
-  });
-
-  // Admin form image preview
-  document.getElementById('admin-prod-image')?.addEventListener('input', function() {
-    const preview = document.getElementById('admin-img-preview');
-    if (preview) {
-      if (this.value) {
-        preview.innerHTML = `<img src="${this.value}" alt="Preview" onerror="this.parentElement.innerHTML='<i class=\'fa-solid fa-image\'></i><span>Invalid image URL</span>'">`;
-      } else {
-        preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
-      }
-    }
-  });
-
-  // Admin search/filter in inventory tab
-  document.getElementById('admin-search-prod')?.addEventListener('input', renderAdminInventory);
-  document.getElementById('admin-filter-cat')?.addEventListener('change', renderAdminInventory);
-
-  // Admin form reset button
-  document.getElementById('btn-admin-reset-form')?.addEventListener('click', resetAdminForm);
-
-  // Admin exit-to-shop and logout buttons
-  document.getElementById('btn-admin-exit-shop')?.addEventListener('click', () => {
-    window.location.hash = '#shop';
-  });
-  document.getElementById('btn-admin-logout')?.addEventListener('click', () => {
-    logout();
-  });
-
-  // Admin categories tab switching
-  document.querySelectorAll('.admin-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      if (tab.dataset.tab === 'categories') fetchAdminCategories();
-    });
-  });
-
-  // Admin category form actions
-  document.getElementById('btn-admin-save-cat')?.addEventListener('click', handleAdminSaveCategory);
-  document.getElementById('btn-admin-reset-cat')?.addEventListener('click', resetAdminCatForm);
 }
-
 
 // ==========================================================================
 // USER AUTH CONTROLLERS
@@ -324,38 +359,89 @@ async function loadUser() {
 
 function logout() {
   clearAuth();
+  closeUserProfileDropdown();
   updateAuthHeaderUI();
   window.location.hash = '#shop';
+}
+
+function closeUserProfileDropdown() {
+  const dropdown = document.getElementById('user-profile-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+  const profileButton = document.getElementById('btn-open-profile');
+  if (profileButton) profileButton.setAttribute('aria-expanded', 'false');
+}
+
+function toggleUserProfileDropdown() {
+  const dropdown = document.getElementById('user-profile-dropdown');
+  if (!dropdown) return;
+  const isHidden = dropdown.classList.contains('hidden');
+  closeUserProfileDropdown();
+  if (isHidden) {
+    dropdown.classList.remove('hidden');
+    document.getElementById('btn-open-profile')?.setAttribute('aria-expanded', 'true');
+  }
 }
 
 function updateAuthHeaderUI() {
   const profileSection = document.getElementById('user-profile-section');
   const navTrack = document.getElementById('btn-nav-track');
   const navAdmin = document.getElementById('btn-nav-admin');
+  const navAdminEntry = document.getElementById('btn-admin-entry');
 
   if (state.user) {
     const roleLabel = state.user.role.toUpperCase();
+    const roleAction = state.user.role === 'admin'
+      ? `<button class="profile-dropdown-item" id="btn-open-admin-console"><i class="fa-solid fa-user-shield"></i> Admin Console</button>`
+      : state.user.role === 'grower'
+        ? `<button class="profile-dropdown-item" id="btn-open-track-orders"><i class="fa-solid fa-truck-fast"></i> Track Orders</button>`
+        : '';
+
     profileSection.innerHTML = `
-      <div class="user-profile-nav">
-        <span><i class="fa-solid fa-circle-user text-primary"></i> ${state.user.fullName} <span style="font-size:0.7rem; background:rgba(255,255,255,0.08); padding:0.2rem 0.4rem; border-radius:4px; margin-left:0.25rem;">${roleLabel}</span></span>
-        <button class="btn btn-secondary" id="btn-logout" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
-          <i class="fa-solid fa-right-from-bracket"></i> Exit
+      <div class="user-profile-wrap">
+        <button class="user-profile-btn" id="btn-open-profile" type="button" aria-haspopup="menu" aria-expanded="false">
+          <i class="fa-solid fa-circle-user"></i>
+          <span class="user-profile-name">${state.user.fullName}</span>
+          <i class="fa-solid fa-chevron-down dropdown-caret"></i>
         </button>
+        <div class="user-profile-dropdown hidden" id="user-profile-dropdown" role="menu" aria-label="User menu">
+          <button class="profile-dropdown-item" id="btn-open-profile-modal" type="button"><i class="fa-solid fa-id-badge"></i> Profile</button>
+          ${roleAction}
+          <button class="profile-dropdown-item danger" id="btn-user-logout" type="button"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+        </div>
       </div>
     `;
-    document.getElementById('btn-logout').addEventListener('click', logout);
+
+    document.getElementById('btn-open-profile')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleUserProfileDropdown();
+    });
+    document.getElementById('btn-open-profile-modal')?.addEventListener('click', () => {
+      closeUserProfileDropdown();
+      profileModal.open();
+    });
+    document.getElementById('btn-open-admin-console')?.addEventListener('click', () => {
+      closeUserProfileDropdown();
+      window.location.href = '/admin.html';
+    });
+    document.getElementById('btn-open-track-orders')?.addEventListener('click', () => {
+      closeUserProfileDropdown();
+      window.location.hash = '#track';
+    });
+    document.getElementById('btn-open-my-orders')?.addEventListener('click', () => {
+      closeUserProfileDropdown();
+      window.location.hash = '#checkout';
+    });
+    document.getElementById('btn-user-logout')?.addEventListener('click', logout);
 
     // Toggle navigation visibilities
     if (state.user.role === 'admin') {
       navTrack.style.display = 'inline-flex';
       navAdmin.style.display = 'inline-flex';
-    } else if (state.user.role === 'grower') {
-      navTrack.style.display = 'inline-flex';
-      navAdmin.style.display = 'none';
+      if (navAdminEntry) navAdminEntry.style.display = 'none';
     } else {
-      // Buyer
-      navTrack.style.display = 'none';
+      navTrack.style.display = state.user.role === 'grower' ? 'inline-flex' : 'none';
       navAdmin.style.display = 'none';
+      if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
     }
   } else {
     profileSection.innerHTML = `
@@ -366,6 +452,7 @@ function updateAuthHeaderUI() {
     document.getElementById('btn-open-auth').addEventListener('click', () => authModal.open('buyer'));
     navTrack.style.display = 'none';
     navAdmin.style.display = 'none';
+    if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
   }
 }
 
@@ -658,10 +745,15 @@ async function openProductDetails(id) {
 function toggleCartDrawer(open) {
   const drawer = document.getElementById('cart-drawer');
   const overlay = document.getElementById('cart-drawer-overlay');
+  const phoneInput = document.getElementById('checkout-delivery-phone');
   
   if (open) {
     drawer.classList.add('open');
     overlay.classList.add('open');
+    if (phoneInput && state.user) {
+      const phoneValue = state.user.whatsapp_number || state.user.whatsappNumber || state.user.phone || '';
+      if (!phoneInput.value && phoneValue) phoneInput.value = phoneValue;
+    }
   } else {
     drawer.classList.remove('open');
     overlay.classList.remove('open');
@@ -669,26 +761,67 @@ function toggleCartDrawer(open) {
 }
 
 function addToCart(productId) {
+  // Ensure a lightweight guest profile exists for anonymous users so they have a profile page
+  if (!state.user) {
+    const guest = { id: 'guest_' + Date.now(), fullName: 'Guest User', email: '', whatsappNumber: '', role: 'buyer', loginMethod: 'guest' };
+    saveUserProfile(guest);
+    updateAuthHeaderUI();
+  }
+
   const existing = state.cart.find(item => item.id === productId);
+  let addedItem;
   
   if (existing) {
     existing.quantity += 1;
+    addedItem = existing;
   } else {
     const product = state.products.find(p => p.id === productId);
     if (!product) return;
-    state.cart.push({
+    const newItem = {
       id: product.id,
       name: product.name,
       price: product.price,
       image_url: product.image_url,
       gst_rate: product.gst_rate,
       quantity: 1
-    });
+    };
+    state.cart.push(newItem);
+    addedItem = newItem;
   }
 
   saveCart();
   updateCartUI();
+  showAddedToCartPopup(addedItem);
   toggleCartDrawer(true);
+}
+
+function showAddedToCartPopup(item) {
+  document.getElementById('added-to-cart-popup')?.remove();
+  const popup = document.createElement('div');
+  popup.id = 'added-to-cart-popup';
+  popup.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9999;max-width:340px;background:#fff;padding:14px 16px;border-radius:14px;box-shadow:0 18px 52px rgba(0,0,0,0.18);font-family:inherit;';
+  popup.innerHTML = `
+    <div style="display:flex;gap:12px;align-items:center;">
+      <img src="${item.image_url || '/images/product_fresh.png'}" alt="${item.name}" style="width:56px;height:56px;object-fit:cover;border-radius:12px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;margin-bottom:3px;">Added to cart</div>
+        <div style="font-size:0.92rem;color:#4b5563;line-height:1.3;">${item.name}</div>
+        <div style="font-size:0.95rem;color:#111;margin-top:6px;">₹${item.price.toFixed(2)}</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:10px;">
+      <button id="popup-view-cart" class="btn btn-secondary" style="flex:1;">View Cart</button>
+      <button id="popup-continue" class="btn btn-primary" style="flex:1;">Continue</button>
+    </div>
+  `;
+
+  document.body.appendChild(popup);
+  document.getElementById('popup-view-cart')?.addEventListener('click', () => {
+    toggleCartDrawer(true);
+    popup.remove();
+  });
+  document.getElementById('popup-continue')?.addEventListener('click', () => popup.remove());
+  setTimeout(() => popup.remove(), 4200);
 }
 
 function changeQuantity(productId, delta) {
@@ -743,6 +876,17 @@ function applyPromoCode() {
   updateCartUI();
 }
 
+async function fetchShippingSettings() {
+  try {
+    const response = await fetch(`${API_BASE}/orders/shipping-settings`);
+    const data = await response.json();
+    state.shippingCharge = Number(data.shipping_charge || 0);
+    updateCartUI();
+  } catch (err) {
+    console.warn('Unable to load shipping charge:', err);
+  }
+}
+
 function updateCartUI() {
   const container = document.getElementById('cart-items-container');
   const countBadge = document.getElementById('cart-count');
@@ -757,10 +901,14 @@ function updateCartUI() {
         <p>Your basket is barren. Select some genetics or spawn to get growing!</p>
       </div>
     `;
-    document.getElementById('ledger-subtotal').textContent = '₹0.00';
-    document.getElementById('ledger-discount-row').classList.add('hidden');
-    document.getElementById('ledger-tax').textContent = '₹0.00';
-    document.getElementById('ledger-total').textContent = '₹0.00';
+    const subtotalEl = document.getElementById('ledger-subtotal');
+    const discountRow = document.getElementById('ledger-discount-row');
+    const taxEl = document.getElementById('ledger-tax');
+    const totalEl = document.getElementById('ledger-total');
+    if (subtotalEl) subtotalEl.textContent = '₹0.00';
+    if (discountRow) discountRow.classList.add('hidden');
+    if (taxEl) taxEl.textContent = '₹0.00';
+    if (totalEl) totalEl.textContent = '₹0.00';
     return;
   }
 
@@ -798,19 +946,33 @@ function updateCartUI() {
   });
 
   const discountAmount = subtotal * state.promoDiscountPct;
-  const netTotal = subtotal - discountAmount + gstAmount;
+  const shippingCharge = Number(state.shippingCharge || 0);
+  const netTotal = subtotal - discountAmount + gstAmount + shippingCharge;
 
-  document.getElementById('ledger-subtotal').textContent = `₹${subtotal.toFixed(2)}`;
+  const subtotalEl = document.getElementById('ledger-subtotal');
+  const discountEl = document.getElementById('ledger-discount');
+  const discountRow = document.getElementById('ledger-discount-row');
+  const shippingRow = document.getElementById('ledger-shipping-row');
+  const shippingEl = document.getElementById('ledger-shipping');
+  const taxEl = document.getElementById('ledger-tax');
+  const totalEl = document.getElementById('ledger-total');
+
+  if (subtotalEl) subtotalEl.textContent = `₹${subtotal.toFixed(2)}`;
   
   if (discountAmount > 0) {
-    document.getElementById('ledger-discount').textContent = `-₹${discountAmount.toFixed(2)}`;
-    document.getElementById('ledger-discount-row').classList.remove('hidden');
+    if (discountEl) discountEl.textContent = `-₹${discountAmount.toFixed(2)}`;
+    if (discountRow) discountRow.classList.remove('hidden');
   } else {
-    document.getElementById('ledger-discount-row').classList.add('hidden');
+    if (discountRow) discountRow.classList.add('hidden');
   }
 
-  document.getElementById('ledger-tax').textContent = `₹${gstAmount.toFixed(2)}`;
-  document.getElementById('ledger-total').textContent = `₹${netTotal.toFixed(2)}`;
+  if (shippingEl && shippingRow) {
+    shippingEl.textContent = `₹${shippingCharge.toFixed(2)}`;
+    shippingRow.style.display = shippingCharge > 0 ? 'flex' : 'none';
+  }
+
+  if (taxEl) taxEl.textContent = `₹${gstAmount.toFixed(2)}`;
+  if (totalEl) totalEl.textContent = `₹${netTotal.toFixed(2)}`;
 }
 
 window.changeQty = changeQuantity;
@@ -845,23 +1007,221 @@ function calculateSubstrateMix() {
 // ==========================================================================
 async function handleCheckoutInitiation() {
   const warning = document.getElementById('cart-auth-warning');
-  warning.classList.add('hidden');
+  if (warning) warning.classList.add('hidden');
 
-  // FORCE USER REGISTRATION/LOGIN BEFORE BUYING
   if (!state.user) {
-    warning.textContent = "⚠️ Please verify your identity to complete checkout.";
-    warning.classList.remove('hidden');
+    if (warning) {
+      warning.textContent = "⚠️ Please verify your identity to complete checkout.";
+      warning.classList.remove('hidden');
+    }
     authModal.open('buyer', () => {
-      // Upon successful auth, attempt checkout again
-      handleCheckoutInitiation();
+      showAddressModal();
     });
     return;
   }
 
-  // Growers are registered for Cultivation Support, block them from buying or suggest Buyer account
   if (state.user.role === 'grower') {
-    warning.textContent = "⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.";
-    warning.classList.remove('hidden');
+    if (warning) {
+      warning.textContent = "⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.";
+      warning.classList.remove('hidden');
+    }
+    return;
+  }
+
+  showAddressModal();
+}
+
+function showAddressModal() {
+  document.getElementById('address-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'address-modal';
+  modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.64);z-index:9999;padding:16px;';
+  const initialPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || (state.user?.whatsapp_number || state.user?.phone || '');
+  const initialName = document.getElementById('checkout-delivery-name')?.value.trim() || (state.user?.fullName || '');
+  const initialPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
+  const initialAddress = document.getElementById('checkout-delivery-address')?.value.trim() || '';
+  modal.innerHTML = `
+    <div style="width:100%;max-width:460px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 28px 80px rgba(15,23,42,0.24);">
+      <div style="padding:18px 20px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+        <h3 style="margin:0;font-size:1.15rem;color:#111;">Delivery details</h3>
+        <p style="margin:8px 0 0;color:#475569;line-height:1.5;">Enter phone, pincode and address before payment.</p>
+      </div>
+      <div style="padding:18px 20px;display:grid;gap:12px;">
+        <label style="font-weight:600;color:#334155;">Full name</label>
+        <input id="modal-delivery-name" type="text" value="${initialName}" placeholder="Your full name" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">
+        <label style="font-weight:600;color:#334155;">Phone</label>
+        <input id="modal-delivery-phone" type="tel" value="${initialPhone}" placeholder="10-15 digit phone" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">
+        <label style="font-weight:600;color:#334155;">Pincode</label>
+        <input id="modal-delivery-pincode" type="text" value="${initialPincode}" placeholder="6-digit pincode" maxlength="6" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">
+        <label style="font-weight:600;color:#334155;">Address</label>
+        <textarea id="modal-delivery-address" rows="4" placeholder="House no., street, landmark, city" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">${initialAddress}</textarea>
+        <div id="modal-address-feedback" style="color:#b91c1c;display:none;font-size:0.95rem;"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="modal-cancel" class="btn btn-secondary" style="flex:1;">Cancel</button>
+          <button id="modal-continue" class="btn btn-primary" style="flex:1;">Proceed to Checkout</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.querySelector('#modal-cancel')?.addEventListener('click', () => modal.remove());
+  modal.querySelector('#modal-continue')?.addEventListener('click', async () => {
+    const name = modal.querySelector('#modal-delivery-name')?.value.trim() || '';
+    const phone = modal.querySelector('#modal-delivery-phone')?.value.trim() || '';
+    const pincode = modal.querySelector('#modal-delivery-pincode')?.value.trim() || '';
+    const address = modal.querySelector('#modal-delivery-address')?.value.trim() || '';
+    const feedback = modal.querySelector('#modal-address-feedback');
+    if (feedback) {
+      feedback.style.display = 'none';
+      feedback.textContent = '';
+    }
+
+    if (!phone || phone.replace(/\D/g, '').length < 10 || phone.replace(/\D/g, '').length > 15) {
+      if (feedback) {
+        feedback.textContent = 'Enter a valid phone number (10-15 digits).';
+        feedback.style.display = 'block';
+      }
+      return;
+    }
+
+    if (!/^[0-9]{6}$/.test(pincode)) {
+      if (feedback) {
+        feedback.textContent = 'Enter a valid 6-digit pincode.';
+        feedback.style.display = 'block';
+      }
+      return;
+    }
+
+    if (!address) {
+      if (feedback) {
+        feedback.textContent = 'Delivery address is required.';
+        feedback.style.display = 'block';
+      }
+      return;
+    }
+
+    // Name mandatory
+    if (!name) {
+      if (feedback) {
+        feedback.textContent = 'Full name is required for delivery.';
+        feedback.style.display = 'block';
+      }
+      return;
+    }
+
+    modal.remove();
+    const phoneInput = document.getElementById('checkout-delivery-phone');
+    const pincodeInput = document.getElementById('checkout-delivery-pincode');
+    const addressInput = document.getElementById('checkout-delivery-address');
+    if (phoneInput) phoneInput.value = phone;
+    if (pincodeInput) pincodeInput.value = pincode;
+    if (addressInput) addressInput.value = address;
+
+    // Update user basic details with delivery info
+    if (!state.user) {
+      // create guest profile locally
+      const guest = { id: 'guest_' + Date.now(), fullName: name, email: '', whatsappNumber: phone, role: 'buyer', loginMethod: 'guest', defaultAddress: address, defaultPincode: pincode };
+      saveUserProfile(guest);
+      window.dispatchEvent(new Event('auth:changed'));
+    } else {
+      // update local state and attempt server update
+      const updated = Object.assign({}, state.user, { fullName: name, whatsappNumber: phone, defaultAddress: address, defaultPincode: pincode });
+      saveUserProfile(updated);
+      window.dispatchEvent(new Event('auth:changed'));
+      if (state.token) {
+        try {
+          await fetchWithAuth('/auth/me', { method: 'PUT', body: JSON.stringify({ fullName: name, whatsappNumber: phone, default_address: address, default_pincode: pincode }) });
+        } catch (err) {
+          console.warn('Failed to persist delivery details to server:', err.message || err);
+        }
+      }
+    }
+
+    window.location.hash = '#checkout';
+  });
+}
+
+function renderCheckoutPage() {
+  const summaryContainer = document.getElementById('checkout-order-summary');
+  if (!summaryContainer) return;
+
+  if (!state.cart.length) {
+    summaryContainer.innerHTML = `
+      <div class="grid-skeleton">
+        <i class="fa-solid fa-cart-shopping loader-icon"></i>
+        <p>Your cart is empty. Add items before continuing to payment.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const lines = state.cart.map(item => {
+    const product = state.products.find(p => p.id === item.id) || {};
+    return `
+      <div class="checkout-summary-line">
+        <span>${item.quantity}× ${product.name || 'Product'}</span>
+        <strong>₹${((product.price || 0) * item.quantity).toFixed(2)}</strong>
+      </div>
+    `;
+  });
+
+  const subtotal = state.cart.reduce((total, item) => {
+    const product = state.products.find(p => p.id === item.id) || {};
+    return total + ((product.price || 0) * item.quantity);
+  }, 0);
+  const gst = +(subtotal * 0.05).toFixed(2);
+  const discount = state.activePromo ? 50 : 0;
+  const shipping = Number(state.shippingCharge || 0);
+  const total = subtotal + gst + shipping - discount;
+
+  summaryContainer.innerHTML = `
+    <div class="checkout-summary-item-list">
+      ${lines.join('')}
+    </div>
+    <div class="checkout-summary-totals">
+      <div><span>Subtotal</span><span>₹${subtotal.toFixed(2)}</span></div>
+      <div><span>GST (5%)</span><span>₹${gst.toFixed(2)}</span></div>
+      <div><span>Shipping</span><span>₹${shipping.toFixed(2)}</span></div>
+      <div><span>Discount</span><span>₹${discount.toFixed(2)}</span></div>
+      <div class="checkout-summary-total"><span>Total</span><strong>₹${total.toFixed(2)}</strong></div>
+    </div>
+  `;
+}
+
+async function handlePaymentContinue() {
+  const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
+  const deliveryAddress = document.getElementById('checkout-delivery-address')?.value.trim() || '';
+  const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
+  const feedback = document.getElementById('checkout-page-feedback');
+
+  if (feedback) {
+    feedback.textContent = '';
+    feedback.classList.add('hidden');
+  }
+
+  if (!deliveryPhone || deliveryPhone.replace(/\D/g, '').length < 10 || deliveryPhone.replace(/\D/g, '').length > 15) {
+    if (feedback) {
+      feedback.textContent = 'Enter a valid delivery phone number (10-15 digits).';
+      feedback.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (!deliveryPincode || !/^\d{6}$/.test(deliveryPincode)) {
+    if (feedback) {
+      feedback.textContent = 'Enter a valid 6-digit pincode.';
+      feedback.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (!deliveryAddress) {
+    if (feedback) {
+      feedback.textContent = 'Delivery address cannot be empty.';
+      feedback.classList.remove('hidden');
+    }
     return;
   }
 
@@ -870,7 +1230,10 @@ async function handleCheckoutInitiation() {
       method: 'POST',
       body: JSON.stringify({
         items: state.cart.map(item => ({ id: item.id, quantity: item.quantity })),
-        promoCode: state.activePromo
+        promoCode: state.activePromo,
+        delivery_phone: deliveryPhone,
+        delivery_address: deliveryAddress,
+        delivery_pincode: deliveryPincode
       })
     });
 
@@ -909,10 +1272,12 @@ async function handleCheckoutInitiation() {
       const rzp = new Razorpay(options);
       rzp.open();
     }
-
   } catch (err) {
-    console.error("Checkout initiation failed: ", err);
-    alert("Connection to billing server timed out.");
+    console.error('Continue to payment failed:', err);
+    if (feedback) {
+      feedback.textContent = 'Unable to connect to payment service. Please try again later.';
+      feedback.classList.remove('hidden');
+    }
   }
 }
 
@@ -939,7 +1304,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
       box-shadow:0 24px 80px rgba(0,0,0,0.6);
       font-family:'Inter',sans-serif; color:#e2e8f0;
     ">
-      <!-- ─── HEADER BAR ─── -->
+      <!-- â”€â”€â”€ HEADER BAR â”€â”€â”€ -->
       <div style="
         display:flex; align-items:center; justify-content:space-between;
         padding:14px 20px; background:#091410;
@@ -961,7 +1326,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
         </div>
       </div>
 
-      <!-- ─── BODY: LEFT TABS + RIGHT PANEL ─── -->
+      <!-- â”€â”€â”€ BODY: LEFT TABS + RIGHT PANEL â”€â”€â”€ -->
       <div style="display:flex; flex:1; overflow:hidden; min-height:0;">
 
         <!-- LEFT METHOD LIST -->
@@ -1000,7 +1365,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
         <!-- RIGHT CONTENT PANEL -->
         <div style="flex:1; overflow-y:auto; padding:20px 22px;">
 
-          <!-- ══ UPI ══ -->
+          <!-- â•â• UPI â•â• -->
           <div class="pgw-panel" id="pgw-panel-upi" style="display:block;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">PAY VIA UPI</div>
 
@@ -1025,7 +1390,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               `).join('')}
             </div>
 
-            <div style="text-align:center;color:#475569;font-size:0.78rem;margin-bottom:14px;">— or enter UPI ID —</div>
+            <div style="text-align:center;color:#475569;font-size:0.78rem;margin-bottom:14px;">â€” or enter UPI ID â€”</div>
 
             <div style="display:flex;gap:8px;margin-bottom:18px;">
               <input id="pgw-upi-id" type="text" placeholder="yourname@upi" value="test@upi" style="
@@ -1040,7 +1405,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               ">Verify</button>
             </div>
             <div id="pgw-upi-verified" style="display:none;background:rgba(56,177,123,0.1);border:1px solid rgba(56,177,123,0.3);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.82rem;color:#38b17b;">
-              <i class="fa-solid fa-circle-check"></i> UPI ID verified — Test User
+              <i class="fa-solid fa-circle-check"></i> UPI ID verified â€” Test User
             </div>
             <button class="pgw-pay-btn" id="pgw-btn-pay-upi" style="
               width:100%; padding:14px; background:linear-gradient(135deg,#38b17b,#1a7a52);
@@ -1051,7 +1416,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </button>
           </div>
 
-          <!-- ══ CARD ══ -->
+          <!-- â•â• CARD â•â• -->
           <div class="pgw-panel" id="pgw-panel-card" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">CREDIT / DEBIT CARD</div>
 
@@ -1115,7 +1480,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </div>
           </div>
 
-          <!-- ══ NET BANKING ══ -->
+          <!-- â•â• NET BANKING â•â• -->
           <div class="pgw-panel" id="pgw-panel-netbank" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">NET BANKING</div>
 
@@ -1160,11 +1525,11 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               border:none;border-radius:10px;color:#fff;font-size:0.95rem;font-weight:700;
               cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;
             ">
-              <i class="fa-solid fa-building-columns"></i> Proceed to Bank — ₹${amount}
+              <i class="fa-solid fa-building-columns"></i> Proceed to Bank â€” ₹${amount}
             </button>
           </div>
 
-          <!-- ══ WALLETS ══ -->
+          <!-- â•â• WALLETS â•â• -->
           <div class="pgw-panel" id="pgw-panel-wallet" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">MOBILE WALLETS</div>
 
@@ -1202,7 +1567,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </button>
           </div>
 
-          <!-- ══ EMI ══ -->
+          <!-- â•â• EMI â•â• -->
           <div class="pgw-panel" id="pgw-panel-emi" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">EMI OPTIONS</div>
 
@@ -1225,7 +1590,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                     <input type="radio" name="pgw-emi" value="${e.months}" ${i===0?'checked':''} style="accent-color:#38b17b;">
                     <div style="flex:1;">
                       <div style="font-size:0.88rem;font-weight:600;">${e.months} Months EMI</div>
-                      <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${e.bank} · ${e.rate}% p.a.</div>
+                      <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${e.bank} Â· ${e.rate}% p.a.</div>
                     </div>
                     <div style="text-align:right;">
                       <div style="font-size:0.95rem;font-weight:700;color:#fbbf24;">₹${emi.toFixed(0)}/mo</div>
@@ -1249,12 +1614,12 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </button>
           </div>
 
-          <!-- ══ COD ══ -->
+          <!-- â•â• COD â•â• -->
           <div class="pgw-panel" id="pgw-panel-cod" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">CASH ON DELIVERY</div>
 
             <div style="background:rgba(56,177,123,0.08);border:1px solid rgba(56,177,123,0.2);border-radius:12px;padding:20px;margin-bottom:20px;text-align:center;">
-              <div style="font-size:2.5rem;margin-bottom:10px;">💵</div>
+              <div style="font-size:2.5rem;margin-bottom:10px;">ðŸ’µ</div>
               <div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin-bottom:6px;">Pay ₹${amount} at Delivery</div>
               <div style="font-size:0.82rem;color:#94a3b8;">Keep exact change ready. Our delivery partner will collect cash at your doorstep.</div>
             </div>
@@ -1262,7 +1627,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
               ${[
                 { icon:'fa-box-open',    text:'Order confirmed immediately' },
-                { icon:'fa-truck-fast',  text:'Delivered in 2–5 business days' },
+                { icon:'fa-truck-fast',  text:'Delivered in 2â€“5 business days' },
                 { icon:'fa-hand-holding-dollar', text:'Pay only when you receive' },
                 { icon:'fa-rotate-left', text:'Easy return policy' },
               ].map(f => `
@@ -1281,14 +1646,14 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               border:none;border-radius:10px;color:#fff;font-size:0.95rem;font-weight:700;
               cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;
             ">
-              <i class="fa-solid fa-box-open"></i> Place Order — Pay on Delivery
+              <i class="fa-solid fa-box-open"></i> Place Order â€” Pay on Delivery
             </button>
           </div>
 
         </div><!-- end right panel -->
       </div><!-- end body -->
 
-      <!-- ─── FOOTER ─── -->
+      <!-- â”€â”€â”€ FOOTER â”€â”€â”€ -->
       <div style="
         display:flex; align-items:center; justify-content:space-between;
         padding:10px 20px; background:#091410; border-top:1px solid rgba(56,177,123,0.12);
@@ -1301,14 +1666,14 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
           background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:6px;
           padding:5px 14px;color:#64748b;font-size:0.75rem;cursor:pointer;font-family:inherit;
           transition:all 0.18s;
-        ">✕ Cancel</button>
+        ">âœ• Cancel</button>
       </div>
     </div>
   `;
 
   document.body.appendChild(mockModal);
 
-  // ── TAB SWITCHING ──
+  // â”€â”€ TAB SWITCHING â”€â”€
   function switchTab(tabId) {
     mockModal.querySelectorAll('.pgw-tab-btn').forEach(btn => {
       const active = btn.dataset.tab === tabId;
@@ -1333,7 +1698,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
     });
   });
 
-  // ── UPI App buttons ──
+  // â”€â”€ UPI App buttons â”€â”€
   mockModal.querySelectorAll('.pgw-upi-app-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       mockModal.querySelectorAll('.pgw-upi-app-btn').forEach(b => {
@@ -1345,19 +1710,19 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
     });
   });
 
-  // ── UPI Verify ──
+  // â”€â”€ UPI Verify â”€â”€
   document.getElementById('pgw-upi-verify-btn')?.addEventListener('click', () => {
     const upiId = document.getElementById('pgw-upi-id').value.trim();
     if (upiId) {
       const verified = document.getElementById('pgw-upi-verified');
       if (verified) {
         verified.style.display = 'block';
-        verified.innerHTML = `<i class="fa-solid fa-circle-check"></i> UPI ID verified — ${upiId}`;
+        verified.innerHTML = `<i class="fa-solid fa-circle-check"></i> UPI ID verified â€” ${upiId}`;
       }
     }
   });
 
-  // ── Bank highlight ──
+  // â”€â”€ Bank highlight â”€â”€
   mockModal.querySelectorAll('.pgw-bank-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       mockModal.querySelectorAll('.pgw-bank-btn').forEach(b => {
@@ -1369,7 +1734,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
     });
   });
 
-  // ── Wallet highlight ──
+  // â”€â”€ Wallet highlight â”€â”€
   mockModal.querySelectorAll('.pgw-wallet-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       mockModal.querySelectorAll('.pgw-wallet-btn').forEach(b => {
@@ -1381,7 +1746,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
     });
   });
 
-  // ── PAYMENT CONFIRM helper ──
+  // â”€â”€ PAYMENT CONFIRM helper â”€â”€
   async function doPayment(btnId) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
@@ -1399,22 +1764,22 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
     await completeOrderPayment(orderId, mockPaymentId, mockSignature);
   }
 
-  // ── Wire all pay buttons ──
+  // â”€â”€ Wire all pay buttons â”€â”€
   ['pgw-btn-pay-upi','pgw-btn-pay-card','pgw-btn-pay-netbank','pgw-btn-pay-wallet','pgw-btn-pay-emi','pgw-btn-pay-cod'].forEach(id => {
     document.getElementById(id)?.addEventListener('click', () => doPayment(id));
   });
 
-  // ── Cancel ──
+  // â”€â”€ Cancel â”€â”€
   document.getElementById('pgw-btn-cancel')?.addEventListener('click', () => {
     mockModal.remove();
-    showSuccessToast('⚠️ Payment cancelled. Your cart is still saved.');
+    showSuccessToast('âš ï¸ Payment cancelled. Your cart is still saved.');
   });
 
-  // ── Outside click to cancel ──
+  // â”€â”€ Outside click to cancel â”€â”€
   mockModal.addEventListener('click', e => {
     if (e.target === mockModal) {
       mockModal.remove();
-      showSuccessToast('⚠️ Payment cancelled. Your cart is still saved.');
+      showSuccessToast('âš ï¸ Payment cancelled. Your cart is still saved.');
     }
   });
 }
@@ -1444,8 +1809,11 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       const promoMsg = document.getElementById('promo-message');
       if (promoMsg) promoMsg.classList.add('hidden');
 
+      // Refresh shop inventory quantities immediately after payment
+      await fetchProducts();
+
       // Show success notification
-      showSuccessToast('🎉 Order placed successfully! Payment confirmed.');
+      showSuccessToast('ðŸŽ‰ Order placed successfully! Payment confirmed.');
       
       // Admin and Growers can track orders; Buyers go back to shop
       if (state.user && (state.user.role === 'admin' || state.user.role === 'grower')) {
@@ -1577,6 +1945,8 @@ function renderTrackingDetails(track) {
     `;
   }).join('');
 
+  const canCancel = !['shipped', 'delivered', 'cancelled'].includes(track.deliveryStatus);
+
   container.innerHTML = `
     <div class="tracker-details-header">
       <div>
@@ -1584,6 +1954,21 @@ function renderTrackingDetails(track) {
         <p class="subtitle">Run ID: RUN-${track.orderId.substring(0,8).toUpperCase()} | Stage: <span class="order-status-badge ${track.deliveryStatus}">${track.deliveryStatus}</span></p>
       </div>
       <span style="font-size:0.75rem; color:var(--color-text-muted);">Sync time: ${dateStr}</span>
+    </div>
+
+    <div class="tracker-summary-grid">
+      <div class="tracker-payment-card">
+        <div class="tracker-payment-header">Payment Details</div>
+        <div class="tracker-payment-line"><strong>Method:</strong> ${track.paymentMethod || 'Pending'}</div>
+        <div class="tracker-payment-line"><strong>Txn ID:</strong> ${track.paymentId || 'Pending confirmation'}</div>
+        <div class="tracker-payment-line"><strong>Status:</strong> ${track.paymentStatus || 'pending'}</div>
+      </div>
+      <div class="tracker-payment-card">
+        <div class="tracker-payment-header">Delivery Summary</div>
+        <div class="tracker-payment-line"><strong>Stage:</strong> ${track.deliveryStatus}</div>
+        <div class="tracker-payment-line"><strong>Progress:</strong> ${track.progressPercent}%</div>
+        <div class="tracker-payment-line"><strong>Updated:</strong> ${dateStr}</div>
+      </div>
     </div>
 
     <div class="progress-container">
@@ -1609,6 +1994,7 @@ function renderTrackingDetails(track) {
       <button class="btn btn-whatsapp-action" onclick="window.whatsappQuickMessage('${track.orderId}')">
         <i class="fa-brands fa-whatsapp"></i> Update via WhatsApp
       </button>
+      ${canCancel ? `<button class="btn btn-cancel" onclick="window.cancelOrder('${track.orderId}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
     </div>
   `;
 
@@ -1624,6 +2010,36 @@ function renderTrackingDetails(track) {
       card.classList.remove('active');
     }
   });
+}
+
+async function cancelOrder(orderId) {
+  const confirmation = confirm('Cancel this order? This will stop processing if it has not shipped yet.');
+  if (!confirmation) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/orders/${orderId}/cancel`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.token}`
+      }
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      throw new Error(error.error || 'Unable to cancel order');
+    }
+
+    showSuccessToast('✅ Order cancellation request submitted. Refreshing tracking...');
+    await pollTrackingData(orderId);
+  } catch (err) {
+    console.error('Cancel order failed:', err);
+    if (typeof showErrorToast === 'function') {
+      showErrorToast('Unable to cancel order at this time.');
+    } else {
+      alert('Unable to cancel order at this time.');
+    }
+  }
 }
 
 async function viewInvoice(orderId) {
@@ -1709,7 +2125,8 @@ function renderInvoicePaper(inv) {
         <h3>TAX INVOICE</h3>
         <p>Invoice No: <span>${inv.invoiceNumber}</span></p>
         <p>Invoice Date: <span>${dateFormatted}</span></p>
-        <p>Payment Mode: <span>Razorpay Gateway</span></p>
+        <p>Payment Mode: <span>${inv.paymentMethod}</span></p>
+        <p>Transaction ID: <span>${inv.paymentId || 'N/A'}</span></p>
         <p>Status: <span style="color:#2a9d8f; font-weight:bold; text-transform:uppercase;">${inv.paymentStatus}</span></p>
       </div>
     </div>
@@ -1722,9 +2139,8 @@ function renderInvoicePaper(inv) {
         <p>WhatsApp ID: ${inv.buyer.phone || 'Not Specified'}</p>
       </div>
       <div class="invoice-addr">
-        <h4>Lab Dispatch Address</h4>
-        <p>Registered Laboratory Location of client</p>
-        <p>Shipping logistics: Bio-Thermal Dry Ice Express</p>
+        <h4>Delivery Address</h4>
+        <p>${inv.buyer.address || 'Address not provided'}</p>
       </div>
     </div>
 
@@ -1778,6 +2194,10 @@ function renderInvoicePaper(inv) {
           <span>Net Tax Collected (GST):</span>
           <span>₹${inv.totals.gstAmount.toFixed(2)}</span>
         </div>
+        <div class="invoice-totals-row">
+          <span>Shipping Charge:</span>
+          <span>₹${(inv.totals.shippingCharge || 0).toFixed(2)}</span>
+        </div>
         <div class="invoice-totals-row grand-total">
           <span>Grand Total Payable:</span>
           <span>₹${inv.totals.total.toFixed(2)}</span>
@@ -1815,282 +2235,60 @@ function whatsappQuickMessage(orderId) {
 }
 
 // ==========================================================================
-// ADMIN MODULE OPERATIONS (CRUD FOR PRODUCT CATALOG)
-// ==========================================================================
-// State for admin inventory (cache)
-let _adminProducts = [];
-
-async function fetchAdminInventory() {
-  const grid = document.getElementById('admin-inventory-grid');
-  if (grid) {
-    grid.innerHTML = `
-      <div style="display:flex; justify-content:center; align-items:center; padding: 2rem; width:100%;">
-        <i class="fa-solid fa-spinner fa-spin loader-icon" style="font-size: 1.5rem;"></i>
-      </div>
-    `;
-  }
-
-  try {
-    const products = await fetchWithAuth('/products');
-    _adminProducts = products;
-    // Update stats chips
-    const statEl = document.getElementById('admin-stat-products');
-    if (statEl) statEl.textContent = products.length;
-    renderAdminInventory();
-  } catch(err) {
-    console.error('Admin inventory fetch error:', err);
-    if (grid) {
-      grid.innerHTML = `<p style="color:var(--color-danger); padding:1rem;">Failed to synchronize active inventory directory.</p>`;
-    }
-  }
-}
-
-function renderAdminInventory() {
-  const grid = document.getElementById('admin-inventory-grid');
-  if (!grid) return;
-  const query = (document.getElementById('admin-search-prod')?.value || '').toLowerCase();
-  const catFilter = document.getElementById('admin-filter-cat')?.value || 'all';
-  
-  let products = _adminProducts;
-  if (catFilter !== 'all') products = products.filter(p => p.category === catFilter);
-  if (query) products = products.filter(p => p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query));
-
-  if (!products.length) {
-    grid.innerHTML = '<div class="admin-loading">No products found.</div>';
-    return;
-  }
-
-  grid.innerHTML = `
-    <div class="admin-product-table-header">
-      <span>Image</span><span>Product</span><span>Price / MRP</span><span>Stock</span><span>GST</span><span>Category</span><span>Actions</span>
-    </div>
-    ${products.map(p => {
-      const stockClass = p.stock === 0 ? 'out-stock' : p.stock < 20 ? 'low-stock' : 'in-stock';
-      const stockLabel = p.stock === 0 ? 'Out of Stock' : p.stock < 20 ? `Low: ${p.stock}` : `${p.stock} units`;
-      return `
-        <div class="admin-product-row" data-id="${p.id}">
-          <img src="${p.image_url}" alt="${p.name}">
-          <div class="admin-prod-name-cell">
-            <h4>${p.name}</h4>
-            <p>${p.description}</p>
-          </div>
-          <div class="admin-price-cell">
-            <span class="price-act">₹${p.price.toFixed(2)}</span>
-            ${p.mrp_price ? `<span class="price-mrp">₹${p.mrp_price.toFixed(2)}</span>` : ''}
-          </div>
-          <span class="admin-stock-badge ${stockClass}">${stockLabel}</span>
-          <span class="admin-gst-badge">${p.gst_rate}%</span>
-          <span style="font-size:.8rem;color:var(--text-soft);text-transform:capitalize;">${p.category}</span>
-          <div class="admin-row-actions">
-            <button class="btn-admin-edit" onclick="window.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-            <button class="btn-admin-delete" onclick="window.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
-          </div>
-        </div>
-      `;
-    }).join('')}
-  `;
-}
-
-function adminEditProduct(productId) {
-  const prod = _adminProducts.find(p => p.id === productId);
-  if (!prod) return;
-  // Switch to Add/Edit tab
-  document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.admin-tab-content').forEach(c => c.classList.remove('active'));
-  document.querySelector('.admin-tab[data-tab="add-product"]')?.classList.add('active');
-  document.getElementById('admin-content-add-product')?.classList.add('active');
-  // Fill form
-  document.getElementById('admin-edit-id').value = prod.id;
-  document.getElementById('admin-prod-name').value = prod.name;
-  document.getElementById('admin-prod-desc').value = prod.description;
-  document.getElementById('admin-prod-category').value = prod.category;
-  document.getElementById('admin-prod-difficulty').value = prod.difficulty;
-  document.getElementById('admin-prod-gst').value = String(prod.gst_rate);
-  document.getElementById('admin-prod-price').value = prod.price;
-  document.getElementById('admin-prod-mrp').value = prod.mrp_price || '';
-  document.getElementById('admin-prod-stock').value = prod.stock;
-  document.getElementById('admin-prod-image').value = prod.image_url;
-  // Show image preview
-  const preview = document.getElementById('admin-img-preview');
-  if (preview) preview.innerHTML = `<img src="${prod.image_url}" alt="Preview">`;
-  // Update submit button
-  const label = document.getElementById('admin-submit-label');
-  if (label) label.textContent = 'Update Product';
-}
-
-function resetAdminForm() {
-  document.getElementById('form-admin-add-product').reset();
-  document.getElementById('admin-edit-id').value = '';
-  const label = document.getElementById('admin-submit-label');
-  if (label) label.textContent = 'Publish Product';
-  const preview = document.getElementById('admin-img-preview');
-  if (preview) preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
-  const feedback = document.getElementById('admin-add-feedback');
-  if (feedback) feedback.classList.add('hidden');
-}
-
-async function handleAdminAddProduct(e) {
-  e.preventDefault();
-  const feedback = document.getElementById('admin-add-feedback');
-  feedback.classList.add('hidden');
-
-  const editId = document.getElementById('admin-edit-id').value;
-  const name = document.getElementById('admin-prod-name').value.trim();
-  const category = document.getElementById('admin-prod-category').value;
-  const description = document.getElementById('admin-prod-desc').value.trim();
-  const price = document.getElementById('admin-prod-price').value;
-  const mrp_price = document.getElementById('admin-prod-mrp').value;
-  const gst_rate = document.getElementById('admin-prod-gst').value;
-  const difficulty = document.getElementById('admin-prod-difficulty').value;
-  const stock = document.getElementById('admin-prod-stock').value;
-  const image_url = document.getElementById('admin-prod-image').value.trim();
-
-  try {
-    const method = editId ? 'PUT' : 'POST';
-    const url = editId ? `${API_BASE}/products/${editId}` : `${API_BASE}/products`;
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify({
-        name,
-        category,
-        description,
-        price: parseFloat(price),
-        mrp_price: mrp_price ? parseFloat(mrp_price) : undefined,
-        gst_rate: parseInt(gst_rate, 10),
-        difficulty,
-        stock: parseInt(stock, 10),
-        image_url
-      })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      showSuccessToast(editId ? '✅ Product updated successfully!' : '✅ Product published successfully!');
-      resetAdminForm();
-      fetchProducts();
-      fetchAdminInventory();
-      // Switch back to products tab
-      document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.admin-tab-content').forEach(c => c.classList.remove('active'));
-      document.querySelector('.admin-tab[data-tab="products"]')?.classList.add('active');
-      document.getElementById('admin-content-products')?.classList.add('active');
-    } else {
-      feedback.textContent = data.error || 'Failed to save product.';
-      feedback.classList.remove('hidden');
-    }
-  } catch(err) {
-    feedback.textContent = 'Server error.';
-    feedback.classList.remove('hidden');
-  }
-}
-
-async function fetchAdminOrders() {
-  try {
-    const res = await fetch(`${API_BASE}/orders/all-orders`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-    if (!res.ok) throw new Error('Failed to load orders');
-    const orders = await res.json();
-    const statEl = document.getElementById('admin-stat-orders');
-    if (statEl) statEl.textContent = orders.length;
-    renderAdminOrders(orders);
-  } catch(err) {
-    console.error('Fetch admin orders error:', err);
-    const wrap = document.getElementById('admin-orders-list');
-    if (wrap) wrap.innerHTML = '<div class="admin-loading" style="color:var(--color-danger)"><i class="fa-solid fa-triangle-exclamation"></i> Could not load orders.</div>';
-  }
-}
-
-function renderAdminOrders(orders) {
-  const wrap = document.getElementById('admin-orders-list');
-  if (!wrap) return;
-  if (!orders.length) {
-    wrap.innerHTML = '<div class="admin-loading">No orders found.</div>';
-    return;
-  }
-  wrap.innerHTML = orders.map(o => {
-    const date = new Date(o.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
-    return `
-      <div class="admin-order-row">
-        <div>
-          <div class="admin-order-id">ORDER-${o.id.substring(0,8).toUpperCase()}</div>
-          <div class="admin-order-date">${date} · ${o.items.length} item(s)</div>
-          <div style="font-size:.75rem;color:var(--text-soft);">${o.user_email || ''}</div>
-        </div>
-        <span class="admin-order-total">₹${o.total.toFixed(2)}</span>
-        <span class="admin-order-status ${o.delivery_status}">${o.delivery_status}</span>
-        <select class="admin-ship-select" onchange="window.adminUpdateShipping('${o.id}', this.value)">
-          <option value="pending" ${o.delivery_status==='pending'?'selected':''}>Pending</option>
-          <option value="processing" ${o.delivery_status==='processing'?'selected':''}>Processing</option>
-          <option value="shipped" ${o.delivery_status==='shipped'?'selected':''}>Shipped</option>
-          <option value="delivered" ${o.delivery_status==='delivered'?'selected':''}>Delivered</option>
-        </select>
-      </div>
-    `;
-  }).join('');
-}
-
-async function adminUpdateShipping(orderId, status) {
-  try {
-    const res = await fetch(`${API_BASE}/orders/${orderId}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify({ delivery_status: status })
-    });
-    if (res.ok) {
-      showSuccessToast(`📦 Shipment status updated to "${status}"`);
-      fetchAdminOrders();
-    } else {
-      throw new Error('Failed');
-    }
-  } catch(err) {
-    alert('Failed to update shipping status.');
-  }
-}
-
-async function adminDeleteProduct(productId) {
-  if (!confirm("Are you sure you want to permanently delete this product from directory inventory?")) return;
-
-  try {
-    const res = await fetch(`${API_BASE}/products/${productId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-
-    if (res.ok) {
-      showSuccessToast("🗑️ Product successfully deleted.");
-      fetchProducts();
-      fetchAdminInventory();
-    } else {
-      const data = await res.json();
-      alert(data.error || "Failed to remove item.");
-    }
-  } catch (err) {
-    console.error("Admin delete product error:", err);
-    alert("Server communication error.");
-  }
-}
-
-window.adminEditProduct = adminEditProduct;
-window.adminDeleteProduct = adminDeleteProduct;
-window.adminUpdateShipping = adminUpdateShipping;
-
-// ==========================================================================
-// CATEGORY MANAGEMENT (FETCH + CRUD + MOBILE NAV)
+// CATEGORY MANAGEMENT (FETCH + MOBILE NAV)
 // ==========================================================================
 let _adminCategories = [];
 
 async function fetchCategories() {
   try {
-    const res = await fetch(`${API_BASE}/categories`);
-    if (!res.ok) return;
-    const categories = await res.json();
+    const response = await fetch(`${API_BASE}/categories`);
+    const categories = await response.json();
+    
     _adminCategories = categories;
-    renderMobileCategoryNav(categories);
-    populateCategorySelects(categories);
-  } catch (err) {
-    console.error('Fetch categories error:', err);
+    
+    // Update shop category nav
+    const categoryNav = document.getElementById('category-nav');
+    if (categoryNav) {
+      categoryNav.innerHTML = categories.map(cat => 
+        `<button class="cat-btn" data-category="${cat.id}">${cat.name}</button>`
+      ).join('');
+      
+      // Re-attach event listeners for category filtering
+      document.querySelectorAll('.cat-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.activeCategory = btn.dataset.category;
+          filterProducts(btn.dataset.category);
+        });
+      });
+    }
+    // Render category carousel/grid
+    renderCategoryGrid(categories);
+    // Populate desktop dropdown menu for Shop by Category
+    populateCategoryDropdown(categories);
+  } catch (error) {
+    console.error('Failed to fetch categories:', error);
   }
+}
+
+function populateCategoryDropdown(categories) {
+  const dd = document.getElementById('cat-dropdown-menu');
+  if (!dd) return;
+  dd.innerHTML = categories.map(cat => {
+    return `<a href="#" class="cat-dd-item" data-category="${cat.id}"><i class="fa-solid fa-seedling"></i><span>${cat.name}</span></a>`;
+  }).join('');
+
+  dd.querySelectorAll('.cat-dd-item').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const cat = a.getAttribute('data-category');
+      navigateToCategory(cat);
+      // close dropdown
+      dd.classList.add('hidden');
+      dd.setAttribute('aria-hidden', 'true');
+    });
+  });
 }
 
 function renderMobileCategoryNav(categories) {
@@ -2124,17 +2322,6 @@ function renderMobileCategoryNav(categories) {
 }
 
 function populateCategorySelects(categories) {
-  // Update admin filter dropdown
-  const adminFilterSelect = document.getElementById('admin-filter-cat');
-  if (adminFilterSelect) {
-    adminFilterSelect.innerHTML = `<option value="all">All Categories</option>` +
-      categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  }
-  // Update admin product form category dropdown
-  const adminCatSelect = document.getElementById('admin-prod-category');
-  if (adminCatSelect) {
-    adminCatSelect.innerHTML = categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  }
   // Update main product filters row
   const filtersRow = document.getElementById('product-filters-row');
   if (filtersRow) {
@@ -2163,250 +2350,61 @@ function populateCategorySelects(categories) {
   }
 }
 
-async function fetchAdminCategories() {
-  const list = document.getElementById('admin-categories-list');
-  if (list) list.innerHTML = `<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading categories...</div>`;
-  try {
-    const res = await fetch(`${API_BASE}/categories`);
-    const categories = await res.json();
-    _adminCategories = categories;
-    renderAdminCategoriesList(categories);
-  } catch (err) {
-    if (list) list.innerHTML = `<div class="admin-loading" style="color:var(--color-danger)">Failed to load categories.</div>`;
-  }
-}
-
-function renderAdminCategoriesList(categories) {
-  const list = document.getElementById('admin-categories-list');
-  if (!list) return;
-  if (!categories.length) {
-    list.innerHTML = `<div class="admin-loading">No categories found. Add one above.</div>`;
-    return;
-  }
-  list.innerHTML = categories.map(cat => `
-    <div class="admin-cat-row" data-id="${cat.id}">
-      <div class="admin-cat-info">
-        <span class="admin-cat-slug">${cat.id}</span>
-        <strong class="admin-cat-name">${cat.name}</strong>
-        <span class="admin-cat-desc">${cat.description || ''}</span>
-      </div>
-      <div class="admin-row-actions">
-        <button class="btn-admin-edit" onclick="window.adminEditCategory('${cat.id}')">
-          <i class="fa-solid fa-pen"></i> Edit
-        </button>
-        <button class="btn-admin-delete" onclick="window.adminDeleteCategory('${cat.id}')">
-          <i class="fa-solid fa-trash"></i>
-        </button>
-      </div>
-    </div>
-  `).join('');
-}
-
-function adminEditCategory(catId) {
-  const cat = _adminCategories.find(c => c.id === catId);
-  if (!cat) return;
-  document.getElementById('admin-edit-cat-id').value = cat.id;
-  const slugInput = document.getElementById('admin-cat-id');
-  if (slugInput) { slugInput.value = cat.id; slugInput.disabled = true; }
-  document.getElementById('admin-cat-name').value = cat.name;
-  document.getElementById('admin-cat-desc').value = cat.description || '';
-  const feedback = document.getElementById('admin-cat-feedback');
-  if (feedback) { feedback.textContent = `Editing: ${cat.name}`; feedback.classList.remove('hidden'); feedback.style.color = 'var(--color-primary)'; }
-}
-
-function resetAdminCatForm() {
-  document.getElementById('admin-edit-cat-id').value = '';
-  const slugInput = document.getElementById('admin-cat-id');
-  if (slugInput) { slugInput.value = ''; slugInput.disabled = false; }
-  document.getElementById('admin-cat-name').value = '';
-  document.getElementById('admin-cat-desc').value = '';
-  const feedback = document.getElementById('admin-cat-feedback');
-  if (feedback) feedback.classList.add('hidden');
-}
-
-async function handleAdminSaveCategory() {
-  const feedback = document.getElementById('admin-cat-feedback');
-  const editId = document.getElementById('admin-edit-cat-id').value;
-  const id = document.getElementById('admin-cat-id').value.trim().toLowerCase().replace(/\s+/g, '-');
-  const name = document.getElementById('admin-cat-name').value.trim();
-  const description = document.getElementById('admin-cat-desc').value.trim();
-
-  if (!name) {
-    if (feedback) { feedback.textContent = 'Category name is required.'; feedback.classList.remove('hidden'); feedback.style.color = 'var(--color-danger)'; }
-    return;
-  }
-  if (!editId && !id) {
-    if (feedback) { feedback.textContent = 'Category slug/ID is required for new categories.'; feedback.classList.remove('hidden'); feedback.style.color = 'var(--color-danger)'; }
-    return;
-  }
-
-  try {
-    const method = editId ? 'PUT' : 'POST';
-    const url = editId ? `${API_BASE}/categories/${editId}` : `${API_BASE}/categories`;
-    const body = editId ? { name, description } : { id, name, description };
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify(body)
-    });
-    const data = await res.json();
-    if (res.ok) {
-      showSuccessToast(editId ? `✅ Category "${name}" updated!` : `✅ Category "${name}" created!`);
-      resetAdminCatForm();
-      fetchAdminCategories();
-      fetchCategories(); // refresh shop nav too
-    } else {
-      if (feedback) { feedback.textContent = data.error || 'Failed to save category.'; feedback.classList.remove('hidden'); feedback.style.color = 'var(--color-danger)'; }
-    }
-  } catch (err) {
-    if (feedback) { feedback.textContent = 'Server error.'; feedback.classList.remove('hidden'); feedback.style.color = 'var(--color-danger)'; }
-  }
-}
-
-async function adminDeleteCategory(catId) {
-  if (!confirm(`Delete category "${catId}"? Products in this category will be moved to "uncategorized".`)) return;
-  try {
-    const res = await fetch(`${API_BASE}/categories/${catId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-    if (res.ok) {
-      showSuccessToast(`🗑️ Category "${catId}" deleted.`);
-      fetchAdminCategories();
-      fetchCategories();
-    } else {
-      const data = await res.json();
-      alert(data.error || 'Failed to delete category.');
-    }
-  } catch (err) {
-    alert('Server error while deleting category.');
-  }
-}
-
-window.adminEditCategory = adminEditCategory;
-window.adminDeleteCategory = adminDeleteCategory;
-
-// Bind methods globally
-window.viewInvoice = viewInvoice;
-window.whatsappQuickMessage = whatsappQuickMessage;
-
-// ==========================================================================
-// SUCCESS TOAST NOTIFICATION
-// ==========================================================================
-function showSuccessToast(message) {
-  // Remove any existing toast
-  const existing = document.getElementById('spk-success-toast');
-  if (existing) existing.remove();
-
-  const toast = document.createElement('div');
-  toast.id = 'spk-success-toast';
-  toast.style.cssText = `
-    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
-    background: #1a5c38; color: #fff; padding: 16px 28px;
-    border-radius: 12px; font-size: 0.95rem; font-weight: 600;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.25); z-index: 9999;
-    display: flex; align-items: center; gap: 10px;
-    animation: toastIn 0.3s ease;
-  `;
-  toast.textContent = message;
-
-  // Add animation keyframe once
-  if (!document.getElementById('toast-keyframes')) {
-    const style = document.createElement('style');
-    style.id = 'toast-keyframes';
-    style.textContent = `@keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`;
-    document.head.appendChild(style);
-  }
-
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
-}
-
-// ==========================================================================
-// THREE.JS 3D WEBGL ENGINE & INTERACTIVE PARTICLE SYSTEM
-// ==========================================================================
 function initThreeJS() {
   const canvas = document.getElementById('hero-three-canvas');
   if (!canvas) return;
 
   const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
   
-  const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-  camera.position.z = 4.5;
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x000000, 0.1);
+  camera.position.z = 3;
 
-  const renderer = new THREE.WebGLRenderer({
-    canvas: canvas,
-    alpha: true,
-    antialias: true
-  });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+  // Spore Cloud 1
+  const count = 2000;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
 
-  // Layer 1: Emerald/Green Spores
-  const particlesCount1 = 900;
-  const positions1 = new Float32Array(particlesCount1 * 3);
-  const colors1 = new Float32Array(particlesCount1 * 3);
-  const greenColor = new THREE.Color('#38b17b');
+  for (let i = 0; i < count * 3; i += 3) {
+    positions[i] = (Math.random() - 0.5) * 20;
+    positions[i + 1] = (Math.random() - 0.5) * 20;
+    positions[i + 2] = (Math.random() - 0.5) * 20;
 
-  for (let i = 0; i < particlesCount1 * 3; i += 3) {
-    const u = Math.random();
-    const v = Math.random();
-    const theta = u * 2.0 * Math.PI;
-    const phi = Math.acos(2.0 * v - 1.0);
-    const r = Math.cbrt(Math.random()) * 2.0;
-
-    positions1[i] = r * Math.sin(phi) * Math.cos(theta);
-    positions1[i + 1] = r * Math.sin(phi) * Math.sin(theta);
-    positions1[i + 2] = r * Math.cos(phi);
-
-    const colorMix = Math.random();
-    if (colorMix > 0.85) {
-      colors1[i] = 1.0;
-      colors1[i + 1] = 0.82;
-      colors1[i + 2] = 0.4;
-    } else {
-      colors1[i] = greenColor.r + (Math.random() - 0.5) * 0.1;
-      colors1[i + 1] = greenColor.g + (Math.random() - 0.5) * 0.1;
-      colors1[i + 2] = greenColor.b + (Math.random() - 0.5) * 0.1;
-    }
+    colors[i] = 0.2 + Math.random() * 0.5;
+    colors[i + 1] = 0.8 + Math.random() * 0.2;
+    colors[i + 2] = 0.4 + Math.random() * 0.3;
   }
 
-  const geometry1 = new THREE.BufferGeometry();
-  geometry1.setAttribute('position', new THREE.BufferAttribute(positions1, 3));
-  geometry1.setAttribute('color', new THREE.BufferAttribute(colors1, 3));
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-  const material1 = new THREE.PointsMaterial({
-    size: 0.07,
+  const material = new THREE.PointsMaterial({
+    size: 0.08,
     vertexColors: true,
     transparent: true,
-    opacity: 0.75,
+    opacity: 0.8,
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
 
-  const sporeCloud1 = new THREE.Points(geometry1, material1);
+  const sporeCloud1 = new THREE.Points(geometry, material);
   scene.add(sporeCloud1);
 
-  // Layer 2: Gold/Amber Spores
-  const particlesCount2 = 500;
-  const positions2 = new Float32Array(particlesCount2 * 3);
-  const colors2 = new Float32Array(particlesCount2 * 3);
-  const goldColor = new THREE.Color('#ffd166');
+  // Spore Cloud 2 (Slower moving)
+  const positions2 = new Float32Array(count * 3);
+  const colors2 = new Float32Array(count * 3);
 
-  for (let i = 0; i < particlesCount2 * 3; i += 3) {
-    const u = Math.random();
-    const v = Math.random();
-    const theta = u * 2.0 * Math.PI;
-    const phi = Math.acos(2.0 * v - 1.0);
-    const r = Math.cbrt(Math.random()) * 1.3;
+  for (let i = 0; i < count * 3; i += 3) {
+    positions2[i] = (Math.random() - 0.5) * 25;
+    positions2[i + 1] = (Math.random() - 0.5) * 25;
+    positions2[i + 2] = (Math.random() - 0.5) * 25;
 
-    positions2[i] = r * Math.sin(phi) * Math.cos(theta);
-    positions2[i + 1] = r * Math.sin(phi) * Math.sin(theta);
-    positions2[i + 2] = r * Math.cos(phi);
-
-    colors2[i] = goldColor.r + (Math.random() - 0.5) * 0.05;
-    colors2[i + 1] = goldColor.g + (Math.random() - 0.5) * 0.05;
-    colors2[i + 2] = goldColor.b + (Math.random() - 0.5) * 0.05;
+    colors2[i] = 0.1 + Math.random() * 0.3;
+    colors2[i + 1] = 0.6 + Math.random() * 0.4;
+    colors2[i + 2] = 0.3 + Math.random() * 0.4;
   }
 
   const geometry2 = new THREE.BufferGeometry();
@@ -2557,3 +2555,32 @@ function initScrollReveal() {
     observer.observe(target);
   });
 }
+
+// Placeholder for showSuccessToast (if not defined elsewhere)
+function showSuccessToast(message) {
+  console.log('âœ“ ' + message);
+  // In production, this would show a toast notification
+}
+
+// Window functions for global access
+function copyInvoiceLink(token) {
+  if (!token) return;
+  const invoiceUrl = `${window.location.origin}/api/orders/share/${token}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(invoiceUrl)
+      .then(() => alert('Invoice share link copied to clipboard.'))
+      .catch(() => alert('Could not copy invoice link.'));
+  } else {
+    const textarea = document.createElement('textarea');
+    textarea.value = invoiceUrl;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+    alert('Invoice share link copied to clipboard.');
+  }
+}
+
+window.viewInvoice = viewInvoice;
+window.whatsappQuickMessage = whatsappQuickMessage;
+window.copyInvoiceLink = copyInvoiceLink;

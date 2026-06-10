@@ -2,7 +2,11 @@ const puppeteer = require('puppeteer');
 
 (async () => {
   try {
-    const browser = await puppeteer.launch();
+    const launchOptions = {};
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      launchOptions.args = ['--no-sandbox', '--disable-setuid-sandbox'];
+    }
+    const browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     
     // Capture console logs and errors

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sporekart Admin Dashboard</title>
+  <meta name="description" content="Sporekart admin control panel for product, order and category management.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>">
+</head>
+
+<body>
+  <div class="admin-shell">
+
+    <main class="admin-page-main">
+      <section id="admin-login-panel" class="admin-login-panel">
+        <div class="admin-login-card">
+          <div class="admin-login-grid">
+            <div class="admin-login-side">
+              <div>
+                <span class="admin-label">Secure Admin Access</span>
+                <h2>Welcome back, Sporekart Operator</h2>
+                <p>Manage live inventory, orders, categories, and store-level updates from a fast, modern control experience.</p>
+              </div>
+              <ul class="login-features">
+                <li><i class="fa-solid fa-check-circle"></i> Fast dashboard access with secure credentials</li>
+                <li><i class="fa-solid fa-sparkles"></i> Elegant responsive design for desktop and mobile</li>
+                <li><i class="fa-solid fa-shield-halved"></i> Admin-only controls for products, orders, categories</li>
+              </ul>
+              <div class="admin-login-branding">
+                <span class="brand-pill">Sporekart</span>
+                <span class="brand-note">Powered by your mushroom e-commerce control center.</span>
+              </div>
+            </div>
+            <div class="admin-login-form-panel">
+              <div class="auth-form-panel">
+                <h2>Admin Sign In</h2>
+                <p>Enter your admin credentials to access the dashboard.</p>
+                <form id="form-admin-auth" class="admin-auth-form">
+                  <div class="input-field">
+                    <label>Admin Email</label>
+                    <input type="email" id="admin-auth-email" required placeholder="admin@example.com">
+                  </div>
+                  <div class="input-field">
+                    <label>Master Password</label>
+                    <input type="password" id="admin-auth-password" required placeholder="Your secure password">
+                  </div>
+                  <div class="admin-error-msg hidden" id="admin-login-error"></div>
+                  <button type="submit" class="btn btn-primary btn-block">Secure Login</button>
+                </form>
+                <p class="admin-login-footer">Not an admin? Head back to the <a href="/">shop homepage</a>.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-dashboard" class="admin-dashboard hidden">
+        <div class="admin-dashboard-topbar">
+          <a href="/" class="admin-topbar-logo">
+            <div class="admin-logo-icon-wrap"><i class="fa-solid fa-seedling"></i></div>
+            <div class="admin-logo-text">
+              <span class="admin-logo-brand">Sporekart</span>
+              <span class="admin-logo-tagline">Admin Dashboard</span>
+            </div>
+          </a>
+          <div class="admin-dash-brand">
+            <div class="admin-dash-icon"><i class="fa-solid fa-user-shield"></i></div>
+            <div>
+              <h2>Admin Control Panel</h2>
+              <span id="admin-dash-subtitle">Sporekart Inventory Management</span>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+            <div class="admin-dash-stats" id="admin-dash-stats">
+              <div class="admin-stat-chip"><i class="fa-solid fa-box"></i> <span id="admin-stat-products">0</span> Products</div>
+              <div class="admin-stat-chip"><i class="fa-solid fa-shopping-bag"></i> <span id="admin-stat-orders">0</span> Orders</div>
+            </div>
+            <div class="admin-top-actions">
+              <button class="btn btn-secondary-glow admin-action-menu-btn" id="admin-action-menu-btn"><i class="fa-solid fa-ellipsis-vertical"></i> Admin Actions</button>
+              <div class="admin-action-menu hidden" id="admin-action-menu">
+                <button type="button" class="admin-action-menu-item" id="btn-admin-view-shop"><i class="fa-solid fa-store"></i> View Shop</button>
+                <button type="button" class="admin-action-menu-item danger" id="btn-admin-logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-bar">
+          <button class="admin-tab active" data-tab="products"><i class="fa-solid fa-boxes-stacked"></i> Products</button>
+          <button class="admin-tab" data-tab="orders"><i class="fa-solid fa-truck-fast"></i> Orders &amp; Shipping</button>
+          <button class="admin-tab" data-tab="add-product"><i class="fa-solid fa-plus-circle"></i> Add Product</button>
+          <button class="admin-tab" data-tab="categories"><i class="fa-solid fa-tags"></i> Categories</button>
+        </div>
+
+        <div class="admin-tab-content active" id="admin-content-products">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-list"></i> Product Inventory</h3>
+              <div class="admin-filter-row">
+                <input type="text" id="admin-search-prod" placeholder="Search products..." class="admin-search-input">
+                <select id="admin-filter-cat" class="admin-select-input">
+                  <option value="all">All Categories</option>
+                </select>
+              </div>
+            </div>
+            <div id="admin-inventory-grid" class="admin-product-table-wrap">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading products...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-orders">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-truck-fast"></i> Orders & Shipping Management</h3>
+            </div>
+            <div class="admin-orders-filter-row">
+              <div class="admin-filter-group">
+                <label for="admin-filter-type">Filter by</label>
+                <select id="admin-filter-type" class="admin-filter-input">
+                  <option value="">Select filter</option>
+                  <option value="modified_date">Modified date</option>
+                  <option value="year">Year</option>
+                  <option value="month">Month</option>
+                  <option value="order_id">Order ID</option>
+                  <option value="phone">Phone</option>
+                  <option value="status">Shipment status</option>
+                  <option value="payment_method">Mode of payment</option>
+                </select>
+              </div>
+              <div class="admin-filter-group admin-filter-value-group">
+                <label>&nbsp;</label>
+                <div id="admin-filter-value" class="admin-filter-value"></div>
+              </div>
+              <div class="admin-filter-group admin-filter-actions">
+                <button type="button" id="admin-filter-clear" class="btn btn-secondary">Clear</button>
+              </div>
+            </div>
+            <div class="admin-shipping-settings-panel" style="margin-bottom:20px;padding:16px;border:1px solid #d8e2ec;border-radius:12px;background:#fff;display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+              <div style="flex:1;min-width:220px;">
+                <label for="admin-shipping-charge" style="font-weight:600;display:block;margin-bottom:6px;">Global shipping charge</label>
+                <input type="number" id="admin-shipping-charge" min="0" step="1" value="0" placeholder="₹ 50" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px;">
+              </div>
+              <div>
+                <button type="button" id="admin-save-shipping-charge" class="btn btn-primary">Save shipping</button>
+              </div>
+              <div style="flex:1;min-width:220px;color:#475569;font-size:0.95rem;">
+                Changes here are applied globally and will be reflected in the storefront cart and checkout totals.
+              </div>
+            </div>
+            <div id="admin-orders-list" class="admin-orders-wrap">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading orders...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-categories">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-tags"></i> Category Management</h3>
+            </div>
+            <div class="admin-cat-form-wrap">
+              <input type="hidden" id="admin-edit-cat-id" value="">
+              <div class="admin-cat-form-section">
+                <div class="admin-cat-form-section-title">Basic Information</div>
+                <div class="admin-cat-form-row">
+                  <div class="input-field" style="flex: 0.8">
+                    <label>Category UID</label>
+                    <input type="text" id="admin-cat-uid" readonly placeholder="spore-000001">
+                    <small class="field-note">Auto-generated</small>
+                  </div>
+                  <div class="input-field" style="flex: 1.2">
+                    <label>Category Slug *</label>
+                    <input type="text" id="admin-cat-id" placeholder="e.g. fresh-mushrooms" pattern="[a-z0-9\-]+" title="Lowercase letters, numbers and hyphens only">
+                    <small class="field-note">URL-safe ID for product assignment</small>
+                  </div>
+                </div>
+                <div class="admin-cat-form-row">
+                  <div class="input-field">
+                    <label>Category Name *</label>
+                    <input type="text" id="admin-cat-name" placeholder="e.g. Fresh Mushrooms">
+                  </div>
+                </div>
+                <div class="admin-cat-form-row">
+                  <div class="input-field">
+                    <label>Description</label>
+                    <input type="text" id="admin-cat-desc" placeholder="Short description of this category...">
+                  </div>
+                </div>
+              </div>
+
+              <div class="admin-cat-form-section">
+                <div class="admin-cat-form-section-title">Category Image</div>
+                <div class="admin-cat-form-row">
+                  <div class="input-field">
+                    <label>Image Upload</label>
+                    <div class="admin-cat-image-upload">
+                      <input type="url" id="admin-cat-image-url" placeholder="Paste image URL or click Browse">
+                      <button type="button" id="admin-cat-image-browse" class="btn btn-secondary btn-image-browse"><i class="fa-solid fa-upload"></i> Browse</button>
+                      <input type="file" id="admin-cat-image-file" class="hidden-file-input">
+                    </div>
+                      <small class="field-note">Supports any image file. Paste an online URL or upload locally; preview updates instantly.</small>
+                  </div>
+                </div>
+
+                <div id="admin-cat-image-preview" class="admin-cat-image-preview">
+                  <i class="fa-solid fa-image"></i>
+                  <span>Category image preview</span>
+                </div>
+              </div>
+              <div class="admin-cat-form-actions">
+                <button type="button" id="btn-admin-save-cat" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                <button type="button" id="btn-admin-reset-cat" class="btn btn-secondary"><i class="fa-solid fa-rotate-left"></i></button>
+              </div>
+              <div class="admin-error-msg hidden" id="admin-cat-feedback"></div>
+            </div>
+            <div id="admin-categories-list" class="admin-categories-wrap">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading categories...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-add-product">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-plus-circle"></i> Add / Edit Product</h3>
+            </div>
+            <div class="admin-form-wrap">
+              <form id="form-admin-add-product" class="admin-product-form">
+                <input type="hidden" id="admin-edit-id" value="">
+                <div class="admin-form-grid">
+                  <div class="admin-form-col">
+                    <div class="input-field">
+                      <label>Category *</label>
+                      <select id="admin-prod-category" class="admin-select-input"></select>
+                    </div>
+                    <div class="input-field">
+                      <label>Product ID</label>
+                      <input type="text" id="admin-prod-id-display" readonly placeholder="Auto-generated">
+                      <small class="field-note">Auto-generated as categoryId-pid-00001</small>
+                    </div>
+                    <div class="input-field">
+                      <label>Product Name *</label>
+                      <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit">
+                    </div>
+                    <div class="input-field">
+                      <label>Description *</label>
+                      <textarea id="admin-prod-desc" required placeholder="Product details, cultivation notes..." class="admin-textarea"></textarea>
+                    </div>
+                    <div class="admin-form-row-2">
+                      <div class="input-field">
+                        <label>Actual Price (₹) *</label>
+                        <input type="number" step="0.01" id="admin-prod-price" required placeholder="350.00">
+                      </div>
+                      <div class="input-field">
+                        <label>MRP / Strikeout (₹)</label>
+                        <input type="number" step="0.01" id="admin-prod-mrp" placeholder="499.00">
+                      </div>
+                    </div>
+                    <div class="input-field">
+                      <label>Stock Quantity</label>
+                      <input type="number" id="admin-prod-stock" value="100" min="0">
+                    </div>
+                    <div class="input-field">
+                      <label>GST Slab (%)</label>
+                      <select id="admin-prod-gst" class="admin-select-input">
+                        <option value="0">0% (Exempt)</option>
+                        <option value="5" selected>5% (Food/Agri)</option>
+                        <option value="12">12% (Standard)</option>
+                        <option value="18">18% (Standard+)</option>
+                        <option value="28">28% (Luxury)</option>
+                      </select>
+                    </div>
+                    <div class="input-field">
+                      <label>Product Image</label>
+                      <div class="admin-cat-image-upload">
+                        <input type="url" id="admin-prod-image-url" placeholder="Paste image URL or click Browse">
+                        <button type="button" id="admin-prod-image-browse" class="btn btn-secondary btn-image-browse"><i class="fa-solid fa-upload"></i> Browse</button>
+                        <input type="file" id="admin-prod-image-file" class="hidden-file-input">
+                      </div>
+                      <small class="field-note">Supports any image file. Paste an online URL or upload locally; preview updates instantly.</small>
+                    </div>
+                    <div class="admin-form-preview" id="admin-img-preview">
+                      <i class="fa-solid fa-image"></i>
+                      <span>Image preview</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="admin-error-msg hidden" id="admin-add-feedback"></div>
+                <div class="admin-form-actions">
+                  <button type="button" id="btn-admin-reset-form" class="btn btn-secondary">Reset</button>
+                  <button type="submit" class="btn btn-primary admin-submit-btn" id="admin-form-submit-btn"><i class="fa-solid fa-plus-circle"></i> <span id="admin-submit-label">Publish Product</span></button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/src/admin.js"></script>
+</body>
+
+</html>

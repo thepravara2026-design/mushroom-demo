@@ -10,11 +10,13 @@ export class AuthModal {
     this.phoneView   = document.getElementById('auth-phone-view');
     this.requestView = document.getElementById('auth-request-view');
     this.verifyView  = document.getElementById('auth-verify-view');
+    this.adminPasswordView = document.getElementById('auth-admin-password-view');
 
     // Forms
     this.formRequest      = document.getElementById('form-request-otp');
     this.formVerify       = document.getElementById('form-verify-otp');
     this.formPhoneRequest = document.getElementById('form-request-phone-otp');
+    this.formAdminLogin   = document.getElementById('form-admin-login');
 
     // Inputs
     this.emailInput  = document.getElementById('auth-email');
@@ -24,11 +26,14 @@ export class AuthModal {
     this.phoneInput  = document.getElementById('auth-phone');
     this.phoneCountry = document.getElementById('auth-phone-country');
     this.phoneNameField = document.getElementById('auth-phone-name-field');
+    this.adminEmailInput = document.getElementById('admin-email');
+    this.adminPasswordInput = document.getElementById('admin-password');
 
     // Error containers
     this.requestError = document.getElementById('request-error');
     this.verifyError  = document.getElementById('verify-error');
     this.phoneError   = document.getElementById('phone-request-error');
+    this.adminLoginError = document.getElementById('admin-login-error');
 
     // Gating state
     this.currentRole = 'buyer';
@@ -47,6 +52,17 @@ export class AuthModal {
     document.getElementById('btn-auth-google')?.addEventListener('click', () => this.handleGoogleLogin());
     document.getElementById('btn-auth-phone')?.addEventListener('click', () => this.showPhoneView());
     document.getElementById('btn-auth-email')?.addEventListener('click', () => this.showEmailView());
+
+    // Admin password login
+    document.getElementById('link-admin-password')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.showAdminPasswordView();
+    });
+
+    document.getElementById('link-back-admin')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.showMethodView();
+    });
 
     // Back navigation
     document.getElementById('link-back-method-phone')?.addEventListener('click', (e) => {
@@ -75,6 +91,12 @@ export class AuthModal {
       await this.handleRequestPhoneOtp();
     });
 
+    // Admin password form
+    this.formAdminLogin?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await this.handleAdminPasswordLogin();
+    });
+
     // Verify OTP form (shared)
     this.formVerify?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -95,7 +117,7 @@ export class AuthModal {
 
   /**
    * Opens the auth modal.
-   * @param {string} role 'buyer' or 'grower'
+   * @param {string} role 'buyer' or 'grower' (admin login is accessed via the "Staff? Use admin login" link)
    * @param {function} onSuccess Callback on success
    */
   open(role = 'buyer', onSuccess = null) {
@@ -110,25 +132,24 @@ export class AuthModal {
     this.currentRole = role;
     this.onSuccessCallback = onSuccess;
 
-    // Update title based on role
+    // Update title and fields based on role
     const titleEl = document.getElementById('auth-modal-title');
     if (titleEl) {
-      titleEl.textContent = role === 'grower' ? 'Grower Portal Access' : 'Welcome to Sporekart';
+      if (role === 'grower') titleEl.textContent = 'Grower Portal Access';
+      else titleEl.textContent = 'Welcome to Sporekart';
     }
 
-    // Show name fields for grower registration
+    // Name fields only for grower registration
     if (this.nameField) this.nameField.style.display = role === 'grower' ? 'block' : 'none';
     if (this.phoneNameField) this.phoneNameField.style.display = role === 'grower' ? 'block' : 'none';
 
     const backBtn = document.getElementById('link-back-method-email');
     if (backBtn) {
-      if (role === 'grower') {
-        backBtn.classList.add('hidden');
-      } else {
-        backBtn.classList.remove('hidden');
-      }
+      if (role === 'grower') backBtn.classList.add('hidden');
+      else backBtn.classList.remove('hidden');
     }
 
+    // Default to method view for buyer/grower, can switch to admin password via link
     if (role === 'grower') {
       this.showEmailView();
     } else {
@@ -142,9 +163,11 @@ export class AuthModal {
     this.formRequest?.reset();
     this.formVerify?.reset();
     this.formPhoneRequest?.reset();
+    this.formAdminLogin?.reset();
     this.requestError?.classList.add('hidden');
     this.verifyError?.classList.add('hidden');
     this.phoneError?.classList.add('hidden');
+    this.adminLoginError?.classList.add('hidden');
   }
 
   showMethodView() {
@@ -176,6 +199,7 @@ export class AuthModal {
     this._hide(this.methodView);
     this._hide(this.phoneView);
     this._hide(this.requestView);
+    this._hide(this.adminPasswordView);
     this._show(this.verifyView);
 
     const subtitle = document.getElementById('verify-subtitle');
@@ -187,17 +211,30 @@ export class AuthModal {
     this.otpInput?.focus();
   }
 
+  showAdminPasswordView() {
+    this._hide(this.methodView);
+    this._hide(this.phoneView);
+    this._hide(this.requestView);
+    this._hide(this.verifyView);
+    this._show(this.adminPasswordView);
+    this.adminEmailInput?.focus();
+  }
+
   async handleGoogleLogin() {
     // Mock Google OAuth - simulate the flow
-    if (this.methodView) {
-      this.methodView.innerHTML = `
-        <div class="auth-google-processing">
-          <i class="fa-brands fa-google fa-spin" style="color:#ea4335; animation: spin 1s linear infinite;"></i>
-          <strong>Connecting to Google…</strong>
-          <p>Please wait while we authenticate you securely</p>
-        </div>
-      `;
-    }
+    if (!this.methodView) return;
+
+    // Create a temporary processing overlay instead of replacing the full method view.
+    const overlay = document.createElement('div');
+    overlay.className = 'auth-google-processing-overlay';
+    overlay.innerHTML = `
+      <div class="auth-google-processing">
+        <i class="fa-brands fa-google fa-spin" style="color:#ea4335; animation: spin 1s linear infinite;"></i>
+        <strong>Connecting to Google…</strong>
+        <p>Please wait while we authenticate you securely</p>
+      </div>
+    `;
+    this.methodView.appendChild(overlay);
 
     // Add spin keyframe once
     if (!document.getElementById('spin-kf')) {
@@ -207,8 +244,8 @@ export class AuthModal {
       document.head.appendChild(s);
     }
 
-    // Simulate 1.8s OAuth round-trip
-    await new Promise(r => setTimeout(r, 1800));
+    // Use a faster mock OAuth response time for better UX
+    await new Promise(r => setTimeout(r, 800));
 
     // Mock successful Google user
     const mockGoogleUser = {
@@ -224,13 +261,20 @@ export class AuthModal {
       // Auto-verify with the universal code '123456'
       const data = await authApi.verifyOtp(mockGoogleUser.email, '123456');
       saveAuth(data.token, data.user);
+      this.removeGoogleOverlay(overlay);
       this.close();
       window.dispatchEvent(new Event('auth:changed'));
       if (this.onSuccessCallback) this.onSuccessCallback();
     } catch (err) {
-      // Restore method view if something went wrong
+      this.removeGoogleOverlay(overlay);
       this.showMethodView();
       alert('Google login simulation failed. Try Email OTP instead.');
+    }
+  }
+
+  removeGoogleOverlay(overlay) {
+    if (overlay && overlay.parentElement) {
+      overlay.parentElement.removeChild(overlay);
     }
   }
 
@@ -253,12 +297,14 @@ export class AuthModal {
 
     try {
       // Use phone as email for backend (mock: phone@phone.sporekart)
-      const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
+        const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
       await authApi.requestOtp(mockEmail, this.currentRole, fullName || `User ${phone.slice(-4)}`);
       this.phoneError?.classList.add('hidden');
 
       // Store mock email for verification step
       this._mockPhoneEmail = mockEmail;
+        // Also store last phone (human-readable) to attach to user after verification
+        this._lastPhone = fullPhone;
       this.showVerifyView(fullPhone);
     } catch (err) {
       if (this.phoneError) {
@@ -291,6 +337,38 @@ export class AuthModal {
     }
   }
 
+  async handleAdminPasswordLogin() {
+    const email = this.adminEmailInput?.value.trim();
+    const password = this.adminPasswordInput?.value.trim();
+
+    if (!email || !password) {
+      if (this.adminLoginError) {
+        this.adminLoginError.textContent = 'Please enter both email and password.';
+        this.adminLoginError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    const btn = this.formAdminLogin?.querySelector('button');
+    if (btn) { btn.disabled = true; btn.textContent = 'Logging in…'; }
+
+    try {
+      const data = await authApi.adminLogin(email, password);
+      saveAuth(data.token, data.user);
+      this.adminLoginError?.classList.add('hidden');
+      this.close();
+      window.dispatchEvent(new Event('auth:changed'));
+      if (this.onSuccessCallback) this.onSuccessCallback();
+    } catch (err) {
+      if (this.adminLoginError) {
+        this.adminLoginError.textContent = err.message || 'Login failed. Please check your credentials.';
+        this.adminLoginError.classList.remove('hidden');
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Login'; }
+    }
+  }
+
   async handleVerifyOtp() {
     const otpCode = this.otpInput?.value.trim();
 
@@ -303,7 +381,14 @@ export class AuthModal {
     if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
 
     try {
-      const data = await authApi.verifyOtp(contact, otpCode);
+      const data = await authApi.verifyOtp(contact, otpCode, { loginMethod: this.activeMethod, whatsappNumber: this._lastPhone });
+      // Mark login method so profile UI can honor immutability rules
+      data.user = data.user || {};
+      data.user.loginMethod = this.activeMethod || 'email';
+      if (this.activeMethod === 'phone') {
+        // Attach phone for display (backend may not persist it in this mock)
+        data.user.whatsappNumber = this._lastPhone || data.user.whatsappNumber || '';
+      }
       saveAuth(data.token, data.user);
       this.close();
       window.dispatchEvent(new Event('auth:changed'));

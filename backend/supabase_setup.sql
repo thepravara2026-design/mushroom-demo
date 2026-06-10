@@ -38,8 +38,12 @@ CREATE TABLE IF NOT EXISTS orders (
   status TEXT DEFAULT 'pending' NOT NULL, -- 'pending', 'paid', 'failed'
   razorpay_order_id TEXT,
   razorpay_payment_id TEXT,
+  payment_method TEXT,
+  transaction_id TEXT,
   delivery_status TEXT DEFAULT 'placed' NOT NULL, -- 'placed', 'inoculating', 'shipped', 'delivered'
+  cancel_reason TEXT,
   whatsapp_sent BOOLEAN DEFAULT false,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 

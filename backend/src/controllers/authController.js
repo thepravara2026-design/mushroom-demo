@@ -1,12 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const authService = require('../services/authService');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const db = require('../config/db');
 const authMiddleware = require('../middleware/auth');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
+const { success, error: respondError } = require('../lib/response');
+const db = require('../config/db');
 
 /**
  * POST /api/auth/request-otp
@@ -21,9 +18,9 @@ router.post('/request-otp', async (req, res) => {
     }
 
     const result = await authService.generateAndSendOTP(email, role, fullName);
-    res.status(200).json(result);
+    return success(res, result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return respondError(res, error.message || 'Failed to send OTP', error.status || 500);
   }
 });
 
@@ -38,11 +35,61 @@ router.post('/verify-otp', async (req, res) => {
     if (!email || !otpCode) {
       return res.status(400).json({ error: 'Email and OTP code are required.' });
     }
-
-    const authResult = await authService.verifyOTP(email, otpCode);
-    res.status(200).json(authResult);
+    // Allow client to optionally pass loginMethod and whatsappNumber so server can persist provider and phone
+    const { loginMethod, whatsappNumber } = req.body;
+    const authResult = await authService.verifyOTP(email, otpCode, { loginMethod, whatsappNumber });
+    return success(res, authResult);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return respondError(res, error.message || 'OTP verification failed', error.status || 400);
+  }
+});
+
+
+/**
+ * PUT /api/auth/me
+ * Update profile fields for current user. Enforces immutability for provider-managed fields.
+ */
+router.put('/me', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const updates = {
+      fullName: req.body.fullName,
+      email: req.body.email,
+      whatsappNumber: req.body.whatsappNumber,
+      defaultAddress: req.body.default_address,
+      defaultPincode: req.body.default_pincode
+    };
+
+    const updated = await authService.updateProfile(userId, updates);
+
+    return success(res, {
+      id: updated.id,
+      email: updated.email,
+      fullName: updated.full_name,
+      whatsappNumber: updated.whatsapp_number || '',
+      role: updated.role,
+      loginMethod: updated.login_method || null,
+      defaultAddress: updated.default_address || '',
+      defaultPincode: updated.default_pincode || ''
+    });
+  } catch (err) {
+    return respondError(res, err.message || 'Failed to update profile', err.status || 500);
+  }
+});
+
+
+/**
+ * DELETE /api/auth/me
+ * Deletes the current user's account (mock/local). Accepts optional reason.
+ */
+router.delete('/me', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const reason = req.body && req.body.reason ? String(req.body.reason).slice(0, 500) : null;
+    await authService.deleteAccount(userId, reason);
+    return success(res, { message: 'Account deleted.' });
+  } catch (err) {
+    return respondError(res, err.message || 'Failed to delete account', err.status || 500);
   }
 });
 
@@ -53,37 +100,15 @@ router.post('/verify-otp', async (req, res) => {
 router.post('/admin-login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Please provide admin email and password.' });
+    if (!email || !password) return respondError(res, 'Please provide admin email and password.', 400);
+    try {
+      const result = await authService.adminLogin(email, password);
+      return success(res, result);
+    } catch (err) {
+      return respondError(res, err.message || 'Admin login failed', err.status || 401);
     }
-
-    // Find user
-    const { data: user } = await db.from('users').select('*').eq('email', email.toLowerCase()).single();
-    if (!user || user.role !== 'admin') {
-      return res.status(401).json({ error: 'Unauthorized access.' });
-    }
-
-    // Verify password
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) {
-      return res.status(400).json({ error: 'Invalid admin credentials.' });
-    }
-
-    // Generate JWT token
-    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.full_name,
-        role: user.role
-      }
-    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return respondError(res, error.message || 'Admin login failed', 500);
   }
 });
 
@@ -93,12 +118,8 @@ router.post('/admin-login', async (req, res) => {
  */
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const { data: user, error } = await db.from('users').select('*').eq('id', req.user.userId).single();
-    if (error || !user) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    res.json({
+    const user = await authService.getUserById(req.user.userId);
+    return success(res, {
       id: user.id,
       email: user.email,
       fullName: user.full_name,
@@ -106,7 +127,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       role: user.role
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return respondError(res, error.message || 'Failed to fetch user', error.status || 500);
   }
 });
 

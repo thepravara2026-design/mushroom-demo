@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const db = require('./config/db');
 const razorpay = require('./config/razorpay');
+const handleError = require('./utils/errorHandler');
 
 const authRoutes = require('./controllers/authController');
 const productRoutes = require('./routes/products');
@@ -38,11 +39,32 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`==================================================`);
-  console.log(`🍄 Sporekart Backend running on port ${PORT}`);
-  console.log(`🗄️  Database Mode: ${db.isMock ? '⚠️  MOCK (In-Memory)' : '✅ Supabase'}`);
-  console.log(`💳 Payment Mode:  ${razorpay.isMock ? '⚠️  MOCK (Simulator)' : '✅ Razorpay'}`);
-  console.log(`==================================================`);
-});
+// Centralized error handler (must be after routes)
+app.use(handleError);
+
+// Start Server with port fallback
+const DEFAULT_PORT = Number(process.env.PORT) || 5000;
+const MAX_PORT_TRIES = 10;
+
+function startServer(port, attempts = 0) {
+  const server = app.listen(port, () => {
+    console.log(`==================================================`);
+    console.log(`🍄 Sporekart Backend running on port ${port}`);
+    console.log(`🗄️  Database Mode: ${db.isMock ? '⚠️  MOCK (In-Memory)' : '✅ Supabase'}`);
+    console.log(`💳 Payment Mode:  ${razorpay.isMock ? '⚠️  MOCK (Simulator)' : '✅ Razorpay'}`);
+    console.log(`==================================================`);
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE' && attempts < MAX_PORT_TRIES) {
+      const nextPort = port + 1;
+      console.warn(`Port ${port} is in use, trying port ${nextPort}...`);
+      startServer(nextPort, attempts + 1);
+    } else {
+      console.error(`Failed to start backend server:`, error);
+      process.exit(1);
+    }
+  });
+}
+
+startServer(DEFAULT_PORT);

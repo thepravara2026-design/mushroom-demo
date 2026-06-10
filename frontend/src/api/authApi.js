@@ -7,10 +7,10 @@ export const authApi = {
       body: JSON.stringify({ email, role, fullName })
     }),
 
-  verifyOtp: (email, otpCode) =>
+  verifyOtp: (email, otpCode, opts = {}) =>
     fetchWithAuth('/auth/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ email, otpCode })
+      body: JSON.stringify(Object.assign({ email, otpCode }, opts))
     }),
 
   adminLogin: (email, password) =>

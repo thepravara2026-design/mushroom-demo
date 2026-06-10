@@ -1,0 +1,59 @@
+name: E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Build frontend (optional for preview)
+        run: npm run build --prefix frontend
+
+      - name: Start backend
+        run: |
+          nohup node backend/src/server.js >/tmp/backend.log 2>&1 &
+
+      - name: Start frontend preview
+        run: |
+          nohup npm run preview --prefix frontend >/tmp/frontend.log 2>&1 &
+
+      - name: Wait for services
+        run: |
+          npx wait-on http://localhost:3000 http://localhost:5000/api/health --timeout 30000
+
+      - name: Run Puppeteer E2E test
+        env:
+          CI: true
+        run: node test.js
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            /tmp/backend.log
+            /tmp/frontend.log

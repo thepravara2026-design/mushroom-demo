@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon --watch src --delay 1 src/server.js",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",
@@ -17,6 +19,12 @@
     "razorpay": "^2.9.2"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.0",
+    "jest": "^29.6.1",
+    "supertest": "^6.3.3"
+  }
+  ,"jest": {
+    "testEnvironment": "node",
+    "roots": ["<rootDir>/tests"]
   }
 }

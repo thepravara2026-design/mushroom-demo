@@ -43,11 +43,7 @@
       </div>
 
       <div class="topbar-actions">
-        <a href="#track" class="topbar-action-btn" id="btn-nav-track" style="display:none">
-          <i class="fa-solid fa-truck-fast"></i>
-          <span>Track Order</span>
-        </a>
-        <a href="#admin" class="topbar-action-btn" id="btn-nav-admin" style="display:none">
+        <a href="/admin.html" class="topbar-action-btn" id="btn-nav-admin" style="display:none">
           <i class="fa-solid fa-user-shield"></i>
           <span>Admin Console</span>
         </a>
@@ -67,19 +63,56 @@
   <nav class="main-navbar">
     <div class="navbar-inner">
       <button class="cat-dropdown-btn" id="btn-nav-shop">
-        <i class="fa-solid fa-grid-2"></i> Shop by Category <i class="fa-solid fa-chevron-down"></i>
+        <i class="fa-solid fa-grid-2"></i>
+        <span class="cat-label">Shop by Category</span>
+        <i class="fa-solid fa-chevron-down chevron"></i>
       </button>
-      <div class="nav-links">
-        <a href="#" class="nav-link" data-category="fresh">Fresh Mushrooms</a>
-        <a href="#" class="nav-link" data-category="dry">Dry Mushrooms</a>
-        <a href="#" class="nav-link" data-category="spawn">Spawn Seeds</a>
-        <a href="#" class="nav-link" data-category="kits">Mushroom Kits</a>
+      <div id="cat-dropdown-menu" class="cat-dropdown-menu hidden" aria-hidden="true"></div>
+      <button id="btn-mobile-menu" class="hamburger" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
+      <div class="nav-links" id="main-nav-links">
+        <a href="#track" class="nav-link" id="btn-nav-track" style="display:none">
+          <i class="fa-solid fa-truck-fast"></i>
+          <span>Track Order</span>
+        </a>
         <a href="#training-section" class="nav-link">Training &amp; Courses</a>
-        <a href="#" class="nav-link">Bulk Orders</a>
         <a href="#footer" class="nav-link">Contact Us</a>
+      </div>
+      <div class="nav-spacer"></div>
+      <div class="nav-actions">
+        <a href="#track" class="nav-action-link" id="btn-nav-track-right" style="display:none">
+          <i class="fa-solid fa-truck-fast"></i>
+          <span>Track</span>
+        </a>
+        <a href="#" class="nav-action-link" id="nav-bulk-orders-right">
+          <i class="fa-solid fa-box"></i>
+          <span>Bulk</span>
+        </a>
       </div>
     </div>
   </nav>
+
+  <!-- Mobile Nav Overlay -->
+  <div id="mobile-nav" class="mobile-nav hidden">
+    <div class="mobile-nav-inner container">
+      <button id="btn-mobile-close" class="mobile-close" aria-label="Close menu"><i class="fa-solid fa-xmark"></i></button>
+      <div class="mobile-logo-row">
+        <a href="#" id="mobile-logo" class="logo small">
+          <div class="logo-icon-wrap small"><i class="fa-solid fa-seedling"></i></div>
+          <div class="logo-text"><span class="logo-brand">Sporekart</span></div>
+        </a>
+      </div>
+      <div id="mobile-nav-links" class="mobile-nav-links">
+        <!-- main links cloned by JS -->
+      </div>
+      <div class="mobile-cat-nav" id="mobile-cat-nav">
+        <div id="mobile-cat-nav-inner"></div>
+      </div>
+      <div class="mobile-actions">
+
+        <button class="btn btn-block" id="btn-open-auth-mobile">Log In</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ============================================================
        HERO SECTION
@@ -106,7 +139,6 @@
             <a href="#shop-section" class="btn-primary-hero">Shop Now <i class="fa-solid fa-arrow-right"></i></a>
             <a href="#training-section" class="btn-outline-hero">Explore Training <i
                 class="fa-solid fa-arrow-right"></i></a>
-            <a href="#" class="btn-outline-hero">Bulk Orders <i class="fa-solid fa-arrow-right"></i></a>
           </div>
           <div class="hero-trust-badges">
             <div class="trust-badge">
@@ -469,205 +501,7 @@
     </div>
   </div>
 
-  <!-- ============================================================
-       ADMIN PAGE WRAPPER (Dynamic SPA Page Section)
-  ============================================================ -->
-  <div id="admin-page" class="page-section">
-    <!-- ADMIN DASHBOARD HEADER -->
-    <div class="admin-dashboard-topbar">
-      <div class="admin-dash-brand">
-        <div class="admin-dash-icon"><i class="fa-solid fa-user-shield"></i></div>
-        <div>
-          <h2>Admin Control Panel</h2>
-          <span id="admin-dash-subtitle">Sporekart Inventory Management</span>
-        </div>
-      </div>
-      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-        <div class="admin-dash-stats" id="admin-dash-stats">
-          <div class="admin-stat-chip"><i class="fa-solid fa-box"></i> <span id="admin-stat-products">0</span> Products
-          </div>
-          <div class="admin-stat-chip"><i class="fa-solid fa-shopping-bag"></i> <span id="admin-stat-orders">0</span>
-            Orders</div>
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn" id="btn-admin-exit-shop"
-            style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: white; padding: 6px 12px; font-size: 0.8rem; border-radius: var(--radius-sm); cursor: pointer;"><i
-              class="fa-solid fa-store"></i> View Shop</button>
-          <button class="btn" id="btn-admin-logout"
-            style="background: #e74c3c; border: 1px solid #e74c3c; color: white; padding: 6px 12px; font-size: 0.8rem; border-radius: var(--radius-sm); cursor: pointer;"><i
-              class="fa-solid fa-right-from-bracket"></i> Logout</button>
-        </div>
-      </div>
-    </div>
 
-    <!-- ADMIN TAB BAR -->
-    <div class="admin-tab-bar">
-      <button class="admin-tab active" data-tab="products"><i class="fa-solid fa-boxes-stacked"></i> Products</button>
-      <button class="admin-tab" data-tab="orders"><i class="fa-solid fa-truck-fast"></i> Orders &amp; Shipping</button>
-      <button class="admin-tab" data-tab="add-product"><i class="fa-solid fa-plus-circle"></i> Add Product</button>
-      <button class="admin-tab" data-tab="categories"><i class="fa-solid fa-tags"></i> Categories</button>
-    </div>
-
-    <!-- ADMIN CONTENT: Products Tab -->
-    <div class="admin-tab-content active" id="admin-content-products">
-      <div class="admin-content-inner">
-        <div class="admin-section-header">
-          <h3><i class="fa-solid fa-list"></i> Product Inventory</h3>
-          <div class="admin-filter-row">
-            <input type="text" id="admin-search-prod" placeholder="Search products..." class="admin-search-input">
-            <select id="admin-filter-cat" class="admin-select-input">
-              <option value="all">All Categories</option>
-              <option value="mushrooms">Mushrooms</option>
-              <option value="spawn">Spawn & Seeds</option>
-            </select>
-          </div>
-        </div>
-        <div id="admin-inventory-grid" class="admin-product-table-wrap">
-          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading products...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ADMIN CONTENT: Orders Tab -->
-    <div class="admin-tab-content" id="admin-content-orders">
-      <div class="admin-content-inner">
-        <div class="admin-section-header">
-          <h3><i class="fa-solid fa-truck-fast"></i> Orders & Shipping Management</h3>
-        </div>
-        <div id="admin-orders-list" class="admin-orders-wrap">
-          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading orders...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ADMIN CONTENT: Categories Tab -->
-    <div class="admin-tab-content" id="admin-content-categories">
-      <div class="admin-content-inner">
-        <div class="admin-section-header">
-          <h3><i class="fa-solid fa-tags"></i> Category Management</h3>
-        </div>
-        <!-- Add/Edit Category Form -->
-        <div class="admin-cat-form-wrap">
-          <input type="hidden" id="admin-edit-cat-id" value="">
-          <div class="admin-cat-form-row">
-            <div class="input-field">
-              <label>Category Slug / ID *</label>
-              <input type="text" id="admin-cat-id" placeholder="e.g. fresh" pattern="[a-z0-9\-]+"
-                title="Lowercase letters, numbers and hyphens only">
-            </div>
-            <div class="input-field">
-              <label>Category Name *</label>
-              <input type="text" id="admin-cat-name" placeholder="e.g. Fresh Mushrooms">
-            </div>
-            <div class="input-field" style="flex:2">
-              <label>Description</label>
-              <input type="text" id="admin-cat-desc" placeholder="Short description of this category...">
-            </div>
-            <div class="admin-cat-form-actions">
-              <button type="button" id="btn-admin-save-cat" class="btn btn-primary"><i
-                  class="fa-solid fa-floppy-disk"></i> Save</button>
-              <button type="button" id="btn-admin-reset-cat" class="btn btn-secondary"><i
-                  class="fa-solid fa-rotate-left"></i></button>
-            </div>
-          </div>
-          <div class="admin-error-msg hidden" id="admin-cat-feedback"></div>
-        </div>
-        <!-- Categories List -->
-        <div id="admin-categories-list" class="admin-categories-wrap">
-          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading categories...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ADMIN CONTENT: Add Product Tab -->
-    <div class="admin-tab-content" id="admin-content-add-product">
-      <div class="admin-content-inner">
-        <div class="admin-section-header">
-          <h3><i class="fa-solid fa-plus-circle"></i> Add / Edit Product</h3>
-        </div>
-        <div class="admin-form-wrap">
-          <form id="form-admin-add-product" class="admin-product-form">
-            <input type="hidden" id="admin-edit-id" value="">
-            <div class="admin-form-grid">
-              <div class="admin-form-col">
-                <div class="input-field">
-                  <label>Product Name *</label>
-                  <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit">
-                </div>
-                <div class="input-field">
-                  <label>Description *</label>
-                  <textarea id="admin-prod-desc" required placeholder="Product details, cultivation notes..."
-                    class="admin-textarea"></textarea>
-                </div>
-                <div class="admin-form-row-3">
-                  <div class="input-field">
-                    <label>Category *</label>
-                    <select id="admin-prod-category" class="admin-select-input">
-                      <option value="mushrooms">Fresh Mushrooms</option>
-                      <option value="spawn">Spawn &amp; Seeds</option>
-                    </select>
-                  </div>
-                  <div class="input-field">
-                    <label>Difficulty</label>
-                    <select id="admin-prod-difficulty" class="admin-select-input">
-                      <option value="beginner">Beginner</option>
-                      <option value="intermediate">Intermediate</option>
-                      <option value="advanced">Advanced</option>
-                    </select>
-                  </div>
-                  <div class="input-field">
-                    <label>GST Slab (%)</label>
-                    <select id="admin-prod-gst" class="admin-select-input">
-                      <option value="0">0% (Exempt)</option>
-                      <option value="5" selected>5% (Food/Agri)</option>
-                      <option value="12">12% (Standard)</option>
-                      <option value="18">18% (Standard+)</option>
-                      <option value="28">28% (Luxury)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div class="admin-form-col">
-                <div class="admin-form-row-2">
-                  <div class="input-field">
-                    <label>Actual Price (₹) *</label>
-                    <input type="number" step="0.01" id="admin-prod-price" required placeholder="350.00">
-                  </div>
-                  <div class="input-field">
-                    <label>MRP / Strikeout (₹)</label>
-                    <input type="number" step="0.01" id="admin-prod-mrp" placeholder="499.00">
-                  </div>
-                </div>
-                <div class="input-field">
-                  <label>Stock Quantity</label>
-                  <input type="number" id="admin-prod-stock" value="100" min="0">
-                </div>
-                <div class="input-field">
-                  <label>Product Image URL</label>
-                  <input type="url" id="admin-prod-image" placeholder="https://images.unsplash.com/...">
-                </div>
-                <div class="admin-form-preview" id="admin-img-preview">
-                  <i class="fa-solid fa-image"></i>
-                  <span>Image preview</span>
-                </div>
-              </div>
-            </div>
-            <div class="admin-error-msg hidden" id="admin-add-feedback"></div>
-            <div class="admin-form-actions">
-              <button type="button" id="btn-admin-reset-form" class="btn btn-secondary">Reset</button>
-              <button type="submit" class="btn btn-primary admin-submit-btn" id="admin-form-submit-btn">
-                <i class="fa-solid fa-plus-circle"></i> <span id="admin-submit-label">Publish Product</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ============================================================
-       FOOTER
-  ============================================================ -->
   <footer class="site-footer" id="footer">
     <div class="footer-inner">
       <!-- Brand -->
@@ -818,6 +652,27 @@
             </button>
           </div>
           <p class="auth-note">By continuing, you agree to our Terms & Privacy Policy</p>
+          <p class="auth-admin-caution"><a href="#" id="link-admin-password">Staff? Use admin login</a></p>
+        </div>
+
+        <!-- Admin Password Login Panel -->
+        <div id="auth-admin-password-view" class="auth-form-panel hidden">
+          <div class="auth-logo"><i class="fa-solid fa-lock"></i></div>
+          <h3>Admin Access</h3>
+          <p class="auth-subtitle">Enter your admin credentials</p>
+          <form id="form-admin-login">
+            <div class="input-field">
+              <label><i class="fa-solid fa-envelope"></i> Admin Email</label>
+              <input type="email" id="admin-email" required placeholder="admin@sporekart.com">
+            </div>
+            <div class="input-field">
+              <label><i class="fa-solid fa-lock"></i> Password</label>
+              <input type="password" id="admin-password" required placeholder="Enter your password">
+            </div>
+            <div class="auth-error-msg hidden" id="admin-login-error"></div>
+            <button type="submit" class="btn btn-primary btn-block">Login</button>
+          </form>
+          <p class="auth-toggle-link"><a href="#" id="link-back-admin">← Back to login options</a></p>
         </div>
 
         <!-- STEP 1b: Phone OTP Entry -->
@@ -890,27 +745,6 @@
     </div>
   </div>
 
-  <!-- ADMIN LOGIN MODAL (Hidden, Isolated) -->
-  <div class="modal-overlay" id="admin-login-modal">
-    <div class="modal-card modal-small" style="border: 2px solid #e74c3c;">
-      <button class="modal-close" id="btn-close-admin-login"><i class="fa-solid fa-xmark"></i></button>
-      <div class="auth-form-panel">
-        <h3 style="color: #e74c3c;"><i class="fa-solid fa-user-shield"></i> Admin Access</h3>
-        <form id="form-admin-auth">
-          <div class="input-field">
-            <label>Admin Email</label>
-            <input type="email" id="admin-auth-email" required>
-          </div>
-          <div class="input-field">
-            <label>Master Password</label>
-            <input type="password" id="admin-auth-password" required>
-          </div>
-          <button type="submit" class="btn btn-primary btn-block" style="background:#e74c3c">Secure Login</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
   <!-- PRODUCT DETAIL MODAL -->
   <div class="modal-overlay" id="product-detail-modal">
     <div class="modal-card">
@@ -959,6 +793,7 @@
         <div class="ledger-row discount hidden" id="ledger-discount-row"><span>Discount:</span><span
             id="ledger-discount">-₹0.00</span></div>
         <div class="ledger-row"><span>GST:</span><span id="ledger-tax">₹0.00</span></div>
+        <div class="ledger-row" id="ledger-shipping-row" style="display:none;"><span>Shipping:</span><span id="ledger-shipping">₹0.00</span></div>
         <div class="ledger-row total"><span>Total:</span><span id="ledger-total">₹0.00</span></div>
       </div>
       <div class="cart-checkout-actions">
@@ -967,6 +802,70 @@
         </button>
         <p class="auth-warning-label hidden" id="cart-auth-warning">⚠️ Please log in to checkout.</p>
       </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       CHECKOUT ADDRESS PAGE
+  ============================================================ -->
+  <div id="checkout-page" class="page-section checkout-page">
+    <div class="checkout-hero">
+      <div class="checkout-hero-copy">
+        <span class="eyebrow-tag">Secure delivery</span>
+        <h2>Checkout with delivery details</h2>
+        <p>Confirm your shipping phone, pincode, and address before moving to secure payment.</p>
+      </div>
+      <div class="checkout-hero-meta">
+        <div class="meta-pill"><i class="fa-solid fa-shield-halved"></i> Secure checkout</div>
+        <div class="meta-pill"><i class="fa-solid fa-clock"></i> Held for 15 minutes</div>
+      </div>
+    </div>
+
+    <div class="checkout-layout">
+      <section class="checkout-panel checkout-form-panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-subtitle">STEP 1</div>
+            <h3>Delivery Information</h3>
+          </div>
+          <div class="panel-pill">Required</div>
+        </div>
+
+        <div class="input-group">
+          <label for="checkout-delivery-phone">Delivery phone</label>
+          <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="15">
+        </div>
+
+        <div class="input-group">
+          <label for="checkout-delivery-pincode">Pincode</label>
+          <input type="text" id="checkout-delivery-pincode" placeholder="Enter 6-digit pincode" maxlength="6">
+        </div>
+
+        <div class="input-group">
+          <label for="checkout-delivery-address">Delivery address</label>
+          <textarea id="checkout-delivery-address" placeholder="House / Flat no, street, landmark, city" rows="5"></textarea>
+        </div>
+
+        <div id="checkout-page-feedback" class="auth-error-msg hidden"></div>
+
+        <button class="btn btn-primary btn-block" id="btn-payment-continue">
+          <i class="fa-solid fa-credit-card"></i> Continue to payment
+        </button>
+        <button class="btn btn-secondary btn-block" id="btn-change-cart">
+          <i class="fa-solid fa-arrow-left"></i> Back to cart
+        </button>
+      </section>
+
+      <aside class="checkout-panel checkout-summary-panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-subtitle">ORDER SUMMARY</div>
+            <h3>Review your cart</h3>
+          </div>
+          <div class="panel-pill panel-pill-soft">Ready to pay</div>
+        </div>
+        <div id="checkout-order-summary"></div>
+      </aside>
     </div>
   </div>
 

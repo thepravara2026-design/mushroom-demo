@@ -1,0 +1,34 @@
+const db = require('../config/db');
+
+async function findByEmail(email) {
+  const { data, error } = await db.from('users').select('*').eq('email', email).single();
+  return { data, error };
+}
+
+async function findById(id) {
+  const { data, error } = await db.from('users').select('*').eq('id', id).single();
+  return { data, error };
+}
+
+async function create(payload) {
+  const { data, error } = await db.from('users').insert(payload).single();
+  return { data, error };
+}
+
+async function update(id, updates) {
+  const { data, error } = await db.from('users').update(updates).eq('id', id).single();
+  return { data, error };
+}
+
+async function remove(id) {
+  // Attempt to fetch existing row so we can return the deleted record on success
+  const { data: existing, error: getErr } = await findById(id);
+  if (getErr || !existing) {
+    return { data: null, error: { message: 'No rows found' } };
+  }
+
+  await db.from('users').delete().eq('id', id).single();
+  return { data: existing, error: null };
+}
+
+module.exports = { findByEmail, findById, create, update, remove };

@@ -4,7 +4,7 @@
   "description": "Premium Mushroom Cultivation E-Commerce Platform",
   "scripts": {
     "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
-    "dev": "npx concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev": "npx concurrently --names \"backend,frontend\" --prefix name --kill-others-on-fail \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "start:backend": "npm start --prefix backend",
     "start:frontend": "npm run dev --prefix frontend"
   },

@@ -2,15 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const authMiddleware = require('../middleware/auth');
-
-// Admin Authorization Helper
-const adminOnly = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
-  }
-};
+const { requireRole } = require('../middleware/roles');
+const adminOnly = requireRole('admin');
 
 // GET /api/products
 // Fetch all products
@@ -83,24 +76,61 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // ADMIN ONLY - POST /api/products
 // Add a new product to listing
 router.post('/', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock } = req.body;
+    const { id, name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock } = req.body;
 
     if (!name || !description || price === undefined || !category) {
       return res.status(400).json({ error: 'Please provide name, description, price, and category.' });
     }
 
+    const numericPrice = parseFloat(price);
+    const numericMrp = mrp_price !== undefined ? parseFloat(mrp_price) : undefined;
+    if (numericMrp !== undefined && numericMrp < numericPrice) {
+      return res.status(400).json({ error: 'MRP must be greater than or equal to actual price.' });
+    }
+
     // Dynamic category validation
-    const { data: categoriesList } = await db.from('categories').select('id');
+    const { data: categoriesList, error: categoryError } = await db.from('categories').select('id');
+    if (categoryError) {
+      return res.status(500).json({ error: categoryError.message });
+    }
+
     const validCategoryIds = categoriesList ? categoriesList.map(c => c.id) : [];
     if (!validCategoryIds.includes(category)) {
       return res.status(400).json({ error: `Invalid category "${category}".` });
     }
 
-    const { data: newProduct, error } = await db.from('products').insert({
+    let categoryUid = null;
+    if (Array.isArray(categoriesList)) {
+      const categoryRow = categoriesList.find(c => c.id === category);
+      categoryUid = categoryRow ? categoryRow.category_id || categoryRow.categoryId : null;
+    }
+
+    if (id) {
+      const expectedPrefix = categoryUid || category;
+      const idPattern = new RegExp(`^${escapeRegExp(expectedPrefix)}-pid-\\d{5}$`);
+      if (!idPattern.test(id)) {
+        return res.status(400).json({ error: `Product ID must be formatted as ${expectedPrefix}-pid-00001.` });
+      }
+
+      const { data: existingProduct, error: existingError } = await db.from('products').select('id').eq('id', id);
+      if (existingError) {
+        return res.status(500).json({ error: existingError.message });
+      }
+      if (existingProduct && existingProduct.length > 0) {
+        return res.status(400).json({ error: `Product ID "${id}" is already in use.` });
+      }
+    }
+
+    const insertData = {
+      ...(id ? { id } : {}),
       name,
       description,
       price: parseFloat(price),
@@ -110,7 +140,9 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
       difficulty: difficulty || 'beginner',
       gst_rate: parseInt(gst_rate, 10) || 5,
       stock: parseInt(stock, 10) || 100
-    }).single();
+    };
+
+    const { data: newProduct, error } = await db.from('products').insert(insertData).single();
 
     if (error) {
       return res.status(500).json({ error: error.message });
@@ -126,8 +158,17 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 // Update product details (pricing, stock, etc.)
 router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock } = req.body;
-    
+    const { id, name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock } = req.body;
+
+    if (id !== undefined) {
+      return res.status(400).json({ error: 'Product ID cannot be modified once created.' });
+    }
+
+    const { data: existingProduct, error: fetchError } = await db.from('products').select('id, category').eq('id', req.params.id).single();
+    if (fetchError || !existingProduct) {
+      return res.status(404).json({ error: 'Product not found.' });
+    }
+
     // Build update object dynamically
     const updates = {};
     if (name !== undefined) updates.name = name;
@@ -136,10 +177,16 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
     if (mrp_price !== undefined) updates.mrp_price = parseFloat(mrp_price);
     if (image_url !== undefined) updates.image_url = image_url;
     if (category !== undefined) {
-      const { data: categoriesList } = await db.from('categories').select('id');
+      const { data: categoriesList } = await db.from('categories').select('id, category_id');
       const validCategoryIds = categoriesList ? categoriesList.map(c => c.id) : [];
       if (!validCategoryIds.includes(category)) {
         return res.status(400).json({ error: `Invalid category "${category}".` });
+      }
+      const categoryRow = categoriesList.find(c => c.id === category);
+      const expectedPrefix = categoryRow ? categoryRow.category_id || categoryRow.categoryId : category;
+      const newPattern = new RegExp(`^${escapeRegExp(expectedPrefix)}-pid-\\d{5}$`);
+      if (!newPattern.test(existingProduct.id)) {
+        return res.status(400).json({ error: 'Category change is not allowed because the existing product ID prefix must match the selected category UID.' });
       }
       updates.category = category;
     }
