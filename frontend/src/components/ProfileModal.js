@@ -391,7 +391,7 @@ class ProfileModal {
   }
 
   async cancelOrder(orderId) {
-    const order = (state.orders || []).find((o) => o.id === orderId);
+    const order = (state.orders || []).find((o) => String(o.id) === String(orderId));
     const status = order?.delivery_status || order?.status || 'unknown';
 
     if (status !== 'processing') {
