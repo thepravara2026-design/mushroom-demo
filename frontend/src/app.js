@@ -256,6 +256,17 @@ function handleRouting() {
     if (heroSection) heroSection.classList.remove('hidden');
   }
 
+  // Landing page: when hero is visible, hide product filter and page-size controls
+  try {
+    const shopControls = document.querySelector('.shop-inventory-controls');
+    const filtersRow = document.getElementById('product-filters-row');
+    const heroVisible = heroSection && !heroSection.classList.contains('hidden');
+    if (shopControls) shopControls.style.display = heroVisible ? 'none' : 'flex';
+    if (filtersRow) filtersRow.style.display = heroVisible ? 'none' : '';
+  } catch (e) {
+    /* ignore */
+  }
+
   // Additional SPA routes for training register and training courses (anchor-based)
   const shopSection = document.getElementById('shop-section');
   const productsSection = document.getElementById('products-section');
