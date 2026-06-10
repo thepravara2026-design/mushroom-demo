@@ -397,11 +397,8 @@
               </div>
               <div class="admin-cat-form-wrap">
                 <input type="hidden" id="admin-edit-cat-id" value="" />
-                <div class="admin-cat-form-section">
-                  <div class="admin-cat-form-section-title">
-                    Basic Information
-                  </div>
-                  <div class="admin-cat-form-row">
+                <div class="admin-cat-form-compact">
+                  <div class="admin-cat-form-fields">
                     <div class="input-field" style="flex: 0.8">
                       <label>Category UID</label>
                       <input
@@ -410,7 +407,6 @@
                         readonly
                         placeholder="spore-000001"
                       />
-                      <small class="field-note">Auto-generated</small>
                     </div>
                     <div class="input-field" style="flex: 1.2">
                       <label>Category Slug *</label>
@@ -421,13 +417,8 @@
                         pattern="[a-z0-9\-]+"
                         title="Lowercase letters, numbers and hyphens only"
                       />
-                      <small class="field-note"
-                        >URL-safe ID for product assignment</small
-                      >
                     </div>
-                  </div>
-                  <div class="admin-cat-form-row">
-                    <div class="input-field">
+                    <div class="input-field span-2">
                       <label>Category Name *</label>
                       <input
                         type="text"
@@ -435,9 +426,7 @@
                         placeholder="e.g. Fresh Mushrooms"
                       />
                     </div>
-                  </div>
-                  <div class="admin-cat-form-row">
-                    <div class="input-field">
+                    <div class="input-field span-2">
                       <label>Description</label>
                       <input
                         type="text"
@@ -445,13 +434,7 @@
                         placeholder="Short description of this category..."
                       />
                     </div>
-                  </div>
-                </div>
-
-                <div class="admin-cat-form-section">
-                  <div class="admin-cat-form-section-title">Category Image</div>
-                  <div class="admin-cat-form-row">
-                    <div class="input-field">
+                    <div class="input-field span-2">
                       <label>Image Upload</label>
                       <div class="admin-cat-image-upload">
                         <input
@@ -472,19 +455,11 @@
                           class="hidden-file-input"
                         />
                       </div>
-                      <small class="field-note"
-                        >Supports any image file. Paste an online URL or upload
-                        locally; preview updates instantly.</small
-                      >
                     </div>
                   </div>
-
-                  <div
-                    id="admin-cat-image-preview"
-                    class="admin-cat-image-preview"
-                  >
+                  <div id="admin-cat-image-preview" class="admin-cat-image-preview-compact">
                     <i class="fa-solid fa-image"></i>
-                    <span>Category image preview</span>
+                    <span>Image</span>
                   </div>
                 </div>
                 <div class="admin-cat-form-actions">
@@ -500,7 +475,7 @@
                     id="btn-admin-reset-cat"
                     class="btn btn-secondary"
                   >
-                    <i class="fa-solid fa-rotate-left"></i>
+                    <i class="fa-solid fa-rotate-left"></i> Reset
                   </button>
                 </div>
                 <div
@@ -526,43 +501,31 @@
               </div>
 
               <div class="admin-trainings-wrap">
-                <div
-                  style="
-                    display: flex;
-                    gap: 12px;
-                    flex-wrap: wrap;
-                    align-items: flex-start;
-                    margin-bottom: 12px;
-                  "
-                >
-                  <form
-                    id="form-admin-add-training"
-                    class="admin-train-form"
-                    style="flex: 1; min-width: 300px"
-                  >
+                <div class="admin-trainings-container">
+                  <form id="form-admin-add-training" class="admin-train-form-compact">
                     <input type="hidden" id="admin-train-edit-id" value="" />
                     <div class="input-field">
-                      <label>Title</label
-                      ><input type="text" id="admin-train-title" required />
+                      <label>Title</label>
+                      <input type="text" id="admin-train-title" required />
                     </div>
                     <div class="input-field">
-                      <label>Category</label
-                      ><select id="admin-train-category">
+                      <label>Category</label>
+                      <select id="admin-train-category">
                         <option>Beginner</option>
                         <option>Farmer</option>
                         <option>Entrepreneur</option>
                       </select>
                     </div>
                     <div class="input-field">
-                      <label>Description</label
-                      ><textarea
+                      <label>Description</label>
+                      <textarea
                         id="admin-train-desc"
-                        class="admin-textarea"
+                        class="admin-textarea-compact"
                       ></textarea>
                     </div>
                     <div class="input-field">
-                      <label>Image URL</label
-                      ><input
+                      <label>Image URL</label>
+                      <input
                         type="url"
                         id="admin-train-image"
                         placeholder="/images/training_farm.png"
@@ -570,64 +533,29 @@
                     </div>
                     <div class="input-field">
                       <label>Allowed Roles</label>
-                      <div
-                        style="display: flex; gap: 10px; align-items: center"
-                      >
-                        <label
-                          ><input
-                            type="checkbox"
-                            id="admin-train-role-trainee"
-                            value="trainee"
-                          />
-                          Trainee</label
-                        >
-                        <label
-                          ><input
-                            type="checkbox"
-                            id="admin-train-role-farmer"
-                            value="farmer"
-                          />
-                          Farmer</label
-                        >
-                        <label
-                          ><input
-                            type="checkbox"
-                            id="admin-train-role-entrepreneur"
-                            value="entrepreneur"
-                          />
-                          Entrepreneur</label
-                        >
+                      <div class="admin-train-roles-grid">
+                        <label><input type="checkbox" id="admin-train-role-trainee" value="trainee" /> Trainee</label>
+                        <label><input type="checkbox" id="admin-train-role-farmer" value="farmer" /> Farmer</label>
+                        <label><input type="checkbox" id="admin-train-role-entrepreneur" value="entrepreneur" /> Entrepreneur</label>
                       </div>
                     </div>
                     <div class="input-field">
-                      <label>Content URL (optional)</label
-                      ><input
-                        type="url"
-                        id="admin-train-content"
-                        placeholder="https://..."
-                      />
+                      <label>Content URL (optional)</label>
+                      <input type="url" id="admin-train-content" placeholder="https://..." />
                     </div>
-                    <div style="display: flex; gap: 8px">
+                    <div class="admin-train-actions">
                       <button type="submit" class="btn btn-primary">
-                        Save Training
+                        <i class="fa-solid fa-save"></i> Save
                       </button>
-                      <button
-                        type="button"
-                        id="btn-admin-reset-train"
-                        class="btn btn-secondary"
-                      >
-                        Reset
+                      <button type="button" id="btn-admin-reset-train" class="btn btn-secondary">
+                        <i class="fa-solid fa-rotate-left"></i> Reset
                       </button>
                     </div>
                   </form>
 
-                  <div
-                    id="admin-trainings-list"
-                    style="flex: 1; min-width: 320px"
-                  >
+                  <div id="admin-trainings-list" class="admin-trainings-list-compact">
                     <div class="admin-loading">
-                      <i class="fa-solid fa-spinner fa-spin"></i> Loading
-                      trainings...
+                      <i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...
                     </div>
                   </div>
                 </div>
@@ -645,115 +573,104 @@
               <div class="admin-form-wrap">
                 <form id="form-admin-add-product" class="admin-product-form">
                   <input type="hidden" id="admin-edit-id" value="" />
-                  <div class="admin-form-grid">
-                    <div class="admin-form-col">
-                      <div class="input-field">
-                        <label>Category *</label>
-                        <select
-                          id="admin-prod-category"
-                          class="admin-select-input"
-                        ></select>
-                      </div>
-                      <div class="input-field">
-                        <label>Product ID</label>
+                  <div class="admin-form-compact-grid">
+                    <div class="input-field">
+                      <label>Category *</label>
+                      <select
+                        id="admin-prod-category"
+                        class="admin-select-input"
+                      ></select>
+                    </div>
+                    <div class="input-field">
+                      <label>Product ID</label>
+                      <input
+                        type="text"
+                        id="admin-prod-id-display"
+                        readonly
+                        placeholder="Auto-generated"
+                      />
+                    </div>
+                    <div class="input-field">
+                      <label>Product Name *</label>
+                      <input
+                        type="text"
+                        id="admin-prod-name"
+                        required
+                        placeholder="e.g. Golden Oyster Mushroom Kit"
+                      />
+                    </div>
+                    <div class="input-field span-2">
+                      <label>Description *</label>
+                      <textarea
+                        id="admin-prod-desc"
+                        required
+                        placeholder="Product details, cultivation notes..."
+                        class="admin-textarea-compact"
+                      ></textarea>
+                    </div>
+                    <div class="input-field">
+                      <label>Actual Price (₹) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        id="admin-prod-price"
+                        required
+                        placeholder="350.00"
+                      />
+                    </div>
+                    <div class="input-field">
+                      <label>MRP / Strikeout (₹)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        id="admin-prod-mrp"
+                        placeholder="499.00"
+                      />
+                    </div>
+                    <div class="input-field">
+                      <label>Stock Quantity</label>
+                      <input
+                        type="number"
+                        id="admin-prod-stock"
+                        value="100"
+                        min="0"
+                      />
+                    </div>
+                    <div class="input-field">
+                      <label>GST Slab (%)</label>
+                      <select id="admin-prod-gst" class="admin-select-input">
+                        <option value="0">0% (Exempt)</option>
+                        <option value="5" selected>5% (Food/Agri)</option>
+                        <option value="12">12% (Standard)</option>
+                        <option value="18">18% (Standard+)</option>
+                        <option value="28">28% (Luxury)</option>
+                      </select>
+                    </div>
+                    <div class="input-field">
+                      <label>Product Image</label>
+                      <div class="admin-cat-image-upload">
                         <input
-                          type="text"
-                          id="admin-prod-id-display"
-                          readonly
-                          placeholder="Auto-generated"
+                          type="url"
+                          id="admin-prod-image-url"
+                          placeholder="Paste image URL or click Browse"
                         />
-                        <small class="field-note"
-                          >Auto-generated as categoryId-pid-00001</small
+                        <button
+                          type="button"
+                          id="admin-prod-image-browse"
+                          class="btn btn-secondary btn-image-browse"
                         >
-                      </div>
-                      <div class="input-field">
-                        <label>Product Name *</label>
+                          <i class="fa-solid fa-upload"></i> Browse
+                        </button>
                         <input
-                          type="text"
-                          id="admin-prod-name"
-                          required
-                          placeholder="e.g. Golden Oyster Mushroom Kit"
+                          type="file"
+                          id="admin-prod-image-file"
+                          class="hidden-file-input"
                         />
                       </div>
-                      <div class="input-field">
-                        <label>Description *</label>
-                        <textarea
-                          id="admin-prod-desc"
-                          required
-                          placeholder="Product details, cultivation notes..."
-                          class="admin-textarea"
-                        ></textarea>
-                      </div>
-                      <div class="admin-form-row-2">
-                        <div class="input-field">
-                          <label>Actual Price (₹) *</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            id="admin-prod-price"
-                            required
-                            placeholder="350.00"
-                          />
-                        </div>
-                        <div class="input-field">
-                          <label>MRP / Strikeout (₹)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            id="admin-prod-mrp"
-                            placeholder="499.00"
-                          />
-                        </div>
-                      </div>
-                      <div class="input-field">
-                        <label>Stock Quantity</label>
-                        <input
-                          type="number"
-                          id="admin-prod-stock"
-                          value="100"
-                          min="0"
-                        />
-                      </div>
-                      <div class="input-field">
-                        <label>GST Slab (%)</label>
-                        <select id="admin-prod-gst" class="admin-select-input">
-                          <option value="0">0% (Exempt)</option>
-                          <option value="5" selected>5% (Food/Agri)</option>
-                          <option value="12">12% (Standard)</option>
-                          <option value="18">18% (Standard+)</option>
-                          <option value="28">28% (Luxury)</option>
-                        </select>
-                      </div>
-                      <div class="input-field">
-                        <label>Product Image</label>
-                        <div class="admin-cat-image-upload">
-                          <input
-                            type="url"
-                            id="admin-prod-image-url"
-                            placeholder="Paste image URL or click Browse"
-                          />
-                          <button
-                            type="button"
-                            id="admin-prod-image-browse"
-                            class="btn btn-secondary btn-image-browse"
-                          >
-                            <i class="fa-solid fa-upload"></i> Browse
-                          </button>
-                          <input
-                            type="file"
-                            id="admin-prod-image-file"
-                            class="hidden-file-input"
-                          />
-                        </div>
-                        <small class="field-note"
-                          >Supports any image file. Paste an online URL or
-                          upload locally; preview updates instantly.</small
-                        >
-                      </div>
-                      <div class="admin-form-preview" id="admin-img-preview">
-                        <i class="fa-solid fa-image"></i>
-                        <span>Image preview</span>
-                      </div>
+                    </div>
+                    <div class="admin-form-preview-compact" id="admin-img-preview">
+                      <i class="fa-solid fa-image"></i>
+                      <span>Image preview</span>
                     </div>
                   </div>
                   <div
