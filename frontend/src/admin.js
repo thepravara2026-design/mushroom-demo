@@ -11,6 +11,9 @@ let _adminCategories = [];
 let _adminTrainings = [];
 let pendingCategoryEditId = null;
 let adminOrdersCache = [];
+let adminHistoryPage = 1;
+let adminHistoryPageSize = 10;
+let adminHistorySort = 'date_desc';
 let _adminInventoryPage = 1;
 let adminInventoryPageSize = 10;
 let productImagePreviewValid = false;
@@ -626,6 +629,7 @@ async function fetchAdminOrders() {
     if (statOrders) statOrders.textContent = orders.length;
     adminOrdersCache = orders;
     renderAdminOrders(orders);
+    renderAdminHistory();
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
     if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;"></div>';
@@ -952,6 +956,231 @@ function clearAdminOrderFilters() {
     valueContainer.innerHTML = '<span class="admin-filter-hint">Select a filter above to apply</span>';
   }
   renderAdminOrders(adminOrdersCache);
+}
+
+function renderAdminHistoryFilterValueControl(filterType) {
+  const container = document.getElementById('admin-history-filter-value');
+  if (!container) return;
+
+  let html = '';
+  switch (filterType) {
+    case 'date':
+      html = '<input type="date" id="admin-history-filter-value-input" class="admin-filter-input">';
+      break;
+    case 'order_id':
+      html = '<input type="text" id="admin-history-filter-value-input" class="admin-filter-input" placeholder="Enter order id">';
+      break;
+    case 'customer_id':
+      html = '<input type="text" id="admin-history-filter-value-input" class="admin-filter-input" placeholder="Enter customer id">';
+      break;
+    case 'phone':
+      html = '<input type="text" id="admin-history-filter-value-input" class="admin-filter-input" placeholder="Enter phone number">';
+      break;
+    default:
+      html = '<span class="admin-filter-hint">Select a filter above to apply</span>';
+  }
+
+  container.innerHTML = html;
+  const input = document.getElementById('admin-history-filter-value-input');
+  if (input) {
+    input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {
+      adminHistoryPage = 1;
+      renderAdminHistory();
+    });
+  }
+}
+
+function getAdminHistoryFilterValue() {
+  const filterType = document.getElementById('admin-history-filter-type')?.value || '';
+  const valueInput = document.getElementById('admin-history-filter-value-input');
+  const value = valueInput ? valueInput.value.trim() : '';
+  return { filterType, value };
+}
+
+function getAdminHistorySortValue() {
+  return document.getElementById('admin-history-sort')?.value || 'date_desc';
+}
+
+function getAdminHistoryPageSize() {
+  return Number(document.getElementById('admin-history-page-size')?.value || 10);
+}
+
+function applyAdminHistoryFilters(orders) {
+  const { filterType, value } = getAdminHistoryFilterValue();
+  const normalizedValue = value.toLowerCase();
+
+  return orders.filter((order) => {
+    switch (filterType) {
+      case 'date': {
+        if (!value) return true;
+        const orderDate = new Date(order.delivered_at || order.updated_at || order.created_at);
+        return orderDate.toDateString() === new Date(value).toDateString();
+      }
+      case 'order_id':
+        return value ? String(order.id || '').toLowerCase().includes(normalizedValue) : true;
+      case 'customer_id':
+        return value
+          ? String(order.user_id || order.customer_id || '')
+            .toLowerCase()
+            .includes(normalizedValue)
+          : true;
+      case 'phone':
+        return value
+          ? String(order.delivery_phone || '')
+            .replace(/\D/g, '')
+            .includes(value.replace(/\D/g, ''))
+          : true;
+      default:
+        return true;
+    }
+  });
+}
+
+function sortAdminHistory(orders) {
+  const sortValue = getAdminHistorySortValue();
+  const [sortKey, sortDir] = sortValue.split('_');
+  const multiplier = sortDir === 'desc' ? -1 : 1;
+
+  return [...orders].sort((a, b) => {
+    if (sortKey === 'date') {
+      const aDate = new Date(a.delivered_at || a.updated_at || a.created_at);
+      const bDate = new Date(b.delivered_at || b.updated_at || b.created_at);
+      return multiplier * (aDate - bDate);
+    }
+    if (sortKey === 'order_id') {
+      return multiplier * String(a.id || '').localeCompare(String(b.id || ''));
+    }
+    if (sortKey === 'customer_id') {
+      return multiplier * String(a.user_id || a.customer_id || '')
+        .localeCompare(String(b.user_id || b.customer_id || ''));
+    }
+    if (sortKey === 'phone') {
+      return multiplier * String(a.delivery_phone || '')
+        .localeCompare(String(b.delivery_phone || ''));
+    }
+    return 0;
+  });
+}
+
+function renderAdminHistoryPagination(totalPages, currentPage, totalCount) {
+  const container = document.getElementById('admin-history-pagination');
+  if (!container) return;
+
+  const prevDisabled = currentPage === 1 ? 'disabled' : '';
+  const nextDisabled = currentPage === totalPages ? 'disabled' : '';
+
+  container.innerHTML = `
+    <div class="admin-pagination-info">Showing page ${currentPage} of ${totalPages} — ${totalCount} delivered orders</div>
+    <div class="admin-pagination-actions">
+      <button type="button" class="btn btn-secondary" id="admin-history-prev" ${prevDisabled}>
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <span class="admin-pagination-label">Page ${currentPage} of ${totalPages}</span>
+      <button type="button" class="btn btn-secondary" id="admin-history-next" ${nextDisabled}>
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+    </div>
+  `;
+
+  document.getElementById('admin-history-prev')?.addEventListener('click', () => {
+    if (adminHistoryPage > 1) {
+      adminHistoryPage -= 1;
+      renderAdminHistory();
+    }
+  });
+  document.getElementById('admin-history-next')?.addEventListener('click', () => {
+    if (adminHistoryPage < totalPages) {
+      adminHistoryPage += 1;
+      renderAdminHistory();
+    }
+  });
+}
+
+function renderAdminHistory() {
+  const wrap = document.getElementById('admin-history-list');
+  if (!wrap) return;
+
+  const deliveredOrders = adminOrdersCache.filter(
+    (order) => String(order.delivery_status || '').toLowerCase() === 'delivered',
+  );
+  if (!deliveredOrders.length) {
+    wrap.innerHTML = '<div class="admin-loading">No delivered orders found.</div>';
+    document.getElementById('admin-history-summary').textContent = '';
+    document.getElementById('admin-history-pagination').innerHTML = '';
+    return;
+  }
+
+  const filteredOrders = applyAdminHistoryFilters(deliveredOrders);
+  const sortedOrders = sortAdminHistory(filteredOrders);
+  const pageSize = getAdminHistoryPageSize();
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / pageSize));
+  if (adminHistoryPage > totalPages) adminHistoryPage = totalPages;
+  const pageStart = (adminHistoryPage - 1) * pageSize;
+  const pageOrders = sortedOrders.slice(pageStart, pageStart + pageSize);
+
+  wrap.innerHTML = pageOrders
+    .map((o) => {
+      const delivered = new Date(o.delivered_at || o.updated_at || o.created_at).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'short', year: 'numeric',
+      });
+      const customerId = o.user_id || o.customer_id || 'N/A';
+      const phone = o.delivery_phone || 'N/A';
+      const items = Array.isArray(o.items) ? o.items : [];
+      const itemRows = items
+        .map((item) => `<li>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</li>`)
+        .join('');
+
+      return `
+        <div class="admin-order-card">
+          <div class="admin-order-card-header">
+            <div>
+              <div class="admin-order-id">${o.id}</div>
+              <div class="admin-order-title">${o.customer_name || o.user_email || 'Customer'}</div>
+              <div class="admin-order-meta-text">Delivered: ${delivered} · ${items.length} item${items.length !== 1 ? 's' : ''} · ₹${(o.total || 0).toFixed(2)}</div>
+            </div>
+            <div class="admin-order-status-badge-wrap">
+              <span class="admin-order-status delivered">Delivered</span>
+            </div>
+          </div>
+          <div class="admin-order-card-grid" style="grid-template-columns:1.4fr minmax(240px,1fr); gap:18px;">
+            <div class="admin-order-card-section">
+              <div class="admin-order-section-title">Delivery details</div>
+              <p><strong>Customer ID:</strong> ${customerId}</p>
+              <p><strong>Phone:</strong> ${phone}</p>
+              <p class="admin-order-address">${o.delivery_address || 'No address provided'}</p>
+            </div>
+            <div class="admin-order-card-section">
+              <div class="admin-order-section-title">Order reference</div>
+              <p><strong>Order ID:</strong> ${o.id}</p>
+              <p><strong>Payment:</strong> ${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</p>
+              <p><strong>Txn:</strong> ${o.transaction_id || o.razorpay_payment_id || 'Pending'}</p>
+            </div>
+          </div>
+          <div class="admin-order-items-panel">
+            <div class="admin-order-section-title">Items</div>
+            <ul style="margin:0;padding-left:18px;">${itemRows}</ul>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  const summary = document.getElementById('admin-history-summary');
+  if (summary) {
+    summary.textContent = `${filteredOrders.length} delivered order${filteredOrders.length !== 1 ? 's' : ''}`;
+  }
+  renderAdminHistoryPagination(totalPages, adminHistoryPage, filteredOrders.length);
+}
+
+function clearAdminHistoryFilters() {
+  const filterType = document.getElementById('admin-history-filter-type');
+  if (filterType) filterType.value = '';
+  const valueContainer = document.getElementById('admin-history-filter-value');
+  if (valueContainer) {
+    valueContainer.innerHTML = '<span class="admin-filter-hint">Select a filter above to apply</span>';
+  }
+  adminHistoryPage = 1;
+  renderAdminHistory();
 }
 
 async function adminCancelOrder(orderId) {
@@ -1684,6 +1913,34 @@ function initAdminPage() {
       _adminInventoryPage = 1;
       renderAdminInventory();
     });
+  }
+
+  const adminHistoryFilterType = document.getElementById('admin-history-filter-type');
+  const adminHistorySort = document.getElementById('admin-history-sort');
+  const adminHistoryPageSize = document.getElementById('admin-history-page-size');
+  const adminHistoryClear = document.getElementById('admin-history-clear');
+
+  if (adminHistoryFilterType) {
+    adminHistoryFilterType.addEventListener('change', () => {
+      adminHistoryPage = 1;
+      renderAdminHistoryFilterValueControl(adminHistoryFilterType.value);
+      renderAdminHistory();
+    });
+  }
+  if (adminHistorySort) {
+    adminHistorySort.addEventListener('change', () => {
+      adminHistoryPage = 1;
+      renderAdminHistory();
+    });
+  }
+  if (adminHistoryPageSize) {
+    adminHistoryPageSize.addEventListener('change', () => {
+      adminHistoryPage = 1;
+      renderAdminHistory();
+    });
+  }
+  if (adminHistoryClear) {
+    adminHistoryClear.addEventListener('click', clearAdminHistoryFilters);
   }
 
   // Expose globals

@@ -326,6 +326,61 @@
                   storefront cart and checkout totals.
                 </div>
               </div>
+
+              <div class="admin-section-header" style="margin-top: 24px;">
+                <h3><i class="fa-solid fa-history"></i> Delivered Order History</h3>
+              </div>
+              <div class="admin-orders-filter-row">
+                <div class="admin-filter-group">
+                  <label for="admin-history-filter-type">Filter by</label>
+                  <select id="admin-history-filter-type" class="admin-filter-input">
+                    <option value="">Select filter</option>
+                    <option value="date">Delivered date</option>
+                    <option value="order_id">Order ID</option>
+                    <option value="customer_id">Customer ID</option>
+                    <option value="phone">Phone number</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group admin-filter-value-group">
+                  <label>&nbsp;</label>
+                  <div id="admin-history-filter-value" class="admin-filter-value"></div>
+                </div>
+                <div class="admin-filter-group admin-filter-actions">
+                  <button type="button" id="admin-history-clear" class="btn btn-secondary">Clear</button>
+                </div>
+              </div>
+              <div class="admin-orders-filter-row" style="margin-top: 12px;">
+                <div class="admin-filter-group">
+                  <label for="admin-history-sort">Sort by</label>
+                  <select id="admin-history-sort" class="admin-filter-input">
+                    <option value="date_desc">Delivered date ↓</option>
+                    <option value="date_asc">Delivered date ↑</option>
+                    <option value="order_id_asc">Order ID ↑</option>
+                    <option value="order_id_desc">Order ID ↓</option>
+                    <option value="customer_id_asc">Customer ID ↑</option>
+                    <option value="customer_id_desc">Customer ID ↓</option>
+                    <option value="phone_asc">Phone ↑</option>
+                    <option value="phone_desc">Phone ↓</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group">
+                  <label for="admin-history-page-size">Page size</label>
+                  <select id="admin-history-page-size" class="admin-filter-input">
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group" style="align-self:flex-end;">
+                  <div id="admin-history-summary" style="color:#475569;font-size:0.95rem;"></div>
+                </div>
+              </div>
+              <div id="admin-history-list" class="admin-orders-wrap">
+                <div class="admin-loading">
+                  <i class="fa-solid fa-spinner fa-spin"></i> Loading history...
+                </div>
+              </div>
+              <div id="admin-history-pagination" class="admin-pagination" style="margin-top:16px;"></div>
               <div id="admin-orders-list" class="admin-orders-wrap">
                 <div class="admin-loading">
                   <i class="fa-solid fa-spinner fa-spin"></i> Loading orders...

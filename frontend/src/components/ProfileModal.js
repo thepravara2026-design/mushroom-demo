@@ -253,6 +253,15 @@ class ProfileModal {
       ? `<div style="margin-top:10px;font-size:0.92rem;color:#b91c1c;"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
       : '';
     const canCancel = o.delivery_status === 'processing';
+    const items = Array.isArray(o.items) ? o.items : [];
+    const itemsHtml = items.length
+      ? `<div class="profile-order-items">
+          <div class="profile-order-items-label">Ordered items</div>
+          <ul>${items
+            .map((item) => `<li>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</li>`)
+            .join('')}</ul>
+        </div>`
+      : '';
 
     return `<div class="profile-order-card">
       <div class="profile-order-header">
@@ -262,7 +271,8 @@ class ProfileModal {
         </div>
         <span class="profile-order-status ${status}">${status}</span>
       </div>
-      <div class="profile-order-summary">₹${total} • ${o.items?.length || 0} item${(o.items?.length || 0) !== 1 ? 's' : ''}</div>
+      <div class="profile-order-summary">₹${total} • ${items.length} item${items.length !== 1 ? 's' : ''}</div>
+      ${itemsHtml}
       ${trackingHtml}
       ${cancelNote}
       <div class="profile-order-actions">
