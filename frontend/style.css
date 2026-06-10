@@ -2013,6 +2013,22 @@ button {
   border: 1px solid rgba(30, 58, 36, 0.08);
 }
 
+/* subtle entrance animation and responsive tweaks */
+.profile-modal-card {
+  transform: translateY(8px) scale(0.985);
+  opacity: 0;
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+.modal-overlay.open .profile-modal-card {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.modal-overlay {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
 .profile-modal-header {
   display: flex;
   align-items: flex-start;
@@ -2288,6 +2304,11 @@ button {
   .profile-card-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .profile-modal-card {
+    padding: 12px 10px;
+    box-shadow: none;
   }
 }
 

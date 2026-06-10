@@ -46,6 +46,20 @@ class ProfileModal {
 
     document.body.appendChild(this.modal);
 
+    // close when clicking outside the card
+    this._overlayClickHandler = (ev) => {
+      if (!this.modal) return;
+      const card = this.modal.querySelector('.profile-modal-card');
+      if (card && !card.contains(ev.target)) this.close();
+    };
+    this.modal.addEventListener('click', this._overlayClickHandler);
+
+    // close on ESC
+    this._escHandler = (ev) => {
+      if (ev.key === 'Escape') this.close();
+    };
+    document.addEventListener('keydown', this._escHandler);
+
     document
       .getElementById('btn-profile-close')
       ?.addEventListener('click', () => this.close());
@@ -72,9 +86,12 @@ class ProfileModal {
   }
 
   close() {
+    // cleanup listeners first
+    if (this._overlayClickHandler && this.modal) this.modal.removeEventListener('click', this._overlayClickHandler);
+    if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
+    this.stopPollingOrders();
     if (this.modal && this.modal.parentElement) this.modal.parentElement.removeChild(this.modal);
     this.modal = null;
-    this.stopPollingOrders();
   }
 
   startPollingOrders() {
