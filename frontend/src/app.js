@@ -16,7 +16,7 @@ import { showErrorToast, showSuccessToast } from './utils/notify.js';
 window.state = state;
 // Storefront pagination/sort state
 let _shopInventoryPage = 1;
-const SHOP_PAGE_SIZE = 10;
+let shopPageSize = 10;
 
 function getShopInventorySortValue() {
   return document.getElementById('shop-inventory-sort')?.value || 'name_asc';
@@ -445,6 +445,14 @@ function initEventListeners() {
       filterProducts();
     });
   }
+  const shopPageSizeSelect = document.getElementById('shop-inventory-page-size');
+  if (shopPageSizeSelect) {
+    shopPageSizeSelect.addEventListener('change', () => {
+      shopPageSize = parseInt(shopPageSizeSelect.value, 10) || 10;
+      _shopInventoryPage = 1;
+      filterProducts();
+    });
+  }
 
   // Category nav links in NAVBAR (data-category on nav-link)
   document.querySelectorAll('.nav-link[data-category]').forEach((link) => {
@@ -758,10 +766,10 @@ function renderProducts(productsList) {
 
   // Apply sorting and pagination
   const sorted = applyShopInventorySort(productsList);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / SHOP_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sorted.length / shopPageSize));
   if (_shopInventoryPage > totalPages) _shopInventoryPage = totalPages;
-  const start = (_shopInventoryPage - 1) * SHOP_PAGE_SIZE;
-  const pageProducts = sorted.slice(start, start + SHOP_PAGE_SIZE);
+  const start = (_shopInventoryPage - 1) * shopPageSize;
+  const pageProducts = sorted.slice(start, start + shopPageSize);
 
   const html = pageProducts
     .map((prod, idx) => {

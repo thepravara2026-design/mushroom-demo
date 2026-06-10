@@ -12,7 +12,7 @@ let _adminTrainings = [];
 let pendingCategoryEditId = null;
 let adminOrdersCache = [];
 let _adminInventoryPage = 1;
-const ADMIN_INVENTORY_PAGE_SIZE = 10;
+let adminInventoryPageSize = 10;
 let productImagePreviewValid = false;
 
 const loginPanel = document.getElementById('admin-login-panel');
@@ -389,10 +389,10 @@ function renderAdminInventory() {
     return;
   }
   products = applyAdminInventorySort(products);
-  const totalPages = Math.max(1, Math.ceil(products.length / ADMIN_INVENTORY_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(products.length / adminInventoryPageSize));
   if (_adminInventoryPage > totalPages) _adminInventoryPage = totalPages;
-  const pageStart = (_adminInventoryPage - 1) * ADMIN_INVENTORY_PAGE_SIZE;
-  const pageProducts = products.slice(pageStart, pageStart + ADMIN_INVENTORY_PAGE_SIZE);
+  const pageStart = (_adminInventoryPage - 1) * adminInventoryPageSize;
+  const pageProducts = products.slice(pageStart, pageStart + adminInventoryPageSize);
   const pageEnd = Math.min(pageStart + pageProducts.length, products.length);
 
   grid.innerHTML = `
@@ -1658,6 +1658,7 @@ function initAdminPage() {
   const adminSearchProd = document.getElementById('admin-search-prod');
   const adminFilterCat = document.getElementById('admin-filter-cat');
   const adminSortSelect = document.getElementById('admin-inventory-sort');
+  const adminPageSizeSelect = document.getElementById('admin-inventory-page-size');
   if (adminSearchProd) {
     adminSearchProd.addEventListener('input', () => {
       _adminInventoryPage = 1;
@@ -1672,6 +1673,14 @@ function initAdminPage() {
   }
   if (adminSortSelect) {
     adminSortSelect.addEventListener('change', () => {
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  }
+  if (adminPageSizeSelect) {
+    adminPageSizeSelect.addEventListener('change', () => {
+      const v = parseInt(adminPageSizeSelect.value, 10) || 10;
+      adminInventoryPageSize = v;
       _adminInventoryPage = 1;
       renderAdminInventory();
     });
