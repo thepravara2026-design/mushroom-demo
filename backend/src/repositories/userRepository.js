@@ -12,6 +12,18 @@ async function findByEmail(email) {
   return { data, error };
 }
 
+async function findByPhone(phone) {
+  const { data, error } = await db
+    .from('users')
+    .select('*')
+    .eq('whatsapp_number', phone)
+    .single();
+  if (error && error.message === 'No rows found') {
+    return { data: null, error: null };
+  }
+  return { data, error };
+}
+
 async function findById(id) {
   const { data, error } = await db
     .from('users')
@@ -39,7 +51,6 @@ async function update(id, updates) {
 }
 
 async function remove(id) {
-  // Attempt to fetch existing row so we can return the deleted record on success
   const { data: existing, error: getErr } = await findById(id);
   if (getErr || !existing) {
     return { data: null, error: { message: 'No rows found' } };
@@ -51,6 +62,7 @@ async function remove(id) {
 
 module.exports = {
   findByEmail,
+  findByPhone,
   findById,
   create,
   update,

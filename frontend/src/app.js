@@ -6,6 +6,7 @@ import {
   saveUserProfile,
 } from './utils/state.js';
 import { authModal } from './components/AuthModal.js';
+import { traineeAuthModal } from './components/TraineeAuthModal.js';
 import { profileModal } from './components/ProfileModal.js';
 import { authApi } from './api/authApi.js';
 import { trainingApi } from './api/trainingApi.js';
@@ -45,6 +46,16 @@ function initApp() {
   updateCartUI();
   initThreeJS();
   initScrollReveal();
+
+  // Training gallery carousel
+  renderTrainingGallery();
+  startTgAutoplay();
+  window.addEventListener('resize', () => {
+    renderTrainingGallery();
+  });
+
+  // Homepage mushroom carousel
+  initCarousel();
 
   // If hash is present, route to it
   handleRouting();
@@ -128,7 +139,7 @@ function initOrderSse() {
         /* ignore */
       }
     });
-    orderEs.addEventListener('error', () => {});
+    orderEs.addEventListener('error', () => { });
   } catch (e) {
     /* ignore */
   }
@@ -284,6 +295,18 @@ function handleRouting() {
       return;
     }
     if (hash === '#training-courses') {
+      // Access control: must be logged in as trainee
+      if (!state.token || !state.user || state.user.role !== 'trainee') {
+        if (regSection) regSection.style.display = 'none';
+        if (coursesSection) coursesSection.style.display = 'none';
+        if (shopSection) shopSection.style.display = 'block';
+        if (productsSection) productsSection.style.display = 'block';
+        if (heroSection) heroSection.classList.remove('hidden');
+        traineeAuthModal.open(() => {
+          window.location.hash = '#training-courses';
+        });
+        return;
+      }
       if (regSection) regSection.style.display = 'none';
       if (coursesSection) coursesSection.style.display = 'block';
       if (shopSection) shopSection.style.display = 'none';
@@ -334,23 +357,41 @@ function initEventListeners() {
     }
   });
 
-  // Training Section Explore button -> open training registration flow
+  // Training Section Explore button -> open trainee auth modal
   const exploreTrainingBtn = document.querySelector('.btn-training');
   if (exploreTrainingBtn) {
     exploreTrainingBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      window.location.hash = '#training-register';
+      traineeAuthModal.open(() => {
+        // On success, redirect to training courses view
+        window.location.hash = '#training-courses';
+      });
     });
   }
 
-  const trainingPlayBtn = document.querySelector('.training-section .play-btn');
+  const trainingPlayBtn = document.getElementById('training-play-btn');
   if (trainingPlayBtn) {
     trainingPlayBtn.addEventListener('click', async (e) => {
       e.preventDefault();
-      // Local video path (place your file at frontend/public/videos/)
-      const candidates = [
-        'training-tour.mp4',
-      ];
+
+      const imgEl = document.getElementById('training-farm-img');
+      const videoEl = document.getElementById('training-farm-video');
+      const closeBtn = document.getElementById('training-video-close');
+
+      if (!videoEl) return;
+
+      // If video is already playing/visible, toggle it off
+      if (videoEl.style.display !== 'none') {
+        videoEl.pause();
+        videoEl.style.display = 'none';
+        if (imgEl) imgEl.style.display = 'block';
+        if (closeBtn) closeBtn.style.display = 'none';
+        trainingPlayBtn.style.display = 'flex';
+        return;
+      }
+
+      // Find the video file
+      const candidates = ['training-tour.mp4'];
       let foundPath = null;
       for (const fname of candidates) {
         const candidatePath = `/videos/${fname}`;
@@ -361,43 +402,66 @@ function initEventListeners() {
             break;
           }
         } catch (e) {
-          // ignore and continue
+          // ignore
+        }
+      }
+
+      if (!foundPath) {
+        // Try a broader fallback
+        const fallbackCandidates = ['mush.mp4', 'mushroom.mp4'];
+        for (const fname of fallbackCandidates) {
+          const candidatePath = `/videos/${fname}`;
+          try {
+            const head = await fetch(candidatePath, { method: 'HEAD' });
+            if (head.ok) {
+              foundPath = candidatePath;
+              break;
+            }
+          } catch (e) {
+            // ignore
+          }
         }
       }
 
       if (foundPath) {
-        const localPath = foundPath;
-        // Create modal with local video (1:1 aspect ratio)
-        const modal = document.createElement('div');
-        modal.id = 'video-modal';
-        modal.style.position = 'fixed';
-        modal.style.left = '0';
-        modal.style.top = '0';
-        modal.style.width = '100%';
-        modal.style.height = '100%';
-        modal.style.background = 'rgba(0,0,0,0.75)';
-        modal.style.display = 'flex';
-        modal.style.alignItems = 'center';
-        modal.style.justifyContent = 'center';
-        modal.style.zIndex = '9999';
-
-        modal.innerHTML = `
-          <div style="width:90%;max-width:600px;aspect-ratio:1/1;background:#000;border-radius:8px;overflow:hidden;position:relative;">
-            <button id="video-modal-close" style="position:absolute;right:8px;top:8px;z-index:2;background:#fff;border:none;border-radius:6px;padding:6px;cursor:pointer;">Close</button>
-            <video id="training-local-video" controls style="width:100%;height:100%;display:block;background:#000;object-fit:contain;" src="${localPath}"></video>
-          </div>
-        `;
-        document.body.appendChild(modal);
-        const closeBtn = document.getElementById('video-modal-close');
-        closeBtn.addEventListener('click', () => { const vid = document.getElementById('training-local-video'); try { vid.pause(); } catch (e) {} modal.remove(); });
-        const vidEl = document.getElementById('training-local-video');
-        vidEl.addEventListener('error', (ev) => { console.error('Video element error:', ev, vidEl.error); const msg = document.createElement('div'); msg.style.padding = '12px'; msg.style.color = '#fff'; msg.style.background = 'rgba(255,0,0,0.15)'; msg.textContent = 'Video playback failed. Check browser console for details.'; vidEl.parentElement.appendChild(msg); });
-        vidEl.addEventListener('loadedmetadata', () => console.log('Video metadata loaded', vidEl.duration, vidEl.videoWidth, vidEl.videoHeight));
-        try { await vidEl.play(); } catch (e) { console.warn('Autoplay blocked or play failed:', e); }
-        return;
+        // Show video inline — hide image, show video
+        if (imgEl) imgEl.style.display = 'none';
+        videoEl.src = foundPath;
+        videoEl.style.display = 'block';
+        if (closeBtn) closeBtn.style.display = 'block';
+        trainingPlayBtn.style.display = 'none';
+        videoEl.load();
+        try {
+          await videoEl.play();
+        } catch (e) {
+          console.warn('Autoplay blocked or play failed:', e);
+        }
+        // When video ends, revert to image
+        videoEl.onended = () => {
+          videoEl.pause();
+          videoEl.style.display = 'none';
+          if (imgEl) imgEl.style.display = 'block';
+          if (closeBtn) closeBtn.style.display = 'none';
+          trainingPlayBtn.style.display = 'flex';
+        };
       }
+    });
+  }
 
-      // No local video found - just return silently
+  // Close button handler for inline video
+  const videoCloseBtn = document.getElementById('training-video-close');
+  if (videoCloseBtn) {
+    videoCloseBtn.addEventListener('click', () => {
+      const imgEl = document.getElementById('training-farm-img');
+      const videoEl = document.getElementById('training-farm-video');
+      const playBtn = document.getElementById('training-play-btn');
+      if (videoEl) {
+        videoEl.pause();
+        videoEl.style.display = 'none';
+      }
+      if (imgEl) imgEl.style.display = 'block';
+      if (playBtn) playBtn.style.display = 'flex';
+      videoCloseBtn.style.display = 'none';
     });
   }
 
@@ -641,6 +705,12 @@ function initEventListeners() {
     /* ignore if not loaded yet */
   }
 
+  // ── Homepage Carousel ──
+  const carouselPrev = document.getElementById('carousel-prev');
+  const carouselNext = document.getElementById('carousel-next');
+  if (carouselPrev) carouselPrev.addEventListener('click', () => carouselGo(-1));
+  if (carouselNext) carouselNext.addEventListener('click', () => carouselGo(1));
+
   // Category card "Shop Now" buttons â€“ filter products and scroll to grid
   document.querySelectorAll('.btn-category-shop').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -665,7 +735,7 @@ async function loadUser() {
     updateAuthHeaderUI();
     try {
       window.dispatchEvent(new CustomEvent('auth:changed', { detail: { token: state.token, user: state.user } }));
-    } catch (e) {}
+    } catch (e) { }
     handleRouting(); // trigger routing refresh for access checks
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
@@ -1102,14 +1172,13 @@ async function openProductDetails(id) {
         <h3>${product.name}</h3>
         <div class="detail-price-wrap">
           <span class="detail-price">₹${product.price.toFixed(2)}</span>
-          ${
-  product.mrp_price && product.mrp_price > product.price
-    ? `
+          ${product.mrp_price && product.mrp_price > product.price
+        ? `
             <span class="detail-mrp">₹${product.mrp_price.toFixed(2)}</span>
             <span class="detail-discount-badge">${Math.round((1 - product.price / product.mrp_price) * 100)}% OFF</span>
           `
-    : ''
-}
+        : ''
+      }
         </div>
         <p style="font-size: 0.95rem; color: var(--color-text-muted); line-height: 1.6;">${product.description}</p>
         
@@ -1705,6 +1774,242 @@ window.changeQty = changeQuantity;
 window.removeCartItem = removeFromCart;
 
 // ==========================================================================
+// TRAINING GALLERY CAROUSEL
+// ==========================================================================
+const DEFAULT_TG_IMAGES = [
+  { url: "https://images.unsplash.com/photo-1574943320219-553eb213f72d?w=600&h=400&fit=crop", caption: "Spawn inoculation lab" },
+  { url: "https://images.unsplash.com/photo-1607168668428-b1c53a70c4e6?w=600&h=400&fit=crop", caption: "Mushroom fruiting room" },
+  { url: "https://images.unsplash.com/photo-1587048948384-f4b931f45cde?w=600&h=400&fit=crop", caption: "Substrate preparation" },
+  { url: "https://images.unsplash.com/photo-1593001872095-7d5b3868fd78?w=600&h=400&fit=crop", caption: "Farmer training workshop" },
+  { url: "https://images.unsplash.com/photo-1590614024037-77e1a8e5b073?w=600&h=400&fit=crop", caption: "Fresh oyster mushrooms" },
+  { url: "https://images.unsplash.com/photo-1562967914-608f82629710?w=600&h=400&fit=crop", caption: "Mushroom harvest sorting" },
+  { url: "https://images.unsplash.com/photo-1504545102780-267741d26080?w=600&h=400&fit=crop", caption: "Packaging station" },
+  { url: "https://images.unsplash.com/photo-1518977676601-b53f82ber6b0?w=600&h=400&fit=crop", caption: "Climate control room" },
+  { url: "https://images.unsplash.com/photo-1596363104785-8c65da3d80b4?w=600&h=400&fit=crop", caption: "Quality inspection" },
+  { url: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600&h=400&fit=crop", caption: "Business planning session" }
+];
+
+function getTgImages() {
+  try {
+    const stored = localStorage.getItem("spore_training_gallery_images");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) { /* ignore */ }
+  return [...DEFAULT_TG_IMAGES];
+}
+
+function saveTgImages(imgs) {
+  localStorage.setItem("spore_training_gallery_images", JSON.stringify(imgs));
+}
+
+let tgCurrentPage = 0;
+let tgAutoplayTimer = null;
+
+function getTgVisibleCount() {
+  const w = window.innerWidth;
+  if (w <= 400) return 1;
+  if (w <= 640) return 2;
+  if (w <= 900) return 3;
+  return 4;
+}
+
+function renderTrainingGallery() {
+  const track = document.getElementById("training-gallery-track");
+  const dotsWrap = document.getElementById("training-gallery-dots");
+  if (!track || !dotsWrap) return;
+
+  const images = getTgImages();
+  const visible = getTgVisibleCount();
+  const totalPages = Math.max(1, Math.ceil(images.length / visible));
+
+  // Clamp page
+  if (tgCurrentPage >= totalPages) tgCurrentPage = 0;
+  if (tgCurrentPage < 0) tgCurrentPage = totalPages - 1;
+
+  // Render slides
+  track.innerHTML = images.map((img) => `
+    <div class="tg-slide">
+      <img src="${img.url}" alt="${img.caption || 'Training glimpse'}" loading="lazy" />
+    </div>
+  `).join("");
+
+  // Set slide width + translate
+  const slideW = 100 / images.length; // percentage of all slides
+  // Each slide width is (trackWidth - gap) / totalSlides
+  // Use flex-basis based percentage of total track for translateX
+  track.style.gap = "16px";
+  // Calculate how far to translate per page (in px)
+  updateTgTranslate(track, tgCurrentPage, visible, images.length);
+
+  // Render dots
+  dotsWrap.innerHTML = "";
+  for (let i = 0; i < totalPages; i++) {
+    const dot = document.createElement("button");
+    dot.className = "tg-dot" + (i === tgCurrentPage ? " active" : "");
+    dot.addEventListener("click", () => {
+      tgCurrentPage = i;
+      updateTgTranslate(track, tgCurrentPage, visible, images.length);
+      renderTgDots(dotsWrap, tgCurrentPage);
+      resetTgAutoplay();
+    });
+    dotsWrap.appendChild(dot);
+  }
+
+  // Show/hide edit btn for admin
+  const editBtn = document.getElementById("tg-admin-edit");
+  if (editBtn) {
+    editBtn.style.display = state.user?.role === "admin" ? "inline-flex" : "none";
+  }
+}
+
+function updateTgTranslate(track, page, visible, total) {
+  if (!track) return;
+  const totalPages = Math.max(1, Math.ceil(total / visible));
+  // Each slide width = (containerWidth - gaps) / total slides
+  // We need to use CSS transform to translate
+  // Calculate the offset as percentage of the track width
+  const gap = 16;
+  // Use the computed slide width approach: translate by visible * (slideWidth + gap)
+  const containerWidth = track.parentElement.offsetWidth;
+  const slideW = (containerWidth - gap * (visible - 1)) / visible;
+  const offset = page * visible * (slideW + gap);
+  track.style.transform = `translateX(-${offset}px)`;
+}
+
+function renderTgDots(dotsWrap, currentPage) {
+  if (!dotsWrap) return;
+  dotsWrap.querySelectorAll(".tg-dot").forEach((d, i) => {
+    d.classList.toggle("active", i === currentPage);
+  });
+}
+
+function tgNextPage() {
+  const images = getTgImages();
+  const visible = getTgVisibleCount();
+  const totalPages = Math.max(1, Math.ceil(images.length / visible));
+  tgCurrentPage = (tgCurrentPage + 1) % totalPages;
+  renderTrainingGallery();
+}
+
+function tgPrevPage() {
+  const images = getTgImages();
+  const visible = getTgVisibleCount();
+  const totalPages = Math.max(1, Math.ceil(images.length / visible));
+  tgCurrentPage = (tgCurrentPage - 1 + totalPages) % totalPages;
+  renderTrainingGallery();
+}
+
+function startTgAutoplay() {
+  stopTgAutoplay();
+  tgAutoplayTimer = setInterval(tgNextPage, 3500);
+}
+
+function stopTgAutoplay() {
+  if (tgAutoplayTimer) { clearInterval(tgAutoplayTimer); tgAutoplayTimer = null; }
+}
+
+function resetTgAutoplay() { stopTgAutoplay(); startTgAutoplay(); }
+
+// Admin gallery editor
+function openTgEditorModal() {
+  const existing = document.getElementById("tg-editor-modal");
+  if (existing) existing.remove();
+
+  const images = getTgImages();
+  const modal = document.createElement("div");
+  modal.id = "tg-editor-modal";
+  modal.className = "modal-overlay open";
+  modal.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;";
+  modal.innerHTML = `
+    <div style="width:100%;max-width:700px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 28px 80px rgba(0,0,0,0.24);max-height:90vh;overflow-y:auto;">
+      <div style="padding:18px 22px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f8fafc;">
+        <h3 style="margin:0;font-size:1.15rem;color:#111;"><i class="fa-solid fa-images" style="margin-right:8px;color:#2d7a50;"></i>Manage Training Gallery</h3>
+        <button id="tg-editor-close" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:#666;"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding:18px 22px;">
+        <p style="font-size:0.85rem;color:#6b7280;margin:0 0 14px;">Add, remove or reorder images. Click <strong>Add Image</strong> to paste a URL. Changes save for the site (localStorage).</p>
+        <div id="tg-editor-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+        <button class="btn" id="tg-editor-add" style="background:#e8f5ee;color:#1a5c38;border:1.5px dashed #2d7a50;width:100%;margin-bottom:12px;"><i class="fa-solid fa-plus"></i> Add Image</button>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button class="btn btn-secondary" id="tg-editor-reset">Reset to Defaults</button>
+          <button class="btn btn-primary" id="tg-editor-save">Save Gallery</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const list = document.getElementById("tg-editor-list");
+  let editImgs = [...images];
+
+  function renderList() {
+    list.innerHTML = editImgs.map((img, i) => `
+      <div style="display:flex;gap:10px;align-items:center;background:#f9fafb;padding:10px;border-radius:10px;border:1px solid #e5e7eb;" data-idx="${i}">
+        <span style="font-size:0.78rem;color:#999;width:20px;text-align:center;cursor:grab;">&#9776;</span>
+        <img src="${img.url}" style="width:64px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;" />
+        <div style="flex:1;min-width:0;">
+          <input type="text" class="tg-ed-url" data-idx="${i}" value="${img.url}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.82rem;" placeholder="Image URL" />
+          <input type="text" class="tg-ed-cap" data-idx="${i}" value="${img.caption || ''}" style="width:100%;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.78rem;margin-top:4px;" placeholder="Caption (optional)" />
+        </div>
+        <button class="tg-ed-remove" data-idx="${i}" style="background:none;border:none;color:#e74c3c;cursor:pointer;padding:4px;"><i class="fa-solid fa-trash-can"></i></button>
+        <button class="tg-ed-up" data-idx="${i}" style="background:none;border:none;color:#666;cursor:pointer;padding:4px;"><i class="fa-solid fa-chevron-up"></i></button>
+        <button class="tg-ed-down" data-idx="${i}" style="background:none;border:none;color:#666;cursor:pointer;padding:4px;"><i class="fa-solid fa-chevron-down"></i></button>
+      </div>
+    `).join("");
+
+    list.querySelectorAll(".tg-ed-url").forEach((inp) => {
+      inp.addEventListener("change", () => { editImgs[parseInt(inp.dataset.idx)].url = inp.value; renderList(); });
+    });
+    list.querySelectorAll(".tg-ed-cap").forEach((inp) => {
+      inp.addEventListener("change", () => { editImgs[parseInt(inp.dataset.idx)].caption = inp.value; });
+    });
+    list.querySelectorAll(".tg-ed-remove").forEach((btn) => {
+      btn.addEventListener("click", () => { editImgs.splice(parseInt(btn.dataset.idx), 1); renderList(); });
+    });
+    list.querySelectorAll(".tg-ed-up").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const i = parseInt(btn.dataset.idx);
+        if (i > 0) { [editImgs[i - 1], editImgs[i]] = [editImgs[i], editImgs[i - 1]]; renderList(); }
+      });
+    });
+    list.querySelectorAll(".tg-ed-down").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const i = parseInt(btn.dataset.idx);
+        if (i < editImgs.length - 1) { [editImgs[i + 1], editImgs[i]] = [editImgs[i], editImgs[i + 1]]; renderList(); }
+      });
+    });
+  }
+  renderList();
+
+  document.getElementById("tg-editor-close").addEventListener("click", () => modal.remove());
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+
+  document.getElementById("tg-editor-add").addEventListener("click", () => {
+    editImgs.push({ url: "https://via.placeholder.com/600x400?text=New+Image", caption: "" });
+    renderList();
+  });
+
+  document.getElementById("tg-editor-reset").addEventListener("click", () => {
+    editImgs = [...DEFAULT_TG_IMAGES];
+    renderList();
+  });
+
+  document.getElementById("tg-editor-save").addEventListener("click", () => {
+    // Re-read latest input values
+    list.querySelectorAll(".tg-ed-url").forEach((inp) => { editImgs[parseInt(inp.dataset.idx)].url = inp.value; });
+    list.querySelectorAll(".tg-ed-cap").forEach((inp) => { editImgs[parseInt(inp.dataset.idx)].caption = inp.value; });
+    saveTgImages(editImgs);
+    tgCurrentPage = 0;
+    renderTrainingGallery();
+    resetTgAutoplay();
+    modal.remove();
+    showSuccessToast("Training gallery updated!");
+  });
+}
+
+// ==========================================================================
 // CULTIVATION SUBSTRATE CALCULATOR
 // ==========================================================================
 function calculateSubstrateMix() {
@@ -2112,45 +2417,45 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
           overflow-y:auto; padding:8px 0;
         ">
           ${[
-    {
-      id: 'upi',
-      icon: 'fa-mobile-screen-button',
-      label: 'UPI',
-      badge: 'Recommended',
-    },
-    {
-      id: 'card',
-      icon: 'fa-credit-card',
-      label: 'Card',
-      badge: '',
-    },
-    {
-      id: 'netbank',
-      icon: 'fa-building-columns',
-      label: 'Net Banking',
-      badge: '',
-    },
-    {
-      id: 'wallet',
-      icon: 'fa-wallet',
-      label: 'Wallets',
-      badge: '',
-    },
-    {
-      id: 'emi',
-      icon: 'fa-calendar-days',
-      label: 'EMI',
-      badge: '',
-    },
-    {
-      id: 'cod',
-      icon: 'fa-box-open',
-      label: 'Cash on Delivery',
-      badge: '',
-    },
-  ]
-    .map(
-      (m, i) => `
+      {
+        id: 'upi',
+        icon: 'fa-mobile-screen-button',
+        label: 'UPI',
+        badge: 'Recommended',
+      },
+      {
+        id: 'card',
+        icon: 'fa-credit-card',
+        label: 'Card',
+        badge: '',
+      },
+      {
+        id: 'netbank',
+        icon: 'fa-building-columns',
+        label: 'Net Banking',
+        badge: '',
+      },
+      {
+        id: 'wallet',
+        icon: 'fa-wallet',
+        label: 'Wallets',
+        badge: '',
+      },
+      {
+        id: 'emi',
+        icon: 'fa-calendar-days',
+        label: 'EMI',
+        badge: '',
+      },
+      {
+        id: 'cod',
+        icon: 'fa-box-open',
+        label: 'Cash on Delivery',
+        badge: '',
+      },
+    ]
+      .map(
+        (m, i) => `
             <button class="pgw-tab-btn" data-tab="${m.id}" style="
               width:100%; text-align:left; background:${i === 0 ? 'rgba(56,177,123,0.12)' : 'transparent'};
               border:none; border-left:3px solid ${i === 0 ? '#38b17b' : 'transparent'};
@@ -2165,8 +2470,8 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               </div>
             </button>
           `,
-    )
-    .join('')}
+      )
+      .join('')}
           <div style="margin:12px 14px 0;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);font-size:0.68rem;color:#475569;display:flex;align-items:center;gap:6px;">
             <i class="fa-solid fa-shield-halved" style="color:#38b17b;"></i> 100% Secure
           </div>
@@ -2182,33 +2487,33 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             <!-- UPI Apps -->
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;">
               ${[
-    {
-      name: 'GPay',
-      color: '#4285F4',
-      icon: 'fa-google',
-      label: 'Google Pay',
-    },
-    {
-      name: 'PhonePe',
-      color: '#5F259F',
-      icon: 'fa-mobile',
-      label: 'PhonePe',
-    },
-    {
-      name: 'Paytm',
-      color: '#00BAF2',
-      icon: 'fa-p',
-      label: 'Paytm',
-    },
-    {
-      name: 'BHIM',
-      color: '#138808',
-      icon: 'fa-indian-rupee-sign',
-      label: 'BHIM',
-    },
-  ]
-    .map(
-      (app) => `
+      {
+        name: 'GPay',
+        color: '#4285F4',
+        icon: 'fa-google',
+        label: 'Google Pay',
+      },
+      {
+        name: 'PhonePe',
+        color: '#5F259F',
+        icon: 'fa-mobile',
+        label: 'PhonePe',
+      },
+      {
+        name: 'Paytm',
+        color: '#00BAF2',
+        icon: 'fa-p',
+        label: 'Paytm',
+      },
+      {
+        name: 'BHIM',
+        color: '#138808',
+        icon: 'fa-indian-rupee-sign',
+        label: 'BHIM',
+      },
+    ]
+      .map(
+        (app) => `
                 <button class="pgw-upi-app-btn" data-app="${app.name}" style="
                   background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
                   border-radius:10px; padding:12px 6px; text-align:center; cursor:pointer;
@@ -2220,8 +2525,8 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                   <div style="font-size:0.72rem;font-weight:500;">${app.label}</div>
                 </button>
               `,
-    )
-    .join('')}
+      )
+      .join('')}
             </div>
 
             <div style="text-align:center;color:#475569;font-size:0.78rem;margin-bottom:14px;">â€” or enter UPI ID â€”</div>
@@ -2257,12 +2562,12 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             <!-- Accepted cards -->
             <div style="display:flex;gap:8px;margin-bottom:16px;">
               ${['VISA', 'MC', 'AMEX', 'RuPay']
-    .map(
-      (c) => `
+      .map(
+        (c) => `
                 <div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 10px;font-size:0.72rem;font-weight:700;color:#94a3b8;">${c}</div>
               `,
-    )
-    .join('')}
+      )
+      .join('')}
             </div>
 
             <div style="position:relative;margin-bottom:16px;">
@@ -2324,15 +2629,15 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;">
               ${[
-    { name: 'SBI', color: '#003087' },
-    { name: 'HDFC', color: '#004C97' },
-    { name: 'ICICI', color: '#B02A30' },
-    { name: 'Axis', color: '#800020' },
-    { name: 'Kotak', color: '#EE2424' },
-    { name: 'PNB', color: '#FF6600' },
-  ]
-    .map(
-      (b) => `
+      { name: 'SBI', color: '#003087' },
+      { name: 'HDFC', color: '#004C97' },
+      { name: 'ICICI', color: '#B02A30' },
+      { name: 'Axis', color: '#800020' },
+      { name: 'Kotak', color: '#EE2424' },
+      { name: 'PNB', color: '#FF6600' },
+    ]
+      .map(
+        (b) => `
                 <button class="pgw-bank-btn" data-bank="${b.name}" style="
                   background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
                   border-radius:8px;padding:10px;text-align:center;cursor:pointer;
@@ -2344,8 +2649,8 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                   <div style="font-size:0.78rem;font-weight:600;">${b.name}</div>
                 </button>
               `,
-    )
-    .join('')}
+      )
+      .join('')}
             </div>
 
             <div style="margin-bottom:16px;">
@@ -2377,44 +2682,44 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
               ${[
-    {
-      name: 'Paytm Wallet',
-      bal: '₹2,450.00',
-      icon: 'fa-p',
-      color: '#00BAF2',
-      id: 'paytm',
-    },
-    {
-      name: 'Amazon Pay',
-      bal: '₹800.00',
-      icon: 'fa-amazon',
-      color: '#FF9900',
-      id: 'amazon',
-    },
-    {
-      name: 'Mobikwik',
-      bal: '₹320.00',
-      icon: 'fa-mobile',
-      color: '#E8174B',
-      id: 'mobikwik',
-    },
-    {
-      name: 'Freecharge',
-      bal: '₹150.00',
-      icon: 'fa-bolt',
-      color: '#E62272',
-      id: 'freecharge',
-    },
-    {
-      name: 'Airtel Money',
-      bal: '₹1,200.00',
-      icon: 'fa-signal',
-      color: '#E40000',
-      id: 'airtel',
-    },
-  ]
-    .map(
-      (w) => `
+      {
+        name: 'Paytm Wallet',
+        bal: '₹2,450.00',
+        icon: 'fa-p',
+        color: '#00BAF2',
+        id: 'paytm',
+      },
+      {
+        name: 'Amazon Pay',
+        bal: '₹800.00',
+        icon: 'fa-amazon',
+        color: '#FF9900',
+        id: 'amazon',
+      },
+      {
+        name: 'Mobikwik',
+        bal: '₹320.00',
+        icon: 'fa-mobile',
+        color: '#E8174B',
+        id: 'mobikwik',
+      },
+      {
+        name: 'Freecharge',
+        bal: '₹150.00',
+        icon: 'fa-bolt',
+        color: '#E62272',
+        id: 'freecharge',
+      },
+      {
+        name: 'Airtel Money',
+        bal: '₹1,200.00',
+        icon: 'fa-signal',
+        color: '#E40000',
+        id: 'airtel',
+      },
+    ]
+      .map(
+        (w) => `
                 <button class="pgw-wallet-btn" data-wallet="${w.id}" style="
                   width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
                   border-radius:10px;padding:12px 16px;cursor:pointer;color:#e2e8f0;font-family:inherit;
@@ -2430,8 +2735,8 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                   <i class="fa-solid fa-chevron-right" style="color:#475569;font-size:0.8rem;"></i>
                 </button>
               `,
-    )
-    .join('')}
+      )
+      .join('')}
             </div>
 
             <button class="pgw-pay-btn" id="pgw-btn-pay-wallet" style="
@@ -2449,17 +2754,17 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
               ${[
-    { months: 3, rate: 13, bank: 'HDFC / ICICI / SBI' },
-    { months: 6, rate: 14, bank: 'All Major Cards' },
-    { months: 9, rate: 15, bank: 'HDFC / Axis / Kotak' },
-    { months: 12, rate: 15, bank: 'All Major Cards' },
-    { months: 18, rate: 16, bank: 'HDFC / ICICI' },
-    { months: 24, rate: 16, bank: 'Select Cards' },
-  ]
-    .map((e, i) => {
-      const emi = ((rzpDetails.amount / 100) * (e.rate / 100 / 12))
-                    / (1 - (1 + e.rate / 100 / 12) ** -e.months);
-      return `
+      { months: 3, rate: 13, bank: 'HDFC / ICICI / SBI' },
+      { months: 6, rate: 14, bank: 'All Major Cards' },
+      { months: 9, rate: 15, bank: 'HDFC / Axis / Kotak' },
+      { months: 12, rate: 15, bank: 'All Major Cards' },
+      { months: 18, rate: 16, bank: 'HDFC / ICICI' },
+      { months: 24, rate: 16, bank: 'Select Cards' },
+    ]
+      .map((e, i) => {
+        const emi = ((rzpDetails.amount / 100) * (e.rate / 100 / 12))
+          / (1 - (1 + e.rate / 100 / 12) ** -e.months);
+        return `
                   <label style="
                     display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.04);
                     border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 16px;
@@ -2476,8 +2781,8 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                     </div>
                   </label>
                 `;
-    })
-    .join('')}
+      })
+      .join('')}
             </div>
 
             <div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.25);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem;color:#fbbf24;">
@@ -2505,25 +2810,25 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
               ${[
-    { icon: 'fa-box-open', text: 'Order confirmed immediately' },
-    {
-      icon: 'fa-truck-fast',
-      text: 'Delivered in 2â€“5 business days',
-    },
-    {
-      icon: 'fa-hand-holding-dollar',
-      text: 'Pay only when you receive',
-    },
-    { icon: 'fa-rotate-left', text: 'Easy return policy' },
-  ]
-    .map(
-      (f) => `
+      { icon: 'fa-box-open', text: 'Order confirmed immediately' },
+      {
+        icon: 'fa-truck-fast',
+        text: 'Delivered in 2â€“5 business days',
+      },
+      {
+        icon: 'fa-hand-holding-dollar',
+        text: 'Pay only when you receive',
+      },
+      { icon: 'fa-rotate-left', text: 'Easy return policy' },
+    ]
+      .map(
+        (f) => `
                 <div style="display:flex;align-items:center;gap:10px;font-size:0.82rem;color:#94a3b8;">
                   <i class="fa-solid ${f.icon}" style="color:#38b17b;width:18px;text-align:center;"></i>${f.text}
                 </div>
               `,
-    )
-    .join('')}
+      )
+      .join('')}
             </div>
 
             <div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem;color:#fbbf24;">
@@ -2740,7 +3045,7 @@ async function completeOrderPayment(orderId, paymentId, signature) {
   } catch (err) {
     showErrorToast(
       getApiErrorMessage(err)
-        || 'Connection error occurred while confirming payment status.',
+      || 'Connection error occurred while confirming payment status.',
     );
   }
 }
@@ -2920,14 +3225,13 @@ function renderTrackingDetails(track) {
     </div>
 
     <div class="tracker-cancel-section">
-      ${
-  track.deliveryStatus === 'cancelled'
-    ? `
+      ${track.deliveryStatus === 'cancelled'
+      ? `
         <div class="tracker-cancelled-note">
           <strong>Cancellation reason:</strong> ${cancelReason || 'Not provided'}
         </div>
       `
-    : `
+      : `
         <div class="input-field">
           <label for="cancel-reason-select">Reason for cancellation</label>
           <select id="cancel-reason-select">
@@ -2944,7 +3248,7 @@ function renderTrackingDetails(track) {
           <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
         </div>
       `
-}
+    }
     </div>
 
     <div class="tracker-details-actions">
@@ -3248,8 +3552,8 @@ async function fetchCategories() {
     const categories = Array.isArray(data)
       ? data
       : Array.isArray(data?.data)
-      ? data.data
-      : [];
+        ? data.data
+        : [];
 
     _adminCategories = categories;
 
@@ -3612,3 +3916,71 @@ window.viewInvoice = viewInvoice;
 window.whatsappQuickMessage = whatsappQuickMessage;
 window.copyInvoiceLink = copyInvoiceLink;
 window.cancelOrder = cancelOrder;
+
+// ==========================================================================
+// HOMEPAGE MUSHROOM CAROUSEL
+// ==========================================================================
+let carouselIndex = 0;
+let carouselTimer = null;
+
+function initCarousel() {
+  const track = document.getElementById('carousel-track');
+  const dotsWrap = document.getElementById('carousel-dots');
+  if (!track || !dotsWrap) return;
+
+  const slides = track.querySelectorAll('.carousel-slide');
+  if (slides.length === 0) return;
+
+  dotsWrap.innerHTML = '';
+  slides.forEach((_, i) => {
+    const dot = document.createElement('button');
+    dot.className = 'carousel-dot' + (i === 0 ? ' active' : '');
+    dot.addEventListener('click', () => {
+      carouselIndex = i;
+      updateCarousel();
+      resetCarouselAutoplay();
+    });
+    dotsWrap.appendChild(dot);
+  });
+
+  updateCarousel();
+  startCarouselAutoplay();
+}
+
+function carouselGo(direction) {
+  const track = document.getElementById('carousel-track');
+  if (!track) return;
+  const slides = track.querySelectorAll('.carousel-slide');
+  if (slides.length === 0) return;
+  carouselIndex = (carouselIndex + direction + slides.length) % slides.length;
+  updateCarousel();
+  resetCarouselAutoplay();
+}
+
+function updateCarousel() {
+  const track = document.getElementById('carousel-track');
+  const dotsWrap = document.getElementById('carousel-dots');
+  if (!track) return;
+  const slides = track.querySelectorAll('.carousel-slide');
+  if (slides.length === 0) return;
+  track.style.transform = `translateX(-${carouselIndex * 100}%)`;
+  if (dotsWrap) {
+    dotsWrap.querySelectorAll('.carousel-dot').forEach((dot, i) => {
+      dot.classList.toggle('active', i === carouselIndex);
+    });
+  }
+}
+
+function startCarouselAutoplay() {
+  stopCarouselAutoplay();
+  carouselTimer = setInterval(() => carouselGo(1), 1000);
+}
+
+function stopCarouselAutoplay() {
+  if (carouselTimer) { clearInterval(carouselTimer); carouselTimer = null; }
+}
+
+function resetCarouselAutoplay() {
+  stopCarouselAutoplay();
+  startCarouselAutoplay();
+}
