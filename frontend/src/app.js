@@ -343,6 +343,64 @@ function initEventListeners() {
     });
   }
 
+  const trainingPlayBtn = document.querySelector('.training-section .play-btn');
+  if (trainingPlayBtn) {
+    trainingPlayBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      // Local video path (place your file at frontend/public/videos/)
+      const candidates = [
+        'training-tour.mp4',
+      ];
+      let foundPath = null;
+      for (const fname of candidates) {
+        const candidatePath = `/videos/${fname}`;
+        try {
+          const head = await fetch(candidatePath, { method: 'HEAD' });
+          if (head.ok) {
+            foundPath = candidatePath;
+            break;
+          }
+        } catch (e) {
+          // ignore and continue
+        }
+      }
+
+      if (foundPath) {
+        const localPath = foundPath;
+        // Create modal with local video (1:1 aspect ratio)
+        const modal = document.createElement('div');
+        modal.id = 'video-modal';
+        modal.style.position = 'fixed';
+        modal.style.left = '0';
+        modal.style.top = '0';
+        modal.style.width = '100%';
+        modal.style.height = '100%';
+        modal.style.background = 'rgba(0,0,0,0.75)';
+        modal.style.display = 'flex';
+        modal.style.alignItems = 'center';
+        modal.style.justifyContent = 'center';
+        modal.style.zIndex = '9999';
+
+        modal.innerHTML = `
+          <div style="width:90%;max-width:600px;aspect-ratio:1/1;background:#000;border-radius:8px;overflow:hidden;position:relative;">
+            <button id="video-modal-close" style="position:absolute;right:8px;top:8px;z-index:2;background:#fff;border:none;border-radius:6px;padding:6px;cursor:pointer;">Close</button>
+            <video id="training-local-video" controls style="width:100%;height:100%;display:block;background:#000;object-fit:contain;" src="${localPath}"></video>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        const closeBtn = document.getElementById('video-modal-close');
+        closeBtn.addEventListener('click', () => { const vid = document.getElementById('training-local-video'); try { vid.pause(); } catch (e) {} modal.remove(); });
+        const vidEl = document.getElementById('training-local-video');
+        vidEl.addEventListener('error', (ev) => { console.error('Video element error:', ev, vidEl.error); const msg = document.createElement('div'); msg.style.padding = '12px'; msg.style.color = '#fff'; msg.style.background = 'rgba(255,0,0,0.15)'; msg.textContent = 'Video playback failed. Check browser console for details.'; vidEl.parentElement.appendChild(msg); });
+        vidEl.addEventListener('loadedmetadata', () => console.log('Video metadata loaded', vidEl.duration, vidEl.videoWidth, vidEl.videoHeight));
+        try { await vidEl.play(); } catch (e) { console.warn('Autoplay blocked or play failed:', e); }
+        return;
+      }
+
+      // No local video found - just return silently
+    });
+  }
+
   document.getElementById('nav-logo').addEventListener('click', (e) => {
     e.preventDefault();
     window.location.hash = '#shop';
@@ -804,9 +862,12 @@ function renderProducts(productsList) {
             <h3>${prod.name}</h3>
             <p class="product-desc">${prod.description}</p>
             <div class="product-card-footer">
-              <div class="product-price-wrap">
-                <span class="product-price">${_formatCurrency(prod.price)}</span>
-                ${hasMrp ? `<span class="product-mrp">${_formatCurrency(prod.mrp_price)}</span>` : ''}
+              <div>
+                <div class="product-price-wrap">
+                  <span class="product-price">${_formatCurrency(prod.price)}</span>
+                  ${hasMrp ? `<span class="product-mrp">${_formatCurrency(prod.mrp_price)}</span>` : ''}
+                </div>
+                <span class="product-free-shipping-badge">Free shipping</span>
               </div>
               <button class="btn-card-add" data-id="${prod.id}">
                 <i class="fa-solid fa-cart-plus"></i>
@@ -3183,11 +3244,15 @@ let _adminCategories = [];
 async function fetchCategories() {
   try {
     const response = await fetch(`${API_BASE}/categories`);
-    const categories = await response.json();
+    const data = await response.json();
+    const categories = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.data)
+      ? data.data
+      : [];
 
     _adminCategories = categories;
 
-    // Update shop category nav
     const categoryNav = document.getElementById('category-nav');
     if (categoryNav) {
       categoryNav.innerHTML = categories
@@ -3196,7 +3261,6 @@ async function fetchCategories() {
         )
         .join('');
 
-      // Re-attach event listeners for category filtering
       document.querySelectorAll('.cat-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           document
@@ -3208,9 +3272,8 @@ async function fetchCategories() {
         });
       });
     }
-    // Render category carousel/grid
+
     renderCategoryGrid(categories);
-    // Populate desktop dropdown menu for Shop by Category
     populateCategoryDropdown(categories);
   } catch (error) {
     showErrorToast(getApiErrorMessage(error));

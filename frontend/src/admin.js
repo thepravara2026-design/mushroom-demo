@@ -4,7 +4,7 @@ import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
 import { trainingApi } from './api/trainingApi.js';
 import { showErrorToast, showSuccessToast } from './utils/notify.js';
 
-window.state = state;
+globalThis.state = state;
 
 let _adminProducts = [];
 let _adminCategories = [];
@@ -59,12 +59,14 @@ let bcCategories = null;
 try {
   bcCategories = new BroadcastChannel('spore-categories');
 } catch (e) {
+  console.warn(e);
   bcCategories = null;
 }
 let bcProducts = null;
 try {
   bcProducts = new BroadcastChannel('spore-products');
 } catch (e) {
+  console.warn(e);
   bcProducts = null;
 }
 let bcOrders = null;
@@ -81,6 +83,7 @@ try {
     }
   });
 } catch (e) {
+  console.warn(e);
   bcOrders = null;
 }
 
@@ -89,7 +92,7 @@ let adminEs = null;
 
 function initAdminSse() {
   try {
-    if (!state || !state.token) return;
+    if (!state?.token) return;
     if (adminEs) return; // already initialized
     const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
     adminEs = new EventSource(esUrl);
@@ -97,7 +100,7 @@ function initAdminSse() {
       try {
         const payload = JSON.parse(ev.data || '{}');
         const order = payload.order;
-        if (state.user && state.user.role === 'admin') {
+        if (state.user?.role === 'admin') {
           fetchAdminOrders();
           if (order) {
             const status = order.delivery_status || order.status || 'updated';
@@ -107,18 +110,18 @@ function initAdminSse() {
           }
         }
       } catch (e) {
-        /* ignore */
+        console.warn(e);
       }
     });
     adminEs.addEventListener('error', () => {
       // noop; BroadcastChannel remains as fallback
     });
   } catch (e) {
-    /* ignore */
+    console.warn(e);
   }
 }
 
-window.addEventListener('auth:changed', () => initAdminSse());
+globalThis.addEventListener('auth:changed', () => initAdminSse());
 
 function showLoginPanel() {
   loginPanel.classList.remove('hidden');
@@ -182,8 +185,8 @@ function generateProductId(categoryUid) {
     )
     .map((p) => {
       const regex = new RegExp(`^${escapeRegExp(categoryUid)}-pid-(\\d+)$`);
-      const match = String(p.id).match(regex);
-      return match ? parseInt(match[1], 10) : 0;
+      const match = regex.exec(String(p.id));
+      return match ? Number.parseInt(match[1], 10) : 0;
     });
   const nextNumber = existingIds.length ? Math.max(...existingIds) + 1 : 1;
   return `${categoryUid}-pid-${String(nextNumber).padStart(5, '0')}`;
@@ -235,7 +238,7 @@ function updateCategoryImagePreview() {
   if (file) {
     const reader = new FileReader();
     reader.onload = () => {
-      categoryImagePreview.innerHTML = `<img src="${reader.result}" alt="Preview">`;
+        categoryImagePreview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
     };
     reader.readAsDataURL(file);
     return;
@@ -245,7 +248,7 @@ function updateCategoryImagePreview() {
   if (url) {
     // Normalize protocol-less URLs (e.g. example.com/image.jpg or //cdn.com/img.png)
     if (url.startsWith('//')) url = `https:${url}`;
-    else if (!/^https?:\/\//i.test(url) && url.indexOf('.') !== -1) url = `https://${url}`;
+    else if (!/^https?:\/\//i.test(url) && url.includes('.')) url = `https://${url}`;
 
     categoryImagePreview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
 
@@ -265,6 +268,7 @@ function updateCategoryImagePreview() {
     try {
       img.src = url;
     } catch (e) {
+      console.warn(e);
       categoryImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
     }
     return;
@@ -281,7 +285,7 @@ function renderUploadPreview(preview, file, url, label) {
     const reader = new FileReader();
     preview.dataset.previewValid = 'false';
     reader.onload = () => {
-      preview.innerHTML = `<img src="${reader.result}" alt="Preview">`;
+        preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
       preview.dataset.previewValid = 'true';
       productImagePreviewValid = true;
     };
@@ -301,7 +305,7 @@ function renderUploadPreview(preview, file, url, label) {
       !/^https?:\/\//i.test(url)
       && !/^data:/i.test(url)
       && !/^blob:/i.test(url)
-      && url.indexOf('.') !== -1
+      && url.includes('.')
     ) {
       url = `https://${url}`;
     }
@@ -330,6 +334,7 @@ function renderUploadPreview(preview, file, url, label) {
     try {
       img.src = url;
     } catch (e) {
+      console.warn(e);
       preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
       preview.dataset.previewValid = 'false';
       productImagePreviewValid = false;
@@ -350,6 +355,43 @@ async function readFileAsDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
+
+// -----------------------------
+// Helper: product/category helpers
+// -----------------------------
+function buildProductBody({ name, category, description, numericPrice, numericMrp, gstRate, image_url, productId, editId }) {
+  const body = {
+    name,
+    category,
+    description,
+    price: numericPrice,
+    mrp_price: numericMrp,
+    gst_rate: Number.parseInt(String(gstRate || 0), 10),
+    image_url,
+  };
+  if (!editId) body.id = productId;
+  return body;
+}
+
+async function submitJson(url, method, body) {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${state.token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
+function buildCategoryBody(editId, { categoryId, id, name, description, image_url }) {
+  return editId
+    ? { name, description, image_url }
+    : { category_id: categoryId, id, name, description, image_url };
+}
+
 
 async function fetchAdminInventory() {
   const grid = document.getElementById('admin-inventory-grid');
@@ -402,16 +444,7 @@ function renderAdminInventory() {
     <div class="admin-product-grid">
       ${pageProducts
     .map((p) => {
-      const stockClass = p.stock === 0
-        ? 'out-stock'
-        : p.stock < 20
-          ? 'low-stock'
-          : 'in-stock';
-      const stockLabel = p.stock === 0
-        ? 'Out of Stock'
-        : p.stock < 20
-          ? `Low: ${p.stock}`
-          : `${p.stock} units`;
+          // stock display removed (inventory managed separately)
       const categoryObj = _adminCategories.find((c) => c.id === p.category);
       const categoryName = categoryObj ? categoryObj.name : 'Unknown';
       const categoryId = categoryObj
@@ -436,7 +469,6 @@ function renderAdminInventory() {
                   ${p.mrp_price ? `<span class="price-mrp">₹${p.mrp_price.toFixed(2)}</span>` : ''}
                 </div>
                 <div class="admin-badge-row">
-                  <span class="admin-stock-badge ${stockClass}">${stockLabel}</span>
                   <span class="admin-gst-badge">GST ${p.gst_rate}%</span>
                 </div>
               </div>
@@ -447,8 +479,8 @@ function renderAdminInventory() {
                 <span class="admin-card-tag">${categoryName}</span>
               </div>
               <div class="admin-row-actions">
-                <button class="btn-admin-edit" onclick="window.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-                <button class="btn-admin-delete" onclick="window.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
+                  <button class="btn-admin-edit" onclick="globalThis.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+                <button class="btn-admin-delete" onclick="globalThis.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
               </div>
             </div>
           </div>
@@ -502,7 +534,6 @@ function adminEditProduct(productId) {
   document.getElementById('admin-prod-gst').value = String(product.gst_rate);
   document.getElementById('admin-prod-price').value = product.price;
   document.getElementById('admin-prod-mrp').value = product.mrp_price || '';
-  document.getElementById('admin-prod-stock').value = product.stock;
   if (productImageUrl) productImageUrl.value = product.image_url || '';
   if (productImageFile) productImageFile.value = '';
 
@@ -518,7 +549,6 @@ function adminEditProduct(productId) {
 
 async function handleAdminAddProduct(event) {
   event.preventDefault();
-
   const feedback = document.getElementById('admin-add-feedback');
   feedback.classList.add('hidden');
 
@@ -529,83 +559,49 @@ async function handleAdminAddProduct(event) {
   const price = document.getElementById('admin-prod-price').value;
   const mrp_price = document.getElementById('admin-prod-mrp').value;
   const gst_rate = document.getElementById('admin-prod-gst').value;
-  const stock = document.getElementById('admin-prod-stock').value;
-  const selectedCategoryUid = document.getElementById('admin-prod-category')?.selectedOptions?.[0]
-    ?.dataset?.categoryUid || '';
+  const selectedCategoryUid = document.getElementById('admin-prod-category')?.selectedOptions?.[0]?.dataset?.categoryUid || '';
   let productId = productIdDisplay?.value.trim() || '';
   const productImageUrlValue = productImageUrl?.value.trim() || '';
   const imageFile = productImageFile?.files?.[0];
   let image_url = productImageUrlValue;
 
   try {
-    const expectedPrefix = selectedCategoryUid
-      ? `${selectedCategoryUid}-pid-`
-      : '';
-    if (
-      !productId
-      || (expectedPrefix && !productId.startsWith(expectedPrefix))
-    ) {
+    const expectedPrefix = selectedCategoryUid ? `${selectedCategoryUid}-pid-` : '';
+    if (!productId || (expectedPrefix && !productId.startsWith(expectedPrefix))) {
       productId = generateProductId(selectedCategoryUid);
       if (productIdDisplay) productIdDisplay.value = productId;
     }
 
-    if (imageFile) {
-      image_url = await readFileAsDataUrl(imageFile);
-    }
+    if (imageFile) image_url = await readFileAsDataUrl(imageFile);
 
-    const numericPrice = parseFloat(price);
-    const numericMrp = mrp_price ? parseFloat(mrp_price) : undefined;
+    const numericPrice = Number.parseFloat(price);
+    const numericMrp = mrp_price ? Number.parseFloat(mrp_price) : undefined;
     if (numericMrp !== undefined && numericMrp < numericPrice) {
       feedback.textContent = 'MRP must be greater than or equal to the actual price.';
       feedback.classList.remove('hidden');
       return;
     }
 
-    const method = editId ? 'PUT' : 'POST';
-    const url = editId
-      ? `${API_BASE}/products/${editId}`
-      : `${API_BASE}/products`;
     if (!productImagePreviewValid) {
       feedback.textContent = 'Please provide a valid product image preview. Upload a local image file or paste a direct image URL (e.g. ending with .jpg, .png, .webp) that loads successfully, not a Google share page or HTML link.';
       feedback.classList.remove('hidden');
       feedback.style.color = 'var(--color-danger)';
       return;
     }
-    const body = {
-      name,
-      category,
-      description,
-      price: numericPrice,
-      mrp_price: numericMrp,
-      gst_rate: parseInt(gst_rate, 10),
-      stock: parseInt(stock, 10),
-      image_url,
-    };
-    if (!editId) {
-      body.id = productId;
-    }
 
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.token}`,
-      },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
+    const method = editId ? 'PUT' : 'POST';
+    const url = editId ? `${API_BASE}/products/${editId}` : `${API_BASE}/products`;
+    const body = buildProductBody({ name, category, description, numericPrice, numericMrp, gstRate: gst_rate, image_url, productId, editId });
+
+    const { res, data } = await submitJson(url, method, body);
     if (res.ok) {
-      showSuccessToast(
-        editId
-          ? '✅ Product updated successfully!'
-          : '✅ Product published successfully!',
-      );
+      showSuccessToast(editId ? '✅ Product updated successfully!' : '✅ Product published successfully!');
       resetAdminForm();
       fetchAdminInventory();
       try {
         bcProducts?.postMessage({ type: 'products:updated' });
       } catch (e) {
-        /* ignore */
+        console.warn(e);
       }
       activateAdminTab('products');
     } else {
@@ -615,6 +611,7 @@ async function handleAdminAddProduct(event) {
   } catch (err) {
     feedback.textContent = 'Server error.';
     feedback.classList.remove('hidden');
+    console.error(err);
   }
 }
 
@@ -624,7 +621,7 @@ async function fetchAdminOrders() {
   try {
     const orders = await fetchWithAuth('/orders/all-orders');
     if (!Array.isArray(orders)) {
-      throw new Error('Invalid orders response');
+      throw new TypeError('Invalid orders response');
     }
     if (statOrders) statOrders.textContent = orders.length;
     adminOrdersCache = orders;
@@ -694,7 +691,7 @@ function renderAdminOrders(orders) {
         )
         .join('');
       const invoiceLink = o.invoice_token
-        ? `${window.location.origin}/api/orders/share/${o.invoice_token}`
+        ? `${globalThis.location.origin}/api/orders/share/${o.invoice_token}`
         : '';
 
       return `
@@ -730,7 +727,7 @@ function renderAdminOrders(orders) {
               </div>
             `
     : `
-              <select class="admin-ship-select" onchange="window.adminUpdateShipping('${o.id}', this.value)">
+              <select class="admin-ship-select" onchange="globalThis.adminUpdateShipping('${o.id}', this.value)">
                 <option value="pending" ${o.delivery_status === 'pending' ? 'selected' : ''}>Pending</option>
                 <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''}>Processing</option>
                 <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''}>Shipped</option>
@@ -738,7 +735,7 @@ function renderAdminOrders(orders) {
               </select>
               <div class="admin-order-cancel-controls">
                 <label class="admin-cancel-label" for="admin-cancel-reason-${o.id}">Cancel reason</label>
-                <select id="admin-cancel-reason-${o.id}" class="admin-cancel-select" onchange="window.adminToggleCancelReason('${o.id}', this.value)">
+                <select id="admin-cancel-reason-${o.id}" class="admin-cancel-select" onchange="globalThis.adminToggleCancelReason('${o.id}', this.value)">
                   <option value="">Select a reason</option>
                   <option value="Stock not available">Stock not available</option>
                   <option value="We are not extended our service to your area">We are not extended our service to your area</option>
@@ -747,7 +744,7 @@ function renderAdminOrders(orders) {
                   <option value="Other">Other</option>
                 </select>
                 <input id="admin-cancel-other-${o.id}" type="text" placeholder="Specify cancel reason" class="admin-cancel-other" style="display:none;">
-                <button class="btn btn-danger admin-cancel-btn" onclick="window.adminCancelOrder('${o.id}')">Cancel order</button>
+                <button class="btn btn-danger admin-cancel-btn" onclick="globalThis.adminCancelOrder('${o.id}')">Cancel order</button>
               </div>
             `
 }
@@ -761,8 +758,8 @@ function renderAdminOrders(orders) {
   invoiceLink
     ? `
               <div class="admin-order-summary-block" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-secondary" onclick="window.open('${invoiceLink}','_blank')">Open Invoice</button>
-                <button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy Link</button>
+                <button class="btn btn-secondary" onclick="globalThis.open('${invoiceLink}','_blank')">Open Invoice</button>
+                <button class="btn btn-secondary" onclick="globalThis.copyInvoiceLink('${o.invoice_token}')">Copy Link</button>
               </div>
             `
     : ''
@@ -801,6 +798,7 @@ async function adminUpdateShipping(orderId, status) {
     showSuccessToast(`📦 Shipment status updated to "${status}"`);
     fetchAdminOrders();
   } catch (err) {
+    console.error(err);
     showErrorToast('Failed to update shipping status.');
   }
 }
@@ -1195,9 +1193,9 @@ async function adminCancelOrder(orderId) {
     return;
   }
 
-  if (reason === 'Other') {
+    if (reason === 'Other') {
     const otherText = document.getElementById(`admin-cancel-other-${orderId}`);
-    if (!otherText || !otherText.value.trim()) {
+    if (!otherText?.value?.trim()) {
       showErrorToast('Please specify a cancellation reason.');
       return;
     }
@@ -1224,6 +1222,7 @@ async function adminCancelOrder(orderId) {
     showSuccessToast('❌ Order cancelled successfully.');
     fetchAdminOrders();
   } catch (err) {
+    console.error(err);
     showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
   }
 }
@@ -1266,6 +1265,7 @@ async function fetchAdminCategories() {
     resetAdminCatForm();
     renderAdminCategoriesList(categories);
   } catch (err) {
+    console.error(err);
     if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;">Failed to load categories.</div>';
   }
 }
@@ -1282,6 +1282,7 @@ async function fetchAdminTrainings() {
     renderAdminTrainings();
     return trainings;
   } catch (err) {
+    console.error(err);
     if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;">Failed to load trainings.</div>';
     return [];
   }
@@ -1290,7 +1291,7 @@ async function fetchAdminTrainings() {
 function renderAdminTrainings() {
   const list = document.getElementById('admin-trainings-list');
   if (!list) return;
-  if (!_adminTrainings || !_adminTrainings.length) {
+  if (!_adminTrainings?.length) {
     list.innerHTML = '<div class="admin-loading">No trainings available.</div>';
     return;
   }
@@ -1306,8 +1307,8 @@ function renderAdminTrainings() {
         </div>
       </div>
       <div class="admin-row-actions">
-        <button class="btn-admin-edit" onclick="window.adminEditTraining('${t.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn-admin-delete" onclick="window.adminDeleteTraining('${t.id}')"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn-admin-edit" onclick="globalThis.adminEditTraining('${t.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="btn-admin-delete" onclick="globalThis.adminDeleteTraining('${t.id}')"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>
   `,
@@ -1423,8 +1424,8 @@ function renderAdminCategoriesList(categories) {
         <span class="admin-cat-desc">${cat.description || ''}</span>
       </div>
       <div class="admin-row-actions">
-        <button class="btn-admin-edit" onclick="window.adminEditCategory('${cat.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn-admin-delete" onclick="window.adminDeleteCategory('${cat.id}')"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn-admin-edit" onclick="globalThis.adminEditCategory('${cat.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="btn-admin-delete" onclick="globalThis.adminDeleteCategory('${cat.id}')"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>
   `,
@@ -1480,7 +1481,7 @@ function adminEditCategory(catId) {
 }
 
 function parseAdminHashEdit() {
-  const hash = window.location.hash || '';
+  const hash = globalThis.location.hash || '';
   if (!hash.startsWith('#categories')) return;
   const queryStart = hash.indexOf('?');
   if (queryStart === -1) return;
@@ -1518,11 +1519,7 @@ function resetAdminCatForm() {
 async function handleAdminSaveCategory() {
   const feedback = document.getElementById('admin-cat-feedback');
   const editId = document.getElementById('admin-edit-cat-id').value;
-  const id = document
-    .getElementById('admin-cat-id')
-    .value.trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-');
+  const id = document.getElementById('admin-cat-id').value.trim().toLowerCase().replace(/\s+/g, '-');
   let categoryId = categoryUidInput?.value.trim() || generateCategoryUid();
   const name = document.getElementById('admin-cat-name').value.trim();
   const description = document.getElementById('admin-cat-desc').value.trim();
@@ -1546,98 +1543,57 @@ async function handleAdminSaveCategory() {
     return;
   }
 
-  // Force auto-generation of category UID for new categories
   if (!editId) {
     categoryId = generateCategoryUid();
     if (categoryUidInput) categoryUidInput.value = categoryId;
   }
 
-  // Client-side uniqueness checks: slug (id), name, and category UID must be unique
-  if (_adminCategories && _adminCategories.length) {
-    const slugConflict = _adminCategories.some(
-      (c) => c.id === id && c.id !== editId,
-    );
-    const nameConflict = _adminCategories.some(
-      (c) => (c.name || '').toLowerCase() === name.toLowerCase() && c.id !== editId,
-    );
-    const uidConflict = _adminCategories.some(
-      (c) => (c.category_id || c.categoryId) === categoryId && c.id !== editId,
-    );
+  // Uniqueness checks
+  if (_adminCategories?.length) {
+    const slugConflict = _adminCategories.some((c) => c.id === id && c.id !== editId);
+    const nameConflict = _adminCategories.some((c) => (c.name || '').toLowerCase() === name.toLowerCase() && c.id !== editId);
+    const uidConflict = _adminCategories.some((c) => (c.category_id || c.categoryId) === categoryId && c.id !== editId);
 
-    if (slugConflict || nameConflict || uidConflict) {
-      const parts = [];
-      if (slugConflict) parts.push('Slug already exists');
-      if (nameConflict) parts.push('Name already exists');
-      if (uidConflict) parts.push('Category UID conflict (regenerating)');
-
-      if (uidConflict) {
-        // regenerate UID until unique
-        let attempts = 0;
-        while (
-          _adminCategories.some(
-            (c) => (c.category_id || c.categoryId) === categoryId && c.id !== editId,
-          )
-          && attempts < 20
-        ) {
-          categoryId = generateCategoryUid();
-          attempts += 1;
-        }
-        if (categoryUidInput) categoryUidInput.value = categoryId;
+    if (uidConflict) {
+      let attempts = 0;
+      while (_adminCategories.some((c) => (c.category_id || c.categoryId) === categoryId && c.id !== editId) && attempts < 20) {
+        categoryId = generateCategoryUid();
+        attempts += 1;
       }
+      if (categoryUidInput) categoryUidInput.value = categoryId;
+    }
 
-      if (slugConflict || nameConflict) {
-        if (feedback) {
-          feedback.textContent = `${parts.join(' · ')}.`;
-          feedback.classList.remove('hidden');
-          feedback.style.color = 'var(--color-danger)';
-        }
-        return;
+    if (slugConflict || nameConflict) {
+      if (feedback) {
+        const parts = [];
+        if (slugConflict) parts.push('Slug already exists');
+        if (nameConflict) parts.push('Name already exists');
+        feedback.textContent = `${parts.join(' · ')}.`;
+        feedback.classList.remove('hidden');
+        feedback.style.color = 'var(--color-danger)';
       }
+      return;
     }
   }
+
   try {
     const file = categoryImageFile?.files?.[0];
-    if (!imageUrl && file) {
-      imageUrl = await readFileAsDataUrl(file);
-    }
+    if (!imageUrl && file) imageUrl = await readFileAsDataUrl(file);
 
     const method = editId ? 'PUT' : 'POST';
-    const url = editId
-      ? `${API_BASE}/categories/${editId}`
-      : `${API_BASE}/categories`;
-    const body = editId
-      ? { name, description, image_url: imageUrl }
-      : {
-        category_id: categoryId,
-        id,
-        name,
-        description,
-        image_url: imageUrl,
-      };
+    const url = editId ? `${API_BASE}/categories/${editId}` : `${API_BASE}/categories`;
+    const body = buildCategoryBody(editId, { categoryId, id, name, description, image_url: imageUrl });
 
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.token}`,
-      },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
+    const { res, data } = await submitJson(url, method, body);
     if (res.ok) {
-      showSuccessToast(
-        editId
-          ? `✅ Category "${name}" updated!`
-          : `✅ Category "${name}" created!`,
-      );
+      showSuccessToast(editId ? `✅ Category "${name}" updated!` : `✅ Category "${name}" created!`);
       resetAdminCatForm();
       fetchAdminCategories();
       fetchCategories();
-      // Notify other tabs (landing page) to refresh categories
       try {
         bcCategories?.postMessage({ type: 'categories:updated' });
       } catch (e) {
-        /* ignore */
+        console.warn(e);
       }
     } else if (feedback) {
       feedback.textContent = data.error || 'Failed to save category.';
@@ -1645,6 +1601,7 @@ async function handleAdminSaveCategory() {
       feedback.style.color = 'var(--color-danger)';
     }
   } catch (err) {
+    console.error(err);
     if (feedback) {
       feedback.textContent = err.message || 'Server error.';
       feedback.classList.remove('hidden');
@@ -1702,7 +1659,7 @@ function updateImagePreview() {
     const reader = new FileReader();
     preview.dataset.previewValid = 'false';
     reader.onload = () => {
-      preview.innerHTML = `<img src="${reader.result}" alt="Preview">`;
+      preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
       preview.dataset.previewValid = 'true';
       productImagePreviewValid = true;
     };
@@ -1722,7 +1679,7 @@ function updateImagePreview() {
       !/^https?:\/\//i.test(url)
       && !/^data:/i.test(url)
       && !/^blob:/i.test(url)
-      && url.indexOf('.') !== -1
+      && url.includes('.')
     ) url = `https://${url}`;
 
     preview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
@@ -1765,8 +1722,8 @@ function updateImagePreview() {
 
 function copyInvoiceLink(token) {
   if (!token) return;
-  const invoiceUrl = `${window.location.origin}/api/orders/share/${token}`;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
+  const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${token}`;
+  if (navigator.clipboard?.writeText) {
     navigator.clipboard
       .writeText(invoiceUrl)
       .then(() => showSuccessToast('Invoice share link copied to clipboard.'))
@@ -1781,7 +1738,7 @@ function copyInvoiceLink(token) {
     showSuccessToast('Invoice share link copied to clipboard.');
   }
 }
-window.copyInvoiceLink = copyInvoiceLink;
+globalThis.copyInvoiceLink = copyInvoiceLink;
 
 function activateAdminTab(tabName) {
   document.querySelectorAll('.admin-tab').forEach((btn) => {
@@ -1795,7 +1752,7 @@ function activateAdminTab(tabName) {
   });
 }
 
-function initAdminPage() {
+function setupAdminEventHandlers() {
   // Tab clicks
   document.querySelectorAll('.admin-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1809,12 +1766,10 @@ function initAdminPage() {
       e.preventDefault();
       clearAuthError();
       const email = document.getElementById('admin-auth-email').value.trim();
-      const password = document
-        .getElementById('admin-auth-password')
-        .value.trim();
+      const password = document.getElementById('admin-auth-password').value.trim();
       try {
         const res = await authApi.adminLogin(email, password);
-        if (res && res.token) {
+        if (res?.token) {
           saveAuth(res.token, res.user);
           showDashboard();
         }
@@ -1825,22 +1780,15 @@ function initAdminPage() {
   }
 
   // Logout
-  if (btnLogout) {
-    btnLogout.addEventListener('click', () => {
-      clearAuth();
-      showLoginPanel();
-    });
-  }
-  if (btnViewShop) btnViewShop.addEventListener('click', () => (window.location.href = '/'));
-  
+  if (btnLogout) btnLogout.addEventListener('click', () => { clearAuth(); showLoginPanel(); });
+  if (btnViewShop) btnViewShop.addEventListener('click', () => (globalThis.location.href = '/'));
+
   // Admin action menu toggle
   if (adminActionMenuBtn && adminActionMenu) {
     adminActionMenuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       adminActionMenu.classList.toggle('hidden');
     });
-    
-    // Close menu when clicking outside
     document.addEventListener('click', (e) => {
       if (!adminActionMenuBtn.contains(e.target) && !adminActionMenu.contains(e.target)) {
         adminActionMenu.classList.add('hidden');
@@ -1875,9 +1823,7 @@ function initAdminPage() {
   if (productImageFile) productImageFile.addEventListener('change', updateImagePreview);
   if (productImageUrl) {
     productImageUrl.addEventListener('input', () => {
-      if (productImageFile?.files?.length) {
-        productImageFile.value = '';
-      }
+      if (productImageFile?.files?.length) productImageFile.value = '';
       updateImagePreview();
     });
   }
@@ -1888,72 +1834,35 @@ function initAdminPage() {
   const adminFilterCat = document.getElementById('admin-filter-cat');
   const adminSortSelect = document.getElementById('admin-inventory-sort');
   const adminPageSizeSelect = document.getElementById('admin-inventory-page-size');
-  if (adminSearchProd) {
-    adminSearchProd.addEventListener('input', () => {
-      _adminInventoryPage = 1;
-      renderAdminInventory();
-    });
-  }
-  if (adminFilterCat) {
-    adminFilterCat.addEventListener('change', () => {
-      _adminInventoryPage = 1;
-      renderAdminInventory();
-    });
-  }
-  if (adminSortSelect) {
-    adminSortSelect.addEventListener('change', () => {
-      _adminInventoryPage = 1;
-      renderAdminInventory();
-    });
-  }
-  if (adminPageSizeSelect) {
-    adminPageSizeSelect.addEventListener('change', () => {
-      const v = parseInt(adminPageSizeSelect.value, 10) || 10;
-      adminInventoryPageSize = v;
-      _adminInventoryPage = 1;
-      renderAdminInventory();
-    });
-  }
+  if (adminSearchProd) adminSearchProd.addEventListener('input', () => { _adminInventoryPage = 1; renderAdminInventory(); });
+  if (adminFilterCat) adminFilterCat.addEventListener('change', () => { _adminInventoryPage = 1; renderAdminInventory(); });
+  if (adminSortSelect) adminSortSelect.addEventListener('change', () => { _adminInventoryPage = 1; renderAdminInventory(); });
+  if (adminPageSizeSelect) adminPageSizeSelect.addEventListener('change', () => { const v = Number.parseInt(adminPageSizeSelect.value, 10) || 10; adminInventoryPageSize = v; _adminInventoryPage = 1; renderAdminInventory(); });
 
   const adminHistoryFilterType = document.getElementById('admin-history-filter-type');
   const adminHistorySort = document.getElementById('admin-history-sort');
   const adminHistoryPageSize = document.getElementById('admin-history-page-size');
   const adminHistoryClear = document.getElementById('admin-history-clear');
 
-  if (adminHistoryFilterType) {
-    adminHistoryFilterType.addEventListener('change', () => {
-      adminHistoryPage = 1;
-      renderAdminHistoryFilterValueControl(adminHistoryFilterType.value);
-      renderAdminHistory();
-    });
-  }
-  if (adminHistorySort) {
-    adminHistorySort.addEventListener('change', () => {
-      adminHistoryPage = 1;
-      renderAdminHistory();
-    });
-  }
-  if (adminHistoryPageSize) {
-    adminHistoryPageSize.addEventListener('change', () => {
-      adminHistoryPage = 1;
-      renderAdminHistory();
-    });
-  }
-  if (adminHistoryClear) {
-    adminHistoryClear.addEventListener('click', clearAdminHistoryFilters);
-  }
+  if (adminHistoryFilterType) adminHistoryFilterType.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistoryFilterValueControl(adminHistoryFilterType.value); renderAdminHistory(); });
+  if (adminHistorySort) adminHistorySort.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistory(); });
+  if (adminHistoryPageSize) adminHistoryPageSize.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistory(); });
+  if (adminHistoryClear) adminHistoryClear.addEventListener('click', clearAdminHistoryFilters);
 
   // Expose globals
-  window.adminEditProduct = adminEditProduct;
-  window.adminDeleteProduct = adminDeleteProduct;
-  window.adminUpdateShipping = adminUpdateShipping;
-  window.adminToggleCancelReason = adminToggleCancelReason;
-  window.adminCancelOrder = adminCancelOrder;
-  window.adminEditCategory = adminEditCategory;
-  window.adminDeleteCategory = adminDeleteCategory;
-  window.adminEditTraining = adminEditTraining;
-  window.adminDeleteTraining = adminDeleteTraining;
+  globalThis.adminEditProduct = adminEditProduct;
+  globalThis.adminDeleteProduct = adminDeleteProduct;
+  globalThis.adminUpdateShipping = adminUpdateShipping;
+  globalThis.adminToggleCancelReason = adminToggleCancelReason;
+  globalThis.adminCancelOrder = adminCancelOrder;
+  globalThis.adminEditCategory = adminEditCategory;
+  globalThis.adminDeleteCategory = adminDeleteCategory;
+  globalThis.adminEditTraining = adminEditTraining;
+  globalThis.adminDeleteTraining = adminDeleteTraining;
+}
 
+function initAdminPage() {
+  setupAdminEventHandlers();
   // Initialize UI state
   if (state.token && state.user) {
     showDashboard();

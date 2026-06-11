@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite --port 3000 --open",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "screenshots": "node ./tools/screenshot.mjs"
   },
   "devDependencies": {
+    "playwright": "^1.60.0",
     "vite": "^5.2.0"
   }
 }

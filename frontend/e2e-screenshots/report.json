@@ -1,0 +1,55 @@
+{
+  "url": "http://localhost:3001/admin.html",
+  "captures": [
+    {
+      "width": 1366,
+      "shot": "C:\\Users\\admin\\mushroom-shop\\frontend\\e2e-screenshots\\admin-1366.png",
+      "checks": {
+        "overflow": false,
+        "overflowEls": [],
+        "formsCount": 0,
+        "forms": []
+      }
+    },
+    {
+      "width": 1024,
+      "shot": "C:\\Users\\admin\\mushroom-shop\\frontend\\e2e-screenshots\\admin-1024.png",
+      "checks": {
+        "overflow": false,
+        "overflowEls": [],
+        "formsCount": 0,
+        "forms": []
+      }
+    },
+    {
+      "width": 900,
+      "shot": "C:\\Users\\admin\\mushroom-shop\\frontend\\e2e-screenshots\\admin-900.png",
+      "checks": {
+        "overflow": false,
+        "overflowEls": [],
+        "formsCount": 0,
+        "forms": []
+      }
+    },
+    {
+      "width": 680,
+      "shot": "C:\\Users\\admin\\mushroom-shop\\frontend\\e2e-screenshots\\admin-680.png",
+      "checks": {
+        "overflow": false,
+        "overflowEls": [],
+        "formsCount": 0,
+        "forms": []
+      }
+    },
+    {
+      "width": 520,
+      "shot": "C:\\Users\\admin\\mushroom-shop\\frontend\\e2e-screenshots\\admin-520.png",
+      "checks": {
+        "overflow": false,
+        "overflowEls": [],
+        "formsCount": 0,
+        "forms": []
+      }
+    }
+  ]
+}
