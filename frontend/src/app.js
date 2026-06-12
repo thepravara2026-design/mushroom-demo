@@ -46,10 +46,19 @@ function initApp() {
   updateCartUI();
   initThreeJS();
   initScrollReveal();
-
-  // Training gallery carousel
-  renderTrainingGallery();
-  startTgAutoplay();
+  /*
+    // Training gallery carousel
+    renderTrainingGallery();
+    startTgAutoplay();
+    window.addEventListener('resize', () => {
+      renderTrainingGallery();
+    });
+  */
+  // Training gallery carousel — defer until layout is painted
+  requestAnimationFrame(() => {
+    renderTrainingGallery();
+    startTgAutoplay();
+  });
   window.addEventListener('resize', () => {
     renderTrainingGallery();
   });
@@ -718,6 +727,20 @@ function initEventListeners() {
       navigateToCategory(btn.getAttribute('data-filter-category'));
     });
   });
+
+  // ── Training Gallery Carousel ──
+  const tgPrev = document.getElementById('tg-prev');
+  const tgNext = document.getElementById('tg-next');
+  if (tgPrev) tgPrev.addEventListener('click', () => { tgPrevPage(); resetTgAutoplay(); });
+  if (tgNext) tgNext.addEventListener('click', () => { tgNextPage(); resetTgAutoplay(); });
+
+  const tgAdminEdit = document.getElementById('tg-admin-edit');
+  if (tgAdminEdit) {
+    tgAdminEdit.addEventListener('click', (e) => {
+      e.preventDefault();
+      openTgEditorModal();
+    });
+  }
 }
 
 // ==========================================================================
@@ -1774,7 +1797,7 @@ window.changeQty = changeQuantity;
 window.removeCartItem = removeFromCart;
 
 // ==========================================================================
-// TRAINING GALLERY CAROUSEL
+// TRAINING GALLERY CAROUSEL — FIXED
 // ==========================================================================
 const DEFAULT_TG_IMAGES = [
   { url: "https://images.unsplash.com/photo-1574943320219-553eb213f72d?w=600&h=400&fit=crop", caption: "Spawn inoculation lab" },
@@ -1784,7 +1807,8 @@ const DEFAULT_TG_IMAGES = [
   { url: "https://images.unsplash.com/photo-1590614024037-77e1a8e5b073?w=600&h=400&fit=crop", caption: "Fresh oyster mushrooms" },
   { url: "https://images.unsplash.com/photo-1562967914-608f82629710?w=600&h=400&fit=crop", caption: "Mushroom harvest sorting" },
   { url: "https://images.unsplash.com/photo-1504545102780-267741d26080?w=600&h=400&fit=crop", caption: "Packaging station" },
-  { url: "https://images.unsplash.com/photo-1518977676601-b53f82ber6b0?w=600&h=400&fit=crop", caption: "Climate control room" },
+  // ✅ FIXED URL (was "ber6b0", now "b6b0")
+  { url: "https://images.unsplash.com/photo-1518977676601-b53f82b6b0b0?w=600&h=400&fit=crop", caption: "Climate control room" },
   { url: "https://images.unsplash.com/photo-1596363104785-8c65da3d80b4?w=600&h=400&fit=crop", caption: "Quality inspection" },
   { url: "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600&h=400&fit=crop", caption: "Business planning session" }
 ];
@@ -1822,84 +1846,206 @@ function renderTrainingGallery() {
 
   const images = getTgImages();
   const visible = getTgVisibleCount();
-  const totalPages = Math.max(1, Math.ceil(images.length / visible));
+  //const offset = tgCurrentPage * (slide +gap);
 
-  // Clamp page
-  if (tgCurrentPage >= totalPages) tgCurrentPage = 0;
-  if (tgCurrentPage < 0) tgCurrentPage = totalPages - 1;
+  /* const totalPages = Math.max(1, Math.ceil(images.length / visible));
+ 
+   if (tgCurrentPage >= totalPages) tgCurrentPage = 0;
+   if (tgCurrentPage < 0) tgCurrentPage = totalPages - 1; */
 
-  // Render slides
+  const totalSlides = images.length;
+
+  if (tgCurrentPage >= totalSlides) tgCurrentPage = 0;
+  if (tgCurrentPage < 0) tgCurrentPage = totalSlides - 1;
+
+
+  const gap = 16;
+  const containerWidth = track.parentElement.offsetWidth || 800;
+  const slideW = (containerWidth - gap * (visible - 1)) / visible;
+
+  /*FIX: Set flex layout on track
+  track.style.display = "flex";
+  track.style.flexWrap = "nowrap";
+  track.style.transition = "transform 0.45s ease";
+  track.style.gap = gap + "px";
+  track.style.willChange = "transform";
+
+  // FIX: Each slide gets an explicit pixel width
   track.innerHTML = images.map((img) => `
-    <div class="tg-slide">
-      <img src="${img.url}" alt="${img.caption || 'Training glimpse'}" loading="lazy" />
+    <div class="tg-slide" style="flex: 0 0 ${slideW}px; width: ${slideW}px; overflow: hidden; border-radius: 12px;">
+      <div class="tg-slide-inner" style="position:relative; width:100%; height:220px;">
+        <img
+          src="${img.url}"
+          alt="${img.caption || 'Training glimpse'}"
+          loading="lazy"
+          style="width:100%; height:100%; object-fit:cover; display:block; border-radius:12px;"
+          onerror="this.parentElement.style.background='#e5e7eb';"
+        />
+        ${img.caption ? `
+          <div class="tg-slide-caption" style="
+            position:absolute; bottom:0; left:0; right:0;
+            background:linear-gradient(transparent, rgba(0,0,0,0.65));
+            color:#fff; padding:12px 14px 10px;
+            font-size:0.82rem; border-radius:0 0 12px 12px;
+          "><i class="fa-solid fa-image"></i> ${img.caption}</div>` : ''}
+      </div>
     </div>
   `).join("");
 
-  // Set slide width + translate
-  const slideW = 100 / images.length; // percentage of all slides
-  // Each slide width is (trackWidth - gap) / totalSlides
-  // Use flex-basis based percentage of total track for translateX
-  track.style.gap = "16px";
-  // Calculate how far to translate per page (in px)
-  updateTgTranslate(track, tgCurrentPage, visible, images.length);
+  // FIX: Apply translate AFTER slides are in the DOM
+  //const offset = tgCurrentPage * visible * (slideW + gap);
+
+  const offset = tgCurrentPage * (slideW + gap);
+  track.style.transform = `translateX(-${offset}px)`; */
+
+  track.style.display = "flex";
+  track.style.flexWrap = "nowrap";
+  track.style.gap = gap + "px";
+  track.style.willChange = "transform";
+
+  // Clone last `visible` slides to front and first `visible` to end for infinite loop
+  const clonesBefore = images.slice(-visible);
+  const clonesAfter = images.slice(0, visible);
+  const allSlides = [...clonesBefore, ...images, ...clonesAfter];
+
+  track.innerHTML = allSlides.map((img) => `
+    <div class="tg-slide" style="flex: 0 0 ${slideW}px; width: ${slideW}px; overflow: hidden; border-radius: 12px;">
+      <div class="tg-slide-inner" style="position:relative; width:100%; height:220px;">
+        <img
+          src="${img.url}"
+          alt="${img.caption || 'Training glimpse'}"
+          loading="lazy"
+          style="width:100%; height:100%; object-fit:cover; display:block; border-radius:12px;"
+          onerror="this.parentElement.style.background='#e5e7eb';"
+        />
+        ${img.caption ? `
+          <div class="tg-slide-caption" style="
+            position:absolute; bottom:0; left:0; right:0;
+            background:linear-gradient(transparent, rgba(0,0,0,0.65));
+            color:#fff; padding:12px 14px 10px;
+            font-size:0.82rem; border-radius:0 0 12px 12px;
+          "><i class="fa-solid fa-image"></i> ${img.caption}</div>` : ''}
+      </div>
+    </div>
+  `).join("");
+
+  // Offset by `visible` clones prepended, then current page
+  const offset = (visible + tgCurrentPage) * (slideW + gap);
+  track.style.transition = "transform 0.45s ease";
+  track.style.transform = `translateX(-${offset}px)`;
 
   // Render dots
   dotsWrap.innerHTML = "";
-  for (let i = 0; i < totalPages; i++) {
+  for (let i = 0; i < totalSlides; i++) {
     const dot = document.createElement("button");
     dot.className = "tg-dot" + (i === tgCurrentPage ? " active" : "");
+    dot.style.cssText = `width:10px;height:10px;border-radius:50%;border:none;cursor:pointer;padding:0;
+      background:${i === tgCurrentPage ? '#38b17b' : '#d1d5db'};transition:background 0.3s;`;
     dot.addEventListener("click", () => {
       tgCurrentPage = i;
-      updateTgTranslate(track, tgCurrentPage, visible, images.length);
-      renderTgDots(dotsWrap, tgCurrentPage);
+      renderTrainingGallery();
       resetTgAutoplay();
     });
     dotsWrap.appendChild(dot);
   }
 
-  // Show/hide edit btn for admin
+  // Show/hide admin edit button
   const editBtn = document.getElementById("tg-admin-edit");
   if (editBtn) {
     editBtn.style.display = state.user?.role === "admin" ? "inline-flex" : "none";
   }
 }
 
-function updateTgTranslate(track, page, visible, total) {
-  if (!track) return;
-  const totalPages = Math.max(1, Math.ceil(total / visible));
-  // Each slide width = (containerWidth - gaps) / total slides
-  // We need to use CSS transform to translate
-  // Calculate the offset as percentage of the track width
-  const gap = 16;
-  // Use the computed slide width approach: translate by visible * (slideWidth + gap)
-  const containerWidth = track.parentElement.offsetWidth;
-  const slideW = (containerWidth - gap * (visible - 1)) / visible;
-  const offset = page * visible * (slideW + gap);
-  track.style.transform = `translateX(-${offset}px)`;
-}
-
 function renderTgDots(dotsWrap, currentPage) {
   if (!dotsWrap) return;
   dotsWrap.querySelectorAll(".tg-dot").forEach((d, i) => {
     d.classList.toggle("active", i === currentPage);
+    d.style.background = i === currentPage ? '#38b17b' : '#d1d5db';
   });
 }
 
 function tgNextPage() {
-  const images = getTgImages();
+  /*const images = getTgImages();
   const visible = getTgVisibleCount();
   const totalPages = Math.max(1, Math.ceil(images.length / visible));
   tgCurrentPage = (tgCurrentPage + 1) % totalPages;
-  renderTrainingGallery();
+  renderTrainingGallery(); 
+
+  const images = getTgImages();
+  const totalSlides = images.length;
+  tgCurrentPage = (tgCurrentPage + 1) % totalSlides;
+  renderTrainingGallery();*/
+
+  // for slides running on loop -pravara
+  const images = getTgImages();
+  const visible = getTgVisibleCount();
+  const gap = 16;
+  const track = document.getElementById("training-gallery-track");
+  const containerWidth = track ? (track.parentElement.offsetWidth || 800) : 800;
+  const slideW = (containerWidth - gap * (visible - 1)) / visible;
+
+  tgCurrentPage++;
+
+  // Animate to next
+  const offset = (visible + tgCurrentPage) * (slideW + gap);
+  track.style.transition = "transform 0.45s ease";
+  track.style.transform = `translateX(-${offset}px)`;
+
+  // If we've gone past the real slides, silently jump to the real start
+  if (tgCurrentPage >= images.length) {
+    setTimeout(() => {
+      tgCurrentPage = 0;
+      track.style.transition = "none";
+      track.style.transform = `translateX(-${visible * (slideW + gap)}px)`;
+    }, 460);
+  }
+
+  //update dots
+  const dotsWrap = document.getElementById("training-gallery-dots");
+  renderTgDots(dotsWrap, tgCurrentPage % images.length)
 }
 
 function tgPrevPage() {
+  /*const images = getTgImages();
+   const visible = getTgVisibleCount();
+   const totalPages = Math.max(1, Math.ceil(images.length / visible));
+   tgCurrentPage = (tgCurrentPage - 1 + totalPages) % totalPages;
+   renderTrainingGallery(); 
+
+  const images = getTgImages();
+  const totalSlides = images.length;
+  tgCurrentPage = (tgCurrentPage - 1 + totalSlides) % totalSlides;
+  renderTrainingGallery(); */
+
+  // for looping carousal slide -pravara
   const images = getTgImages();
   const visible = getTgVisibleCount();
-  const totalPages = Math.max(1, Math.ceil(images.length / visible));
-  tgCurrentPage = (tgCurrentPage - 1 + totalPages) % totalPages;
-  renderTrainingGallery();
+  const gap = 16;
+  const track = document.getElementById("training-gallery-track");
+  const containerWidth = track ? (track.parentElement.offsetWidth || 800) : 800;
+  const slideW = (containerWidth - gap * (visible - 1)) / visible;
+
+  tgCurrentPage--;
+
+  // Animate to prev
+  const offset = (visible + tgCurrentPage) * (slideW + gap);
+  track.style.transition = "transform 0.45s ease";
+  track.style.transform = `translateX(-${offset}px)`;
+
+  // If we've gone before the real slides, silently jump to the real end
+  if (tgCurrentPage < 0) {
+    setTimeout(() => {
+      tgCurrentPage = images.length - 1;
+      track.style.transition = "none";
+      track.style.transform = `translateX(-${(visible + tgCurrentPage) * (slideW + gap)}px)`;
+    }, 460);
+  }
+  // Update dots
+  const dotsWrap = document.getElementById("training-gallery-dots");
+  renderTgDots(dotsWrap, ((tgCurrentPage % images.length) + images.length) % images.length);
 }
+
+
 
 function startTgAutoplay() {
   stopTgAutoplay();
@@ -1987,6 +2133,10 @@ function openTgEditorModal() {
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
 
   document.getElementById("tg-editor-add").addEventListener("click", () => {
+    if (editImgs.length >= 10) {
+      showErrorToast("Maximum of 10 images are allowed in the gallery.");
+      return;
+    }
     editImgs.push({ url: "https://via.placeholder.com/600x400?text=New+Image", caption: "" });
     renderList();
   });

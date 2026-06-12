@@ -1831,13 +1831,15 @@ button {
 
 .training-gallery-wrap {
   position: relative;
-  max-width: var(--max-w);
-  margin: 0 auto;
+  /* max-width: var(--max-w); 
+  margin: 0 auto; */
   overflow: hidden;
+  padding-bottom: 20px;
 }
 
 .training-gallery-track {
   display: flex;
+  flex-wrap: nowrap;
   gap: 16px;
   transition: transform 0.5s ease;
   will-change: transform;
@@ -1868,6 +1870,7 @@ button {
   margin-top: 18px;
 }
 
+/*
 .training-gallery-arrow {
   width: 36px;
   height: 36px;
@@ -1881,8 +1884,24 @@ button {
   cursor: pointer;
   transition: all var(--transition);
   font-size: 0.85rem;
+} */
+
+.training-gallery-arrow {
+  background: #fff;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  color: #111;
+  transition: background 0.2s, border-color 0.2s;
 }
 
+/*
 .training-gallery-arrow:hover {
   background: var(--green-dark);
   color: var(--white);
@@ -1902,11 +1921,39 @@ button {
   border: none;
   cursor: pointer;
   transition: background var(--transition);
-}
+} 
 
 .training-gallery-dots .tg-dot.active {
   background: var(--green-dark);
+} */
+
+.training-gallery-arrow:hover {
+  background: #38b17b;
+  border-color: #38b17b;
+  color: #fff;
 }
+
+.training-gallery-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tg-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: #d1d5db;
+  transition: background 0.3s;
+  padding: 0;
+}
+
+.tg-dot.active {
+  background: #38b17b;
+}
+
 
 .training-gallery-edit-btn {
   display: flex;

@@ -551,53 +551,25 @@
         <div class="section-label">
           <i class="fa-solid fa-images"></i> Training Glimpses
         </div>
-        <h2 class="section-title">Our Training Glimpses</h2>
+        <h2 class="section-title" style="display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;">
+          Our Training Glimpses
+          <button class="btn btn-secondary-glow" id="tg-admin-edit" style="display: none; padding: 6px 12px; font-size: 0.8rem; height: auto;">
+            <i class="fa-solid fa-pen-to-square"></i> Edit Gallery
+          </button>
+        </h2>
       </div>
       <div class="training-gallery-wrap">
-        <div class="carousel-container" id="mushroom-carousel">
-          <button class="carousel-arrow carousel-arrow-left" id="carousel-prev" aria-label="Previous slide">
+        <div class="training-gallery-track" id="training-gallery-track">
+          <!-- Dynamic slides rendered by renderTrainingGallery() -->
+        </div>
+        <div class="training-gallery-controls">
+          <button class="training-gallery-arrow" id="tg-prev" aria-label="Previous slide">
             <i class="fa-solid fa-chevron-left"></i>
           </button>
-          <div class="carousel-viewport">
-            <div class="carousel-track" id="carousel-track">
-              <div class="carousel-slide active">
-                <img src="/images/carousel_images/c1.png" alt="Carousel Image 1" />
-                <div class="carousel-caption">
-                  <span class="carousel-caption-tag">Featured</span>
-                  <h3>Fresh Premium Mushrooms</h3>
-                  <p>Handpicked, farm-fresh mushrooms delivered to your doorstep</p>
-                </div>
-              </div>
-              <div class="carousel-slide">
-                <img src="/images/carousel_images/c2.png" alt="Carousel Image 2" />
-                <div class="carousel-caption">
-                  <span class="carousel-caption-tag">Nutritious</span>
-                  <h3>Sun-Dried Mushrooms</h3>
-                  <p>100% natural & sun-dried for rich nutrition and long shelf life</p>
-                </div>
-              </div>
-              <div class="carousel-slide">
-                <img src="/images/carousel_images/c3.png" alt="Carousel Image 3" />
-                <div class="carousel-caption">
-                  <span class="carousel-caption-tag">High Yield</span>
-                  <h3>Premium Spawn Seeds</h3>
-                  <p>Lab-tested, high-quality spawn for maximum yield and quality</p>
-                </div>
-              </div>
-              <div class="carousel-slide">
-                <img src="/images/carousel_images/c4.png" alt="Carousel Image 4" />
-                <div class="carousel-caption">
-                  <span class="carousel-caption-tag">Beginner Friendly</span>
-                  <h3>Mushroom Growing Kits</h3>
-                  <p>All-in-one kits — perfect for beginners and home growers</p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <button class="carousel-arrow carousel-arrow-right" id="carousel-next" aria-label="Next slide">
+          <div class="training-gallery-dots" id="training-gallery-dots"></div>
+          <button class="training-gallery-arrow" id="tg-next" aria-label="Next slide">
             <i class="fa-solid fa-chevron-right"></i>
           </button>
-          <div class="carousel-dots" id="carousel-dots"></div>
         </div>
       </div>
     </section>
@@ -671,10 +643,10 @@
               taste are unmatched."
             </p>
             <div class="test-author">
-              <img src="https://i.pravatar.cc/44?img=10" alt="Priya Sharma" />
+              <img src="https://i.pravatar.cc/44?img=10" alt="praveen kodekal" />
               <div>
-                <strong>Priya Sharma</strong>
-                <span>Home Chef</span>
+                <strong>Praveen Kodekal</strong>
+                <span>Restaurant Owner</span>
               </div>
             </div>
           </div>
