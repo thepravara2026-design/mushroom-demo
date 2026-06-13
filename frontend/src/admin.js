@@ -154,7 +154,7 @@ async function fetchDashboardData() {
     fetchAdminInventory(),
     fetchAdminOrders(),
     fetchAdminCategories(),
-    fetchAdminTrainings().catch(() => {}),
+    fetchAdminTrainings().catch(() => { }),
   ]);
 }
 
@@ -238,7 +238,7 @@ function updateCategoryImagePreview() {
   if (file) {
     const reader = new FileReader();
     reader.onload = () => {
-        categoryImagePreview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
+      categoryImagePreview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
     };
     reader.readAsDataURL(file);
     return;
@@ -285,7 +285,7 @@ function renderUploadPreview(preview, file, url, label) {
     const reader = new FileReader();
     preview.dataset.previewValid = 'false';
     reader.onload = () => {
-        preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
+      preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
       preview.dataset.previewValid = 'true';
       productImagePreviewValid = true;
     };
@@ -443,14 +443,14 @@ function renderAdminInventory() {
   grid.innerHTML = `
     <div class="admin-product-grid">
       ${pageProducts
-    .map((p) => {
-          // stock display removed (inventory managed separately)
-      const categoryObj = _adminCategories.find((c) => c.id === p.category);
-      const categoryName = categoryObj ? categoryObj.name : 'Unknown';
-      const categoryId = categoryObj
-        ? categoryObj.category_id || categoryObj.categoryId || ''
-        : '';
-      return `
+      .map((p) => {
+        // stock display removed (inventory managed separately)
+        const categoryObj = _adminCategories.find((c) => c.id === p.category);
+        const categoryName = categoryObj ? categoryObj.name : 'Unknown';
+        const categoryId = categoryObj
+          ? categoryObj.category_id || categoryObj.categoryId || ''
+          : '';
+        return `
           <div class="admin-product-card" data-id="${p.id}">
             <div class="admin-card-meta">
               <img src="${p.image_url}" alt="${p.name}">
@@ -485,8 +485,8 @@ function renderAdminInventory() {
             </div>
           </div>
         `;
-    })
-    .join('')}
+      })
+      .join('')}
     </div>
     <div class="admin-pagination">
       <div class="admin-pagination-info">Showing ${pageStart + 1}–${pageEnd} of ${products.length} products</div>
@@ -641,9 +641,9 @@ function renderAdminOrders(orders) {
     return;
   }
 
-  const statusSteps = ['pending', 'processing', 'shipped', 'delivered'];
+  const statusSteps = ['placed', 'processing', 'shipped', 'delivered'];
   const statusLabels = {
-    pending: 'Pending',
+    placed: 'Placed',
     processing: 'Processing',
     shipped: 'Shipped',
     delivered: 'Delivered',
@@ -679,7 +679,7 @@ function renderAdminOrders(orders) {
       <div class="admin-order-items-single">${itemRows}</div>
     `;
 
-      const currentStage = statusSteps.indexOf(o.delivery_status || 'pending');
+      const currentStage = statusSteps.indexOf(o.delivery_status || 'placed');
       const progressSteps = statusSteps
         .map(
           (step, index) => `
@@ -717,21 +717,20 @@ function renderAdminOrders(orders) {
 
           <div class="admin-order-card-section admin-order-actions-panel">
             <div class="admin-order-section-title">Shipment status</div>
-            ${
-  o.delivery_status === 'cancelled'
-    ? `
+            ${o.delivery_status === 'cancelled'
+          ? `
               <div class="admin-order-cancelled-note">
                 <div class="admin-order-cancelled-label">Cancelled</div>
                 <div class="admin-order-cancelled-subtitle">Cancelled by ${o.cancelled_by === 'admin' ? 'admin' : 'user'}</div>
                 <div class="admin-order-cancelled-reason">${o.cancel_reason || 'Reason not provided'}</div>
               </div>
             `
-    : `
+          : `
               <select class="admin-ship-select" onchange="globalThis.adminUpdateShipping('${o.id}', this.value)">
-                <option value="pending" ${o.delivery_status === 'pending' ? 'selected' : ''}>Pending</option>
-                <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''}>Processing</option>
-                <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''}>Shipped</option>
-                <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''}>Delivered</option>
+                <option value="placed" ${o.delivery_status === 'placed' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 0 ? 'disabled' : ''}>Placed</option>
+                <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 1 ? 'disabled' : ''}>Processing</option>
+                <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 2 ? 'disabled' : ''}>Shipped</option>
+                <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 3 ? 'disabled' : ''}>Delivered</option>
               </select>
               <div class="admin-order-cancel-controls">
                 <label class="admin-cancel-label" for="admin-cancel-reason-${o.id}">Cancel reason</label>
@@ -747,23 +746,22 @@ function renderAdminOrders(orders) {
                 <button class="btn btn-danger admin-cancel-btn" onclick="globalThis.adminCancelOrder('${o.id}')">Cancel order</button>
               </div>
             `
-}
+        }
             <div class="admin-order-summary-block">
               <div><span>Order total</span><strong>₹${o.total.toFixed(2)}</strong></div>
               <div><span>Payment mode</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
               <div><span>Transaction</span><strong>${o.transaction_id || o.razorpay_payment_id || 'Pending'}</strong></div>
               <div><span>Customer</span><strong>${customerName}</strong></div>
             </div>
-            ${
-  invoiceLink
-    ? `
+            ${invoiceLink && ['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)
+          ? `
               <div class="admin-order-summary-block" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="btn btn-secondary" onclick="globalThis.open('${invoiceLink}','_blank')">Open Invoice</button>
                 <button class="btn btn-secondary" onclick="globalThis.copyInvoiceLink('${o.invoice_token}')">Copy Link</button>
               </div>
             `
-    : ''
-}
+          : ''
+        }
           </div>
         </div>
 
@@ -782,6 +780,25 @@ function renderAdminOrders(orders) {
     `;
     })
     .join('');
+}
+
+function copyInvoiceLink(token) {
+  if (!token) return;
+  const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${token}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard
+      .writeText(invoiceUrl)
+      .then(() => showSuccessToast('Invoice share link copied to clipboard.'))
+      .catch(() => showErrorToast('Could not copy invoice link.'));
+  } else {
+    const textarea = document.createElement('textarea');
+    textarea.value = invoiceUrl;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+    showSuccessToast('Invoice share link copied to clipboard.');
+  }
 }
 
 async function adminUpdateShipping(orderId, status) {
@@ -861,7 +878,7 @@ function renderAdminFilterValueControl(filterType) {
       html = `
         <select id="admin-filter-value-input" class="admin-filter-input">
           <option value="">All statuses</option>
-          <option value="pending">Pending</option>
+          <option value="placed">Placed</option>
           <option value="processing">Processing</option>
           <option value="shipped">Shipped</option>
           <option value="delivered">Delivered</option>
@@ -1193,7 +1210,7 @@ async function adminCancelOrder(orderId) {
     return;
   }
 
-    if (reason === 'Other') {
+  if (reason === 'Other') {
     const otherText = document.getElementById(`admin-cancel-other-${orderId}`);
     if (!otherText?.value?.trim()) {
       showErrorToast('Please specify a cancellation reason.');
@@ -1859,14 +1876,19 @@ function setupAdminEventHandlers() {
   globalThis.adminDeleteCategory = adminDeleteCategory;
   globalThis.adminEditTraining = adminEditTraining;
   globalThis.adminDeleteTraining = adminDeleteTraining;
+  globalThis.copyInvoiceLink = copyInvoiceLink;
 }
 
 function initAdminPage() {
   setupAdminEventHandlers();
-  // Initialize UI state
-  if (state.token && state.user) {
+  // Initialize UI state — only show dashboard if the logged-in user is an admin
+  if (state.token && state.user && state.user.role === 'admin') {
     showDashboard();
   } else {
+    // If a non-admin user is logged in, clear their auth so the admin login works cleanly
+    if (state.token && state.user && state.user.role !== 'admin') {
+      clearAuth();
+    }
     showLoginPanel();
   }
 }

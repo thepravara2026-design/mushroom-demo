@@ -1,14 +1,47 @@
-import { state, saveUserProfile, deleteUserProfile } from '../utils/state.js';
+import { state, saveUserProfile, deleteUserProfile, saveCart } from '../utils/state.js';
 import { fetchWithAuth, API_BASE, getApiErrorMessage } from '../api/client.js';
 import { showErrorToast, showSuccessToast } from '../utils/notify.js';
+
+const STATE_CITIES = {
+  "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kurnool", "Rajahmundry", "Kadapa"],
+  "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tawang"],
+  "Assam": ["Guwahati", "Dibrugarh", "Silchar", "Jorhat", "Nagaon", "Tinsukia"],
+  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Ara"],
+  "Chhattisgarh": ["Raipur", "Bhilai", "Bilaspur", "Korba", "Rajnandgaon"],
+  "Delhi": ["New Delhi", "Delhi Cantt", "Dwarka", "Rohini", "Saket", "Vasant Kunj"],
+  "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa"],
+  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar"],
+  "Haryana": ["Faridabad", "Gurugram", "Panipat", "Ambala", "Yamunanagar", "Rohtak", "Hisar"],
+  "Himachal Pradesh": ["Shimla", "Dharamshala", "Solan", "Mandi"],
+  "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Deoghar"],
+  "Karnataka": ["Bengaluru", "Davangere", "Mysuru", "Hubballi", "Mangaluru", "Belagavi", "Tumakuru", "Ballari", "Shimoga"],
+  "Kerala": ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur", "Kollam", "Alappuzha", "Palakkad"],
+  "Madhya Pradesh": ["Indore", "Bhopal", "Jabalpur", "Gwalior", "Ujjain", "Sagar", "Dewas"],
+  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Kalyan-Dombivli", "Vasai-Virar", "Aurangabad", "Navi Mumbai", "Solapur"],
+  "Manipur": ["Imphal", "Thoubal"],
+  "Meghalaya": ["Shillong", "Tura"],
+  "Mizoram": ["Aizawl", "Lunglei"],
+  "Nagaland": ["Dimapur", "Kohima"],
+  "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Berhampur", "Sambalpur"],
+  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda"],
+  "Rajasthan": ["Jaipur", "Jodhpur", "Udaipur", "Kota", "Bikaner", "Ajmer", "Bhilwara"],
+  "Sikkim": ["Gangtok", "Namchi"],
+  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tiruppur", "Erode", "Vellore"],
+  "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar", "Khammam", "Ramagundam"],
+  "Tripura": ["Agartala", "Dharmanagar"],
+  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Meerut", "Varanasi", "Prayagraj", "Noida", "Greater Noida", "Bareilly", "Aligarh"],
+  "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani"],
+  "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "Siliguri", "Asansol", "Durgapur", "Kharagpur"]
+};
 
 class ProfileModal {
   constructor() {
     this.modal = null;
   }
 
-  async open() {
+  async open(initialTab = 'details') {
     this.close();
+    this.initialTab = initialTab;
     this.modal = document.createElement('div');
     this.modal.className = 'modal-overlay open';
     this.modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
@@ -22,24 +55,13 @@ class ProfileModal {
           </div>
           <div class="profile-modal-actions">
             <button id="btn-profile-logout" class="btn btn-secondary profile-mini-btn">Logout</button>
-            <button id="btn-profile-close" class="btn btn-primary profile-mini-btn">Close</button>
+            <button id="btn-profile-close" class="btn btn-primary profile-mini-btn">Shop</button>
           </div>
         </div>
         <div class="profile-modal-content">
-          <div class="profile-main-column">
+          <div class="profile-main-column" style="width: 100%;">
             <div id="profile-main"></div>
           </div>
-          <aside class="profile-sidebar">
-            <div class="profile-sidebar-card">
-              <h4>Quick actions</h4>
-              <p class="profile-sidebar-copy">Refresh your latest orders, clear local profile data, or manage your account quickly from one place.</p>
-              <div class="profile-sidebar-buttons">
-                <button id="btn-view-orders" class="btn btn-secondary profile-sidebar-btn">Refresh Orders</button>
-                <button id="btn-clear-local" class="btn btn-secondary profile-sidebar-btn">Clear Local Profile</button>
-                <button id="btn-delete-account" class="btn btn-danger profile-sidebar-btn">Delete Account</button>
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
     `;
@@ -67,18 +89,8 @@ class ProfileModal {
       .getElementById('btn-profile-logout')
       ?.addEventListener('click', () => this.logout());
     document
-      .getElementById('btn-delete-account')
-      ?.addEventListener('click', () => this.handleDelete());
-    document
-      .getElementById('btn-view-orders')
-      ?.addEventListener('click', () => this.renderOrders(true));
-    document
-      .getElementById('btn-clear-local')
-      ?.addEventListener('click', () => {
-        deleteUserProfile();
-        window.dispatchEvent(new Event('auth:changed'));
-        this.close();
-      });
+      .getElementById('btn-profile-logout')
+      ?.addEventListener('click', () => this.logout());
 
     this.renderProfile();
     this.renderOrders();
@@ -117,86 +129,289 @@ class ProfileModal {
   }
 
   async renderProfile() {
+    const mainCol = this.modal.querySelector('.profile-main-column');
+    const container = this.modal.querySelector('#profile-main');
+
+    let tabsContainer = this.modal.querySelector('.profile-tabs');
+    if (!tabsContainer) {
+      tabsContainer = document.createElement('div');
+      tabsContainer.className = 'profile-tabs';
+      tabsContainer.style.cssText = 'display:flex;gap:1rem;margin-bottom:1.5rem;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;overflow-x:auto;';
+      tabsContainer.innerHTML = `
+        <button class="profile-tab-btn active" data-tab="details" style="background:none;border:none;font-weight:600;color:var(--color-primary);cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid var(--color-primary);">My Details</button>
+        <button class="profile-tab-btn" data-tab="orders" style="background:none;border:none;font-weight:500;color:#64748b;cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid transparent;">My Orders</button>
+        <button class="profile-tab-btn" data-tab="recent" style="background:none;border:none;font-weight:500;color:#64748b;cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid transparent;">Recent Orders</button>
+        <button class="profile-tab-btn" data-tab="quick_actions" style="background:none;border:none;font-weight:500;color:#64748b;cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid transparent;">Quick Actions</button>
+      `;
+      mainCol.insertBefore(tabsContainer, container);
+
+      tabsContainer.querySelectorAll('.profile-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          tabsContainer.querySelectorAll('.profile-tab-btn').forEach(b => {
+            b.classList.remove('active');
+            b.style.fontWeight = '500';
+            b.style.color = '#64748b';
+            b.style.borderBottom = '2px solid transparent';
+          });
+          btn.classList.add('active');
+          btn.style.fontWeight = '600';
+          btn.style.color = 'var(--color-primary)';
+          btn.style.borderBottom = '2px solid var(--color-primary)';
+          this.activeTab = btn.dataset.tab;
+          this.renderTabContent();
+        });
+      });
+      this.activeTab = this.initialTab || 'details';
+
+      // Select the active tab button visually
+      const activeBtn = tabsContainer.querySelector(`[data-tab="${this.activeTab}"]`);
+      if (activeBtn) {
+        tabsContainer.querySelectorAll('.profile-tab-btn').forEach(b => {
+          b.classList.remove('active');
+          b.style.fontWeight = '500';
+          b.style.color = '#64748b';
+          b.style.borderBottom = '2px solid transparent';
+        });
+        activeBtn.classList.add('active');
+        activeBtn.style.fontWeight = '600';
+        activeBtn.style.color = 'var(--color-primary)';
+        activeBtn.style.borderBottom = '2px solid var(--color-primary)';
+      }
+    }
+    this.renderTabContent();
+  }
+
+  renderTabContent() {
     const container = this.modal.querySelector('#profile-main');
     const user = state.user || {};
-    const loginMethod = user.loginMethod
-      || (user.whatsappNumber ? 'phone' : user.email ? 'email' : 'guest');
+    const loginMethod = user.loginMethod || (user.whatsappNumber ? 'phone' : user.email ? 'email' : 'guest');
 
-    container.innerHTML = `
-      <section class="profile-summary-card">
-        <div class="profile-summary-content">
-          <p class="profile-overline">Account overview</p>
-          <h4>Welcome back, ${user.fullName || 'Sporekart user'}</h4>
-          <p class="profile-copy">Update your contact details and shipping preferences to keep orders moving smoothly.</p>
-        </div>
-        <div class="profile-summary-meta">
-          <span class="profile-pill">${(user.role || 'buyer').toUpperCase()}</span>
-        </div>
-      </section>
+    if (this.activeTab === 'details') {
+      container.innerHTML = `
+        <section class="profile-summary-card">
+          <div class="profile-summary-content">
+            <p class="profile-overline">Account overview</p>
+            <h4>Welcome back, ${user.fullName || 'Sporekart user'}</h4>
+            <p class="profile-copy">Update your contact details and shipping preferences to keep orders moving smoothly.</p>
+          </div>
+          <div class="profile-summary-meta" style="display:flex; align-items:center; gap: 1rem;">
+            <div class="profile-avatar-container" style="position:relative; width: 64px; height: 64px; border-radius: 50%; overflow: hidden; border: 2px solid var(--color-primary); cursor: pointer;" onclick="document.getElementById('avatar-upload').click()">
+              <img id="profile-avatar-img" src="${user.avatarUrl || '/images/default_avatar.png'}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='/images/default_avatar.png'">
+              <div style="position:absolute; bottom:0; left:0; right:0; background: rgba(0,0,0,0.5); color: white; font-size: 10px; text-align: center; padding: 2px 0;">Edit</div>
+            </div>
+            <input type="file" id="avatar-upload" accept="image/*" style="display: none;" onchange="window.profileModal.handleAvatarChange(event)">
+            <span class="profile-pill">${(user.role || 'buyer').toUpperCase()}</span>
+          </div>
+        </section>
 
-      <section class="profile-form-card">
-        <div class="profile-card-header">
-          <div>
-            <h4>Basic details</h4>
-            <p class="profile-card-subtitle">Your personal information and default delivery address.</p>
+        <section class="profile-form-card">
+          <div class="profile-card-header" style="cursor:pointer;" onclick="this.parentElement.querySelector('.profile-field-grid').classList.toggle('hidden'); this.querySelector('.profile-toggle-icon').classList.toggle('fa-chevron-down'); this.querySelector('.profile-toggle-icon').classList.toggle('fa-chevron-up');">
+            <div>
+              <h4>Basic details <i class="fa-solid fa-chevron-down profile-toggle-icon" style="font-size:0.8rem;margin-left:6px;"></i></h4>
+              <p class="profile-card-subtitle">Your personal information and default delivery address.</p>
+            </div>
           </div>
-        </div>
-        <div class="profile-field-grid">
-          <div class="input-field">
-            <label>Full name</label>
-            <input id="profile-fullname" value="${user.fullName || ''}" class="profile-input">
+          <div class="profile-field-grid hidden">
+            <div class="input-field">
+              <label>Full name</label>
+              <input id="profile-fullname" value="${user.fullName || ''}" class="profile-input">
+            </div>
+            <div class="input-field">
+              <label>Email</label>
+              <input id="profile-email" value="${user.email || ''}" class="profile-input" ${loginMethod === 'google' ? 'disabled' : ''}>
+            </div>
+            <div class="input-field">
+              <label>Phone</label>
+              <input id="profile-phone" value="${user.whatsappNumber || ''}" class="profile-input" ${loginMethod === 'phone' ? 'disabled' : ''}>
+            </div>
+            <div class="input-field">
+              <label>Role</label>
+              <input value="${user.role || 'buyer'}" disabled class="profile-input">
+            </div>
+            <div class="input-field" style="grid-column: 1 / -1;">
+              <label>Address Line 1 <span style="color:var(--color-danger)">*</span></label>
+              <input id="profile-address-line1" value="${user.addressLine1 || ''}" class="profile-input" placeholder="House/Flat No, Building, Street">
+            </div>
+            <div class="input-field" style="grid-column: 1 / -1;">
+              <label>Address Line 2 <span style="color:var(--color-danger)">*</span></label>
+              <input id="profile-address-line2" value="${user.addressLine2 || ''}" class="profile-input" placeholder="Area, Sector, Locality">
+            </div>
+            <div class="input-field">
+              <label>Landmark <span style="color:var(--color-danger)">*</span></label>
+              <input id="profile-landmark" value="${user.landmark || ''}" class="profile-input" placeholder="Near XYZ">
+            </div>
+            <div class="input-field">
+              <label>Pincode <span style="color:var(--color-danger)">*</span></label>
+              <input id="profile-pincode" value="${user.defaultPincode || ''}" class="profile-input">
+            </div>
+            <div class="input-field">
+              <label>State <span style="color:var(--color-danger)">*</span></label>
+              <select id="profile-state" class="profile-input" style="background: #fff; color: var(--color-text-dark);"></select>
+            </div>
+            <div class="input-field">
+              <label>City <span style="color:var(--color-danger)">*</span></label>
+              <select id="profile-city" class="profile-input" style="background: #fff; color: var(--color-text-dark);"></select>
+            </div>
+            <div class="input-field" style="grid-column: 1 / -1;">
+              <label>Default Address (Legacy)</label>
+              <input id="profile-address" value="${user.defaultAddress || ''}" class="profile-input" disabled>
+            </div>
           </div>
-          <div class="input-field">
-            <label>Email</label>
-            <input id="profile-email" value="${user.email || ''}" class="profile-input" ${loginMethod === 'google' ? 'disabled' : ''}>
+          <div class="profile-form-footer">
+            <button id="btn-save-profile" class="btn btn-primary">Save changes</button>
           </div>
-          <div class="input-field">
-            <label>Phone</label>
-            <input id="profile-phone" value="${user.whatsappNumber || ''}" class="profile-input" ${loginMethod === 'phone' ? 'disabled' : ''}>
-          </div>
-          <div class="input-field">
-            <label>Role</label>
-            <input value="${user.role || 'buyer'}" disabled class="profile-input">
-          </div>
-          <div class="input-field">
-            <label>Default pincode</label>
-            <input id="profile-pincode" value="${user.defaultPincode || ''}" class="profile-input">
-          </div>
-          <div class="input-field">
-            <label>Default address</label>
-            <input id="profile-address" value="${user.defaultAddress || ''}" class="profile-input">
-          </div>
-        </div>
-        <div class="profile-form-footer">
-          <button id="btn-save-profile" class="btn btn-primary">Save changes</button>
-        </div>
-      </section>
+        </section>
 
-      <section class="profile-card profile-section">
-        <div class="profile-card-header">
-          <div>
-            <h4>Current cart</h4>
-            <p class="profile-card-subtitle">A quick snapshot of the items you are ready to purchase.</p>
+        <section class="profile-card profile-section">
+          <div class="profile-card-header">
+            <div>
+              <h4>Current cart</h4>
+              <p class="profile-card-subtitle">A quick snapshot of the items you are ready to purchase.</p>
+            </div>
           </div>
-        </div>
-        <div id="profile-cart" class="profile-cart-list"></div>
-      </section>
-
-      <section class="profile-card profile-section">
-        <div class="profile-card-header">
-          <div>
-            <h4>Tracking & Orders</h4>
-            <p class="profile-card-subtitle">Everything you need to review and manage your recent orders.</p>
+          <div id="profile-cart" class="profile-cart-list"></div>
+        </section>
+      `;
+      this.modal.querySelector('#btn-save-profile')?.addEventListener('click', () => this.saveProfile());
+      this.renderCart();
+      this.initAddressDropdownsAndPincode();
+    } else if (this.activeTab === 'orders') {
+      container.innerHTML = `
+        <section class="profile-card profile-section">
+          <div class="profile-card-header">
+            <div>
+              <h4>Active Orders</h4>
+              <p class="profile-card-subtitle">Track your current shipments.</p>
+            </div>
           </div>
-        </div>
-        <div id="profile-orders" class="profile-orders-list"></div>
-      </section>
-    `;
+          <div id="profile-active-orders" class="profile-orders-list"></div>
+        </section>
+      `;
+      this.renderOrdersList('#profile-active-orders', false);
+    } else if (this.activeTab === 'recent') {
+      container.innerHTML = `
+        <section class="profile-card profile-section">
+          <div class="profile-card-header">
+            <div>
+              <h4>Recent Orders</h4>
+              <p class="profile-card-subtitle">Your delivered and cancelled orders.</p>
+            </div>
+          </div>
+          <div id="profile-recent-orders" class="profile-orders-list"></div>
+        </section>
+      `;
+      this.renderOrdersList('#profile-recent-orders', true);
+    } else if (this.activeTab === 'quick_actions') {
+      container.innerHTML = `
+        <section class="profile-card profile-section">
+          <div class="profile-card-header">
+            <div>
+              <h4>Quick Actions</h4>
+              <p class="profile-card-subtitle">Manage your account and local data.</p>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 300px; padding: 1rem 0;">
+            <button id="tab-btn-view-orders" class="btn btn-secondary profile-sidebar-btn" style="width: 100%">Refresh Orders</button>
+            <button id="tab-btn-clear-local" class="btn btn-secondary profile-sidebar-btn" style="width: 100%">Clear Local Profile</button>
+            <button id="tab-btn-delete-account" class="btn btn-danger profile-sidebar-btn" style="width: 100%">Delete Account</button>
+          </div>
+        </section>
+      `;
 
-    this.modal
-      .querySelector('#btn-save-profile')
-      ?.addEventListener('click', () => this.saveProfile());
-    this.renderCart();
+      this.modal.querySelector('#tab-btn-view-orders')?.addEventListener('click', () => this.renderOrders(true));
+      this.modal.querySelector('#tab-btn-clear-local')?.addEventListener('click', () => {
+        deleteUserProfile();
+        window.dispatchEvent(new Event('auth:changed'));
+        this.close();
+      });
+      this.modal.querySelector('#tab-btn-delete-account')?.addEventListener('click', () => this.handleDelete());
+    }
+  }
+
+  initAddressDropdownsAndPincode() {
+    const user = state.user || {};
+    const stateSelect = this.modal.querySelector('#profile-state');
+    const citySelect = this.modal.querySelector('#profile-city');
+    const pincodeInput = this.modal.querySelector('#profile-pincode');
+
+    if (stateSelect && citySelect) {
+      // Populate state dropdown
+      stateSelect.innerHTML = '<option value="">Select State</option>' +
+        Object.keys(STATE_CITIES).map(s => `<option value="${s}">${s}</option>`).join('');
+
+      // Helper to update city dropdown based on selected state
+      const updateCitiesForState = (selectedState, defaultCity = '') => {
+        if (!selectedState || !STATE_CITIES[selectedState]) {
+          citySelect.innerHTML = '<option value="">Select State first</option>';
+          return;
+        }
+        const cities = STATE_CITIES[selectedState];
+        citySelect.innerHTML = '<option value="">Select City</option>' +
+          cities.map(c => `<option value="${c}">${c}</option>`).join('');
+
+        if (defaultCity) {
+          if (!cities.includes(defaultCity)) {
+            const opt = document.createElement('option');
+            opt.value = defaultCity;
+            opt.textContent = defaultCity;
+            citySelect.appendChild(opt);
+          }
+          citySelect.value = defaultCity;
+        }
+      };
+
+      // Set initial values
+      const initialState = user.state || '';
+      const initialCity = user.city || '';
+      if (initialState) {
+        stateSelect.value = initialState;
+        updateCitiesForState(initialState, initialCity);
+      } else {
+        citySelect.innerHTML = '<option value="">Select State first</option>';
+      }
+
+      // Listen to state change
+      stateSelect.addEventListener('change', (e) => {
+        updateCitiesForState(e.target.value);
+      });
+
+      // Pincode autofill
+      if (pincodeInput) {
+        const handlePincodeAutofill = async () => {
+          const pin = pincodeInput.value.trim();
+          if (pin.length === 6 && /^\d{6}$/.test(pin)) {
+            try {
+              const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+              const data = await res.json();
+              if (data && data[0] && data[0].Status === 'Success') {
+                const postOffice = data[0].PostOffice[0];
+                const fetchedState = postOffice.State || '';
+                const fetchedCity = postOffice.District || postOffice.Region || '';
+
+                if (fetchedState) {
+                  if (!STATE_CITIES[fetchedState]) {
+                    const opt = document.createElement('option');
+                    opt.value = fetchedState;
+                    opt.textContent = fetchedState;
+                    stateSelect.appendChild(opt);
+                  }
+                  stateSelect.value = fetchedState;
+                  updateCitiesForState(fetchedState, fetchedCity);
+                }
+              }
+            } catch (err) {
+              console.error('Failed to fetch pincode details in profile', err);
+            }
+          }
+        };
+
+        pincodeInput.addEventListener('input', handlePincodeAutofill);
+        // Trigger if initial pincode exists
+        if (pincodeInput.value) {
+          handlePincodeAutofill();
+        }
+      }
+    }
   }
 
   renderCart() {
@@ -214,9 +429,6 @@ class ProfileModal {
   }
 
   async renderOrders(forceRefresh = false) {
-    const el = this.modal.querySelector('#profile-orders');
-    if (!el) return;
-    el.innerHTML = '<div style="color:#64748b">Loading orders…</div>';
     try {
       let orders = state.orders || [];
       if (state.token && (forceRefresh || !orders.length)) {
@@ -224,20 +436,38 @@ class ProfileModal {
         orders = await fetchWithAuth('/orders/my-orders');
         state.orders = orders;
       }
-      if (!orders || !orders.length) {
-        el.innerHTML = '<div>No recent orders.</div>';
-        return;
+      if (this.activeTab === 'orders' || this.activeTab === 'recent') {
+        this.renderTabContent();
       }
-      el.innerHTML = orders
-        .slice(0, 10)
-        .map((o) => this.renderOrderCard(o))
-        .join('');
     } catch (err) {
-      el.innerHTML = `<div style="color:#b91c1c">Unable to load orders: ${err.message || err}</div>`;
+      console.error(err);
     }
   }
 
-  renderOrderCard(o) {
+  renderOrdersList(selector, isRecent) {
+    const el = this.modal.querySelector(selector);
+    if (!el) return;
+
+    let orders = state.orders || [];
+
+    let filteredOrders = orders.filter(o => {
+      const status = o.delivery_status || o.status || 'pending';
+      const isCompleted = ['delivered', 'cancelled'].includes(status);
+      return isRecent ? isCompleted : !isCompleted;
+    });
+
+    if (!filteredOrders.length) {
+      el.innerHTML = `<div>No ${isRecent ? 'recent' : 'active'} orders.</div>`;
+      return;
+    }
+
+    el.innerHTML = filteredOrders
+      .slice(0, 15)
+      .map((o) => this.renderOrderCard(o, isRecent))
+      .join('');
+  }
+
+  renderOrderCard(o, isRecent = false) {
     const placed = new Date(
       o.created_at || o.createdAt || o.orderedAt || Date.now(),
     ).toLocaleString();
@@ -258,8 +488,8 @@ class ProfileModal {
       ? `<div class="profile-order-items">
           <div class="profile-order-items-label">Ordered items</div>
           <ul>${items
-            .map((item) => `<li>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</li>`)
-            .join('')}</ul>
+        .map((item) => `<li>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</li>`)
+        .join('')}</ul>
         </div>`
       : '';
 
@@ -276,9 +506,13 @@ class ProfileModal {
       ${trackingHtml}
       ${cancelNote}
       <div class="profile-order-actions">
-        <button class="btn btn-secondary" onclick="window.viewInvoice('${o.id}')">View invoice</button>
-        ${shareLink ? `<button class="btn btn-secondary" data-share-url="${shareLink}" onclick="window.open(this.dataset.shareUrl,'_blank')">Share invoice</button><button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy invoice link</button>` : ''}
+        ${['shipped', 'in_transit', 'delivered'].includes(status) ? `
+          <button class="btn btn-secondary" onclick="window.viewInvoice('${o.id}')">View invoice</button>
+          ${shareLink ? `<button class="btn btn-secondary" data-share-url="${shareLink}" onclick="window.open(this.dataset.shareUrl,'_blank')">Share invoice</button><button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy invoice link</button>` : ''}
+        ` : ''}
         ${canCancel ? `<button class="btn btn-cancel profile-order-cancel" onclick="window.cancelOrderFromProfile('${o.id}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
+        ${status === 'delivered' && !o.rating ? `<button class="btn btn-primary" onclick="window.openReviewModal('${o.id}')"><i class="fa-solid fa-star"></i> Leave a Review</button>` : ''}
+        ${isRecent ? `<button class="btn btn-primary" onclick="window.orderAgainFromProfile('${o.id}')"><i class="fa-solid fa-rotate-right"></i> Order Again</button>` : ''}
       </div>
     </div>`;
   }
@@ -351,29 +585,159 @@ class ProfileModal {
     return html;
   }
 
+  async handleAvatarChange(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      showErrorToast('Image size should be less than 2MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64Img = e.target.result;
+      document.getElementById('profile-avatar-img').src = base64Img;
+      // Wait for user to click "Save changes" or save immediately? 
+      // Saving automatically is better UX for avatars
+      this.tempAvatarData = base64Img;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  initAddressDropdownsAndPincode() {
+    const stateSelect = this.modal.querySelector('#profile-state');
+    const citySelect = this.modal.querySelector('#profile-city');
+    const pincodeInput = this.modal.querySelector('#profile-pincode');
+    if (!stateSelect || !citySelect || !pincodeInput) return;
+
+    // Populate states
+    stateSelect.innerHTML = '<option value="">Select State</option>';
+    Object.keys(STATE_CITIES).sort().forEach(state => {
+      const opt = document.createElement('option');
+      opt.value = state;
+      opt.textContent = state;
+      stateSelect.appendChild(opt);
+    });
+
+    const updateCities = (stateVal, defaultCity = '') => {
+      citySelect.innerHTML = '<option value="">Select City</option>';
+      if (stateVal && STATE_CITIES[stateVal]) {
+        STATE_CITIES[stateVal].sort().forEach(city => {
+          const opt = document.createElement('option');
+          opt.value = city;
+          opt.textContent = city;
+          citySelect.appendChild(opt);
+        });
+      }
+      if (defaultCity) {
+        citySelect.value = defaultCity;
+      }
+    };
+
+    stateSelect.addEventListener('change', (e) => {
+      updateCities(e.target.value);
+    });
+
+    // Handle Pincode Auto-select (mock logic for demo)
+    pincodeInput.addEventListener('blur', (e) => {
+      const pin = e.target.value.trim();
+      if (pin.length === 6) {
+        // Mock lookup: if it starts with 1, Delhi. If 4, Maharashtra. If 5, Karnataka. Else, just random logic or do nothing.
+        let detectedState = '';
+        let detectedCity = '';
+        if (pin.startsWith('1')) {
+          detectedState = 'Delhi';
+          detectedCity = 'New Delhi';
+        } else if (pin.startsWith('4')) {
+          detectedState = 'Maharashtra';
+          detectedCity = 'Mumbai';
+        } else if (pin.startsWith('5')) {
+          detectedState = 'Karnataka';
+          detectedCity = 'Bengaluru';
+        } else if (pin.startsWith('6')) {
+          detectedState = 'Tamil Nadu';
+          detectedCity = 'Chennai';
+        }
+
+        if (detectedState) {
+          stateSelect.value = detectedState;
+          updateCities(detectedState, detectedCity);
+        }
+      }
+    });
+
+    // Set initial values
+    const user = state.user || {};
+    if (user.state) {
+      stateSelect.value = user.state;
+      updateCities(user.state, user.city);
+    }
+  }
+
   saveProfile() {
     const fullName = this.modal.querySelector('#profile-fullname')?.value.trim() || '';
     const email = this.modal.querySelector('#profile-email')?.value.trim() || '';
     const phone = this.modal.querySelector('#profile-phone')?.value.trim() || '';
+    const addressLine1 = this.modal.querySelector('#profile-address-line1')?.value.trim() || '';
+    const addressLine2 = this.modal.querySelector('#profile-address-line2')?.value.trim() || '';
+    const landmark = this.modal.querySelector('#profile-landmark')?.value.trim() || '';
+    const city = this.modal.querySelector('#profile-city')?.value.trim() || '';
+    const stateVal = this.modal.querySelector('#profile-state')?.value.trim() || '';
+    const pincodeVal = this.modal.querySelector('#profile-pincode')?.value.trim() || '';
+
+    if (!fullName) {
+      showErrorToast('Full name is required.');
+      return;
+    }
+    if (!email) {
+      showErrorToast('Email is required.');
+      return;
+    }
+    if (!phone) {
+      showErrorToast('Phone number is required.');
+      return;
+    }
+    if (phone.replace(/\D/g, '').length < 10 || phone.replace(/\D/g, '').length > 15) {
+      showErrorToast('Enter a valid phone number (10-15 digits).');
+      return;
+    }
+    if (!addressLine1 || !addressLine2 || !landmark || !city || !stateVal || !pincodeVal) {
+      showErrorToast('All address fields (Line 1, Line 2, Landmark, Pincode, City, State) are mandatory.');
+      return;
+    }
+    if (!/^\d{6}$/.test(pincodeVal)) {
+      showErrorToast('Enter a valid 6-digit pincode.');
+      return;
+    }
+
+    const addressParts = [addressLine1, addressLine2, landmark, city, stateVal, pincodeVal ? 'Pincode: ' + pincodeVal : ''].filter(Boolean);
+    const addressVal = addressParts.join(', ');
+
     const user = { ...(state.user || {}) };
     // apply edits only to allowed fields
     if (user.loginMethod !== 'google') user.email = email;
     if (user.loginMethod !== 'phone') user.whatsappNumber = phone;
     user.fullName = fullName;
+    if (this.tempAvatarData) {
+      user.avatarUrl = this.tempAvatarData;
+    }
+
     // If authenticated, persist to server
     if (state.token) {
       (async () => {
         try {
-          const payload = { fullName: user.fullName };
+          const payload = {
+            fullName: user.fullName,
+            address_line1: addressLine1,
+            address_line2: addressLine2,
+            landmark: landmark,
+            city: city,
+            state: stateVal,
+          };
           if (user.loginMethod !== 'google') payload.email = user.email;
           if (user.loginMethod !== 'phone') payload.whatsappNumber = user.whatsappNumber;
-          // include default address and pincode if present in inputs
-          const pincodeVal = this.modal
-            .querySelector('#profile-pincode')
-            ?.value.trim();
-          const addressVal = this.modal
-            .querySelector('#profile-address')
-            ?.value.trim();
+          if (this.tempAvatarData) payload.avatar_url = this.tempAvatarData;
           if (typeof pincodeVal === 'string') payload.default_pincode = pincodeVal;
           if (typeof addressVal === 'string') payload.default_address = addressVal;
 
@@ -390,6 +754,12 @@ class ProfileModal {
             whatsappNumber: updated.whatsappNumber,
             role: updated.role,
             loginMethod: updated.loginMethod || user.loginMethod,
+            avatarUrl: updated.avatarUrl || user.avatarUrl,
+            addressLine1: updated.addressLine1 || user.addressLine1 || addressLine1,
+            addressLine2: updated.addressLine2 || user.addressLine2 || addressLine2,
+            landmark: updated.landmark || user.landmark || landmark,
+            city: updated.city || user.city || city,
+            state: updated.state || user.state || stateVal,
             defaultAddress:
               updated.defaultAddress || addressVal || user.defaultAddress || '',
             defaultPincode:
@@ -406,12 +776,14 @@ class ProfileModal {
     }
 
     // unauthenticated fallback: save local address fields
-    user.defaultPincode = this.modal.querySelector('#profile-pincode')?.value.trim()
-      || user.defaultPincode
-      || '';
-    user.defaultAddress = this.modal.querySelector('#profile-address')?.value.trim()
-      || user.defaultAddress
-      || '';
+    user.defaultPincode = pincodeVal;
+    user.defaultAddress = addressVal;
+    user.addressLine1 = addressLine1;
+    user.addressLine2 = addressLine2;
+    user.landmark = landmark;
+    user.city = city;
+    user.state = stateVal;
+
     saveUserProfile(user);
     window.dispatchEvent(new Event('auth:changed'));
     showSuccessToast('Profile saved locally.');
@@ -449,6 +821,34 @@ class ProfileModal {
     }
   }
 
+  async orderAgain(orderId) {
+    const order = (state.orders || []).find((o) => String(o.id) === String(orderId));
+    if (!order || !order.items) return;
+
+    if (!state.cart) state.cart = [];
+
+    for (const item of order.items) {
+      const existing = state.cart.find((i) => String(i.id) === String(item.product_id || item.id));
+      if (existing) {
+        existing.quantity += Number(item.quantity || 1);
+      } else {
+        state.cart.push({
+          id: item.product_id || item.id,
+          name: item.name || item.product_name || 'Product',
+          price: item.price || 0,
+          image_url: item.image_url || '/images/product_fresh.png',
+          quantity: Number(item.quantity || 1)
+        });
+      }
+    }
+
+    saveCart();
+    window.dispatchEvent(new Event('cart:updated'));
+    showSuccessToast('Items added to cart!');
+    this.close();
+    if (window.toggleCart) window.toggleCart(true);
+  }
+
   async handleDelete() {
     const doDelete = confirm(
       'Delete account? This will remove your account. This action cannot be undone. Proceed?',
@@ -478,5 +878,7 @@ class ProfileModal {
 }
 
 const _profileModal = new ProfileModal();
+window.profileModal = _profileModal;
 window.cancelOrderFromProfile = (orderId) => _profileModal.cancelOrder(orderId);
+window.orderAgainFromProfile = (orderId) => _profileModal.orderAgain(orderId);
 export const profileModal = _profileModal;

@@ -1351,9 +1351,29 @@
         </div>
 
         <div class="input-group">
-          <label for="checkout-delivery-address">Delivery address</label>
-          <textarea id="checkout-delivery-address" placeholder="House / Flat no, street, landmark, city"
-            rows="5"></textarea>
+          <label for="checkout-address-line1">Address Line 1 <span style="color:var(--color-danger)">*</span></label>
+          <input type="text" id="checkout-address-line1" placeholder="House / Flat no, Building, Street" />
+        </div>
+
+        <div class="input-group">
+          <label for="checkout-address-line2">Address Line 2 <span style="color:var(--color-danger)">*</span></label>
+          <input type="text" id="checkout-address-line2" placeholder="Area, Sector, Locality" />
+        </div>
+
+        <div class="input-group">
+          <label for="checkout-landmark">Near by Landmark <span style="color:var(--color-danger)">*</span></label>
+          <input type="text" id="checkout-landmark" placeholder="Near XYZ" />
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="input-group">
+            <label for="checkout-state">State <span style="color:var(--color-danger)">*</span></label>
+            <select id="checkout-state" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+          </div>
+          <div class="input-group">
+            <label for="checkout-city">City <span style="color:var(--color-danger)">*</span></label>
+            <select id="checkout-city" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+          </div>
         </div>
 
         <div id="checkout-page-feedback" class="auth-error-msg hidden"></div>

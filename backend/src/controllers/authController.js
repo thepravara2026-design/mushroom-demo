@@ -73,6 +73,12 @@ router.put('/me', authMiddleware, async (req, res) => {
       whatsappNumber: req.body.whatsappNumber,
       defaultAddress: req.body.default_address,
       defaultPincode: req.body.default_pincode,
+      avatarUrl: req.body.avatar_url,
+      addressLine1: req.body.address_line1,
+      addressLine2: req.body.address_line2,
+      landmark: req.body.landmark,
+      city: req.body.city,
+      state: req.body.state,
     };
 
     const updated = await authService.updateProfile(userId, updates);
@@ -86,6 +92,12 @@ router.put('/me', authMiddleware, async (req, res) => {
       loginMethod: updated.login_method || null,
       defaultAddress: updated.default_address || '',
       defaultPincode: updated.default_pincode || '',
+      avatarUrl: updated.avatar_url || '',
+      addressLine1: updated.address_line1 || '',
+      addressLine2: updated.address_line2 || '',
+      landmark: updated.landmark || '',
+      city: updated.city || '',
+      state: updated.state || '',
     });
   } catch (err) {
     return respondError(
@@ -153,6 +165,14 @@ router.get('/me', authMiddleware, async (req, res) => {
       fullName: user.full_name,
       whatsappNumber: user.whatsapp_number || '',
       role: user.role,
+      avatarUrl: user.avatar_url || '',
+      defaultAddress: user.default_address || '',
+      defaultPincode: user.default_pincode || '',
+      addressLine1: user.address_line1 || '',
+      addressLine2: user.address_line2 || '',
+      landmark: user.landmark || '',
+      city: user.city || '',
+      state: user.state || '',
     });
   } catch (error) {
     return respondError(

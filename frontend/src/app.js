@@ -15,6 +15,38 @@ import { showErrorToast, showSuccessToast } from './utils/notify.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
+
+const STATE_CITIES = {
+  "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kurnool", "Rajahmundry", "Kadapa"],
+  "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tawang"],
+  "Assam": ["Guwahati", "Dibrugarh", "Silchar", "Jorhat", "Nagaon", "Tinsukia"],
+  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Ara"],
+  "Chhattisgarh": ["Raipur", "Bhilai", "Bilaspur", "Korba", "Rajnandgaon"],
+  "Delhi": ["New Delhi", "Delhi Cantt", "Dwarka", "Rohini", "Saket", "Vasant Kunj"],
+  "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa"],
+  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar"],
+  "Haryana": ["Faridabad", "Gurugram", "Panipat", "Ambala", "Yamunanagar", "Rohtak", "Hisar"],
+  "Himachal Pradesh": ["Shimla", "Dharamshala", "Solan", "Mandi"],
+  "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Deoghar"],
+  "Karnataka": ["Bengaluru", "Davangere", "Mysuru", "Hubballi", "Mangaluru", "Belagavi", "Tumakuru", "Ballari", "Shimoga"],
+  "Kerala": ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur", "Kollam", "Alappuzha", "Palakkad"],
+  "Madhya Pradesh": ["Indore", "Bhopal", "Jabalpur", "Gwalior", "Ujjain", "Sagar", "Dewas"],
+  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Kalyan-Dombivli", "Vasai-Virar", "Aurangabad", "Navi Mumbai", "Solapur"],
+  "Manipur": ["Imphal", "Thoubal"],
+  "Meghalaya": ["Shillong", "Tura"],
+  "Mizoram": ["Aizawl", "Lunglei"],
+  "Nagaland": ["Dimapur", "Kohima"],
+  "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Berhampur", "Sambalpur"],
+  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda"],
+  "Rajasthan": ["Jaipur", "Jodhpur", "Udaipur", "Kota", "Bikaner", "Ajmer", "Bhilwara"],
+  "Sikkim": ["Gangtok", "Namchi"],
+  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tiruppur", "Erode", "Vellore"],
+  "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar", "Khammam", "Ramagundam"],
+  "Tripura": ["Agartala", "Dharmanagar"],
+  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Meerut", "Varanasi", "Prayagraj", "Noida", "Greater Noida", "Bareilly", "Aligarh"],
+  "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani"],
+  "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "Siliguri", "Asansol", "Durgapur", "Kharagpur"]
+};
 // Storefront pagination/sort state
 let _shopInventoryPage = 1;
 let shopPageSize = 10;
@@ -525,6 +557,76 @@ function initEventListeners() {
     });
   }
 
+  const checkoutStateSelect = document.getElementById('checkout-state');
+  const checkoutCitySelect = document.getElementById('checkout-city');
+
+  const updateCheckoutCities = (selectedState, defaultCity = '') => {
+    if (!checkoutCitySelect) return;
+    if (!selectedState || !STATE_CITIES[selectedState]) {
+      checkoutCitySelect.innerHTML = '<option value="">Select State first</option>';
+      return;
+    }
+    const cities = STATE_CITIES[selectedState];
+    checkoutCitySelect.innerHTML = '<option value="">Select City</option>' +
+      cities.map(c => `<option value="${c}">${c}</option>`).join('');
+
+    if (defaultCity) {
+      if (!cities.includes(defaultCity)) {
+        const opt = document.createElement('option');
+        opt.value = defaultCity;
+        opt.textContent = defaultCity;
+        checkoutCitySelect.appendChild(opt);
+      }
+      checkoutCitySelect.value = defaultCity;
+    }
+  };
+
+  if (checkoutStateSelect) {
+    checkoutStateSelect.innerHTML = '<option value="">Select State</option>' +
+      Object.keys(STATE_CITIES).map(s => `<option value="${s}">${s}</option>`).join('');
+
+    checkoutStateSelect.addEventListener('change', (e) => {
+      updateCheckoutCities(e.target.value);
+    });
+  }
+
+  const pincodeInput = document.getElementById('checkout-delivery-pincode');
+  if (pincodeInput) {
+    pincodeInput.addEventListener('input', async (e) => {
+      const pin = e.target.value.trim();
+      if (pin.length === 6 && /^\d{6}$/.test(pin)) {
+        try {
+          const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+          const data = await res.json();
+          if (data && data[0] && data[0].Status === 'Success') {
+            const postOffice = data[0].PostOffice[0];
+            const fetchedState = postOffice.State || '';
+            const fetchedCity = postOffice.District || postOffice.Region || '';
+
+            if (fetchedState && checkoutStateSelect) {
+              if (!STATE_CITIES[fetchedState]) {
+                const opt = document.createElement('option');
+                opt.value = fetchedState;
+                opt.textContent = fetchedState;
+                checkoutStateSelect.appendChild(opt);
+              }
+              checkoutStateSelect.value = fetchedState;
+              updateCheckoutCities(fetchedState, fetchedCity);
+            }
+          } else {
+            if (checkoutStateSelect) checkoutStateSelect.value = '';
+            if (checkoutCitySelect) checkoutCitySelect.innerHTML = '<option value="">Select State first</option>';
+          }
+        } catch (err) {
+          console.error('Failed to fetch pincode details', err);
+        }
+      } else {
+        if (checkoutStateSelect) checkoutStateSelect.value = '';
+        if (checkoutCitySelect) checkoutCitySelect.innerHTML = '<option value="">Select State first</option>';
+      }
+    });
+  }
+
   // Calculator
   document
     .getElementById('btn-calculate-substrate')
@@ -812,7 +914,7 @@ function updateAuthHeaderUI() {
     profileSection.innerHTML = `
       <div class="user-profile-wrap">
         <button class="user-profile-btn" id="btn-open-profile" type="button" aria-haspopup="menu" aria-expanded="false">
-          <i class="fa-solid fa-circle-user"></i>
+          ${state.user.avatarUrl ? `<img src="${state.user.avatarUrl}" class="nav-profile-avatar" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover;">` : '<i class="fa-solid fa-circle-user"></i>'}
           <span class="user-profile-name">${state.user.fullName}</span>
           <i class="fa-solid fa-chevron-down dropdown-caret"></i>
         </button>
@@ -1285,11 +1387,11 @@ function addToCart(productId) {
   saveCart();
   updateCartUI();
   showAddedToCartPopup(addedItem);
-  toggleCartDrawer(true);
 }
 
 function showAddedToCartPopup(item) {
   document.getElementById('added-to-cart-popup')?.remove();
+  const totalCount = state.cart.reduce((sum, cartItem) => sum + cartItem.quantity, 0);
   const popup = document.createElement('div');
   popup.id = 'added-to-cart-popup';
   popup.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9999;max-width:340px;background:#fff;padding:14px 16px;border-radius:14px;box-shadow:0 18px 52px rgba(0,0,0,0.18);font-family:inherit;';
@@ -1301,6 +1403,10 @@ function showAddedToCartPopup(item) {
         <div style="font-size:0.92rem;color:#4b5563;line-height:1.3;">${item.name}</div>
         <div style="font-size:0.95rem;color:#111;margin-top:6px;">₹${item.price.toFixed(2)}</div>
       </div>
+    </div>
+    <div style="margin-top:10px;padding:8px 12px;background:#f0fdf4;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:0.85rem;color:#166534;"><i class="fa-solid fa-cart-shopping"></i> ${totalCount} item${totalCount !== 1 ? 's' : ''} in cart</span>
+      <span style="font-size:0.85rem;font-weight:600;color:#166534;">₹${state.cart.reduce((sum, ci) => sum + ci.price * ci.quantity, 0).toFixed(2)}</span>
     </div>
     <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:10px;">
       <button id="popup-view-cart" class="btn btn-secondary" style="flex:1;">View Cart</button>
@@ -1316,7 +1422,6 @@ function showAddedToCartPopup(item) {
   document
     .getElementById('popup-continue')
     ?.addEventListener('click', () => popup.remove());
-  setTimeout(() => popup.remove(), 4200);
 }
 
 function changeQuantity(productId, delta) {
@@ -1331,12 +1436,22 @@ function changeQuantity(productId, delta) {
 
   saveCart();
   updateCartUI();
+
+  if (state.cart.length === 0) {
+    toggleCartDrawer(false);
+    if (window.location.hash === '#checkout') window.location.hash = '#shop';
+  }
 }
 
 function removeFromCart(productId) {
   state.cart = state.cart.filter((item) => item.id !== productId);
   saveCart();
   updateCartUI();
+
+  if (state.cart.length === 0) {
+    toggleCartDrawer(false);
+    if (window.location.hash === '#checkout') window.location.hash = '#shop';
+  }
 }
 
 function applyPromoCode() {
@@ -2196,7 +2311,8 @@ async function handleCheckoutInitiation() {
       warning.classList.remove('hidden');
     }
     authModal.open('buyer', () => {
-      showAddressModal();
+      toggleCartDrawer(false);
+      window.location.hash = '#checkout';
     });
     return;
   }
@@ -2209,163 +2325,77 @@ async function handleCheckoutInitiation() {
     return;
   }
 
-  showAddressModal();
-}
-
-function showAddressModal() {
-  document.getElementById('address-modal')?.remove();
-  const modal = document.createElement('div');
-  modal.id = 'address-modal';
-  modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.64);z-index:9999;padding:16px;';
-  const initialPhone = document.getElementById('checkout-delivery-phone')?.value.trim()
-    || state.user?.whatsapp_number
-    || state.user?.phone
-    || '';
-  const initialName = document.getElementById('checkout-delivery-name')?.value.trim()
-    || state.user?.fullName
-    || '';
-  const initialPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
-  const initialAddress = document.getElementById('checkout-delivery-address')?.value.trim() || '';
-  modal.innerHTML = `
-    <div style="width:100%;max-width:460px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 28px 80px rgba(15,23,42,0.24);">
-      <div style="padding:18px 20px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
-        <h3 style="margin:0;font-size:1.15rem;color:#111;">Delivery details</h3>
-        <p style="margin:8px 0 0;color:#475569;line-height:1.5;">Enter phone, pincode and address before payment.</p>
-      </div>
-      <div style="padding:18px 20px;display:grid;gap:12px;">
-        <label style="font-weight:600;color:#334155;">Full name</label>
-        <input id="modal-delivery-name" type="text" value="${initialName}" placeholder="Your full name" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">
-        <label style="font-weight:600;color:#334155;">Phone</label>
-        <input id="modal-delivery-phone" type="tel" value="${initialPhone}" placeholder="10-15 digit phone" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">
-        <label style="font-weight:600;color:#334155;">Pincode</label>
-        <input id="modal-delivery-pincode" type="text" value="${initialPincode}" placeholder="6-digit pincode" maxlength="6" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">
-        <label style="font-weight:600;color:#334155;">Address</label>
-        <textarea id="modal-delivery-address" rows="4" placeholder="House no., street, landmark, city" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;">${initialAddress}</textarea>
-        <div id="modal-address-feedback" style="color:#b91c1c;display:none;font-size:0.95rem;"></div>
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="modal-cancel" class="btn btn-secondary" style="flex:1;">Cancel</button>
-          <button id="modal-continue" class="btn btn-primary" style="flex:1;">Proceed to Checkout</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(modal);
-
-  modal
-    .querySelector('#modal-cancel')
-    ?.addEventListener('click', () => modal.remove());
-  modal
-    .querySelector('#modal-continue')
-    ?.addEventListener('click', async () => {
-      const name = modal.querySelector('#modal-delivery-name')?.value.trim() || '';
-      const phone = modal.querySelector('#modal-delivery-phone')?.value.trim() || '';
-      const pincode = modal.querySelector('#modal-delivery-pincode')?.value.trim() || '';
-      const address = modal.querySelector('#modal-delivery-address')?.value.trim() || '';
-      const feedback = modal.querySelector('#modal-address-feedback');
-      if (feedback) {
-        feedback.style.display = 'none';
-        feedback.textContent = '';
-      }
-
-      if (
-        !phone
-        || phone.replace(/\D/g, '').length < 10
-        || phone.replace(/\D/g, '').length > 15
-      ) {
-        if (feedback) {
-          feedback.textContent = 'Enter a valid phone number (10-15 digits).';
-          feedback.style.display = 'block';
-        }
-        return;
-      }
-
-      if (!/^[0-9]{6}$/.test(pincode)) {
-        if (feedback) {
-          feedback.textContent = 'Enter a valid 6-digit pincode.';
-          feedback.style.display = 'block';
-        }
-        return;
-      }
-
-      if (!address) {
-        if (feedback) {
-          feedback.textContent = 'Delivery address is required.';
-          feedback.style.display = 'block';
-        }
-        return;
-      }
-
-      // Name mandatory
-      if (!name) {
-        if (feedback) {
-          feedback.textContent = 'Full name is required for delivery.';
-          feedback.style.display = 'block';
-        }
-        return;
-      }
-
-      modal.remove();
-      const phoneInput = document.getElementById('checkout-delivery-phone');
-      const pincodeInput = document.getElementById('checkout-delivery-pincode');
-      const addressInput = document.getElementById('checkout-delivery-address');
-      if (phoneInput) phoneInput.value = phone;
-      if (pincodeInput) pincodeInput.value = pincode;
-      if (addressInput) addressInput.value = address;
-
-      // Update user basic details with delivery info
-      if (!state.user) {
-        // create guest profile locally
-        const guest = {
-          id: `guest_${Date.now()}`,
-          fullName: name,
-          email: '',
-          whatsappNumber: phone,
-          role: 'buyer',
-          loginMethod: 'guest',
-          defaultAddress: address,
-          defaultPincode: pincode,
-        };
-        saveUserProfile(guest);
-        window.dispatchEvent(new Event('auth:changed'));
-      } else {
-        // update local state and attempt server update
-        const updated = {
-          ...state.user,
-          fullName: name,
-          whatsappNumber: phone,
-          defaultAddress: address,
-          defaultPincode: pincode,
-        };
-        saveUserProfile(updated);
-        window.dispatchEvent(new Event('auth:changed'));
-        if (state.token) {
-          try {
-            await fetchWithAuth('/auth/me', {
-              method: 'PUT',
-              body: JSON.stringify({
-                fullName: name,
-                whatsappNumber: phone,
-                default_address: address,
-                default_pincode: pincode,
-              }),
-            });
-          } catch (err) {
-            console.warn(
-              'Failed to persist delivery details to server:',
-              err.message || err,
-            );
-          }
-        }
-      }
-
-      window.location.hash = '#checkout';
-    });
+  toggleCartDrawer(false);
+  window.location.hash = '#checkout';
 }
 
 function renderCheckoutPage() {
   const summaryContainer = document.getElementById('checkout-order-summary');
   if (!summaryContainer) return;
+
+  // Pre-fill user profile address details if available
+  if (state.user) {
+    const phoneInput = document.getElementById('checkout-delivery-phone');
+    const pincodeInput = document.getElementById('checkout-delivery-pincode');
+    const line1Input = document.getElementById('checkout-address-line1');
+    const line2Input = document.getElementById('checkout-address-line2');
+    const landmarkInput = document.getElementById('checkout-landmark');
+    const stateSelect = document.getElementById('checkout-state');
+    const citySelect = document.getElementById('checkout-city');
+
+    const uPhone = state.user.whatsappNumber || state.user.whatsapp_number || '';
+    if (phoneInput && !phoneInput.value && uPhone) {
+      phoneInput.value = uPhone;
+    }
+
+    const uPincode = state.user.defaultPincode || state.user.default_pincode || '';
+    if (pincodeInput && !pincodeInput.value && uPincode) {
+      pincodeInput.value = uPincode;
+    }
+
+    const uLine1 = state.user.addressLine1 || state.user.address_line1 || '';
+    if (line1Input && !line1Input.value && uLine1) {
+      line1Input.value = uLine1;
+    }
+
+    const uLine2 = state.user.addressLine2 || state.user.address_line2 || '';
+    if (line2Input && !line2Input.value && uLine2) {
+      line2Input.value = uLine2;
+    }
+
+    const uLandmark = state.user.landmark || '';
+    if (landmarkInput && !landmarkInput.value && uLandmark) {
+      landmarkInput.value = uLandmark;
+    }
+
+    const uState = state.user.state || '';
+    const uCity = state.user.city || '';
+    if (stateSelect && !stateSelect.value && uState) {
+      if (!STATE_CITIES[uState]) {
+        const opt = document.createElement('option');
+        opt.value = uState;
+        opt.textContent = uState;
+        stateSelect.appendChild(opt);
+      }
+      stateSelect.value = uState;
+
+      // Populate cities dropdown
+      if (citySelect) {
+        const cities = STATE_CITIES[uState] || [];
+        citySelect.innerHTML = '<option value="">Select City</option>' +
+          cities.map(c => `<option value="${c}">${c}</option>`).join('');
+        if (uCity) {
+          if (!cities.includes(uCity)) {
+            const opt = document.createElement('option');
+            opt.value = uCity;
+            opt.textContent = uCity;
+            citySelect.appendChild(opt);
+          }
+          citySelect.value = uCity;
+        }
+      }
+    }
+  }
 
   if (!state.cart.length) {
     summaryContainer.innerHTML = `
@@ -2413,7 +2443,11 @@ function renderCheckoutPage() {
 
 async function handlePaymentContinue() {
   const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
-  const deliveryAddress = document.getElementById('checkout-delivery-address')?.value.trim() || '';
+  const addressLine1 = document.getElementById('checkout-address-line1')?.value.trim() || '';
+  const addressLine2 = document.getElementById('checkout-address-line2')?.value.trim() || '';
+  const landmark = document.getElementById('checkout-landmark')?.value.trim() || '';
+  const city = document.getElementById('checkout-city')?.value.trim() || '';
+  const stateVal = document.getElementById('checkout-state')?.value.trim() || '';
   const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
   const feedback = document.getElementById('checkout-page-feedback');
 
@@ -2442,9 +2476,9 @@ async function handlePaymentContinue() {
     return;
   }
 
-  if (!deliveryAddress) {
+  if (!addressLine1 || !addressLine2 || !landmark || !city || !stateVal) {
     if (feedback) {
-      feedback.textContent = 'Delivery address cannot be empty.';
+      feedback.textContent = 'All fields (Address Line 1, Address Line 2, Landmark, Pincode, City, State) are mandatory.';
       feedback.classList.remove('hidden');
     }
     return;
@@ -2460,8 +2494,12 @@ async function handlePaymentContinue() {
         })),
         promoCode: state.activePromo,
         delivery_phone: deliveryPhone,
-        delivery_address: deliveryAddress,
-        delivery_pincode: deliveryPincode,
+        address_line1: addressLine1,
+        address_line2: addressLine2,
+        landmark: landmark,
+        city: city,
+        state: stateVal,
+        pincode: deliveryPincode,
       }),
     });
 
@@ -3168,9 +3206,58 @@ async function completeOrderPayment(orderId, paymentId, signature) {
 
       // Refresh shop inventory quantities immediately after payment
       await fetchProducts();
+      await loadUser();
+
+      // Auto-save delivery details to user profile after order completion
+      if (state.token && state.user) {
+        try {
+          const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
+          const addressLine1 = document.getElementById('checkout-address-line1')?.value.trim() || '';
+          const addressLine2 = document.getElementById('checkout-address-line2')?.value.trim() || '';
+          const landmark = document.getElementById('checkout-landmark')?.value.trim() || '';
+          const city = document.getElementById('checkout-city')?.value.trim() || '';
+          const stateVal = document.getElementById('checkout-state')?.value.trim() || '';
+          const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
+
+          const profilePayload = {};
+          if (deliveryPhone) profilePayload.whatsappNumber = deliveryPhone;
+          if (addressLine1) profilePayload.address_line1 = addressLine1;
+          if (addressLine2) profilePayload.address_line2 = addressLine2;
+          if (landmark) profilePayload.landmark = landmark;
+          if (city) profilePayload.city = city;
+          if (stateVal) profilePayload.state = stateVal;
+          if (deliveryPincode) profilePayload.default_pincode = deliveryPincode;
+          if (addressLine1 || addressLine2 || landmark || city || stateVal || deliveryPincode) {
+            profilePayload.default_address = [addressLine1, addressLine2, landmark, city, stateVal, deliveryPincode ? `Pincode: ${deliveryPincode}` : ''].filter(Boolean).join(', ');
+          }
+
+          if (Object.keys(profilePayload).length > 0) {
+            const updated = await fetchWithAuth('/auth/me', {
+              method: 'PUT',
+              body: JSON.stringify(profilePayload),
+            });
+            // Update local state with saved profile
+            const savedUser = {
+              ...state.user,
+              whatsappNumber: updated.whatsappNumber || state.user.whatsappNumber,
+              addressLine1: updated.addressLine1 || state.user.addressLine1,
+              addressLine2: updated.addressLine2 || state.user.addressLine2,
+              landmark: updated.landmark || state.user.landmark,
+              city: updated.city || state.user.city,
+              state: updated.state || state.user.state,
+              defaultPincode: updated.defaultPincode || state.user.defaultPincode,
+              defaultAddress: updated.defaultAddress || state.user.defaultAddress,
+            };
+            saveUserProfile(savedUser);
+          }
+        } catch (err) {
+          // Silently fail — profile auto-save is best-effort
+          console.warn('Auto-save profile after order failed:', err);
+        }
+      }
 
       // Show success notification
-      showSuccessToast('ðŸŽ‰ Order placed successfully! Payment confirmed.');
+      showSuccessToast('🎉 Order placed successfully! Payment confirmed.');
 
       // Notify other tabs (admin) that orders have been updated
       try {
@@ -3188,6 +3275,11 @@ async function completeOrderPayment(orderId, paymentId, signature) {
         window.location.hash = `#track-${data.order.id}`;
       } else {
         window.location.hash = '#shop';
+        setTimeout(() => {
+          if (window.profileModal) {
+            window.profileModal.open('details');
+          }
+        }, 100);
       }
     } else {
       showErrorToast(data.error || 'Payment verification failed.');
@@ -3214,6 +3306,7 @@ async function fetchOrders() {
     if (res.ok) {
       state.orders = await res.json();
       renderOrdersSidebar();
+      checkAndShowReviewModal();
     }
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
@@ -3402,9 +3495,11 @@ function renderTrackingDetails(track) {
     </div>
 
     <div class="tracker-details-actions">
+      ${['shipped', 'in_transit', 'delivered'].includes(track.deliveryStatus) ? `
       <button class="btn btn-secondary" onclick="window.viewInvoice('${track.orderId}')">
         <i class="fa-solid fa-file-invoice-dollar"></i> Generate Tax Invoice
       </button>
+      ` : ''}
       <button class="btn btn-whatsapp-action" onclick="window.whatsappQuickMessage('${track.orderId}')">
         <i class="fa-brands fa-whatsapp"></i> Update via WhatsApp
       </button>
@@ -4134,3 +4229,100 @@ function resetCarouselAutoplay() {
   stopCarouselAutoplay();
   startCarouselAutoplay();
 }
+
+// ==========================================================================
+// REVIEW MODAL
+// ==========================================================================
+function checkAndShowReviewModal() {
+  if (!state.orders || !state.orders.length) return;
+  // Find first delivered order without a rating that hasn't been skipped
+  const orderToReview = state.orders.find(o =>
+    o.delivery_status === 'delivered' && !o.rating && !localStorage.getItem(`skipped_review_${o.id}`)
+  );
+  if (orderToReview) {
+    openReviewModal(orderToReview.id);
+  }
+}
+
+window.openReviewModal = function (orderId) {
+  const existing = document.getElementById('review-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'review-modal';
+  modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10001;padding:1rem;backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="background:white;border-radius:12px;padding:2rem;max-width:400px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+      <h3 style="margin-top:0;font-family:var(--font-heading);font-size:1.5rem;color:var(--color-text-dark);">How was your order?</h3>
+      <p style="color:#64748b;margin-bottom:1.5rem;font-size:0.95rem;">Rate your experience for Order #${orderId}</p>
+      
+      <div id="review-stars" style="display:flex;gap:0.5rem;margin-bottom:1.5rem;justify-content:center;font-size:2rem;color:#cbd5e1;cursor:pointer;">
+        <i class="fa-solid fa-star" data-val="1"></i>
+        <i class="fa-solid fa-star" data-val="2"></i>
+        <i class="fa-solid fa-star" data-val="3"></i>
+        <i class="fa-solid fa-star" data-val="4"></i>
+        <i class="fa-solid fa-star" data-val="5"></i>
+      </div>
+      
+      <div style="margin-bottom:1.5rem;">
+        <textarea id="review-desc" placeholder="Tell us more about your experience (optional)" style="width:100%;border:1px solid #e2e8f0;border-radius:8px;padding:0.75rem;font-family:inherit;resize:vertical;min-height:80px;"></textarea>
+      </div>
+      
+      <div style="display:flex;gap:1rem;">
+        <button id="btn-skip-review" class="btn btn-secondary" style="flex:1;">Skip</button>
+        <button id="btn-submit-review" class="btn btn-primary" style="flex:2;" disabled>Submit Review</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  let selectedRating = 0;
+  const stars = modal.querySelectorAll('#review-stars i');
+  const submitBtn = modal.querySelector('#btn-submit-review');
+
+  stars.forEach(star => {
+    star.addEventListener('mouseover', (e) => {
+      const val = parseInt(e.target.dataset.val);
+      stars.forEach(s => {
+        s.style.color = parseInt(s.dataset.val) <= val ? '#fbbf24' : '#cbd5e1';
+      });
+    });
+    star.addEventListener('mouseout', () => {
+      stars.forEach(s => {
+        s.style.color = parseInt(s.dataset.val) <= selectedRating ? '#fbbf24' : '#cbd5e1';
+      });
+    });
+    star.addEventListener('click', (e) => {
+      selectedRating = parseInt(e.target.dataset.val);
+      submitBtn.disabled = false;
+      stars.forEach(s => {
+        s.style.color = parseInt(s.dataset.val) <= selectedRating ? '#fbbf24' : '#cbd5e1';
+      });
+    });
+  });
+
+  modal.querySelector('#btn-skip-review').addEventListener('click', () => {
+    localStorage.setItem(`skipped_review_${orderId}`, 'true');
+    modal.remove();
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const desc = modal.querySelector('#review-desc').value.trim();
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
+    try {
+      const res = await fetchWithAuth(`/orders/${orderId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ rating: selectedRating, reviewText: desc }),
+      });
+      showSuccessToast('Thank you for your review!');
+      modal.remove();
+      fetchOrders(); // Refresh to update profile modal
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err));
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = 'Submit Review';
+    }
+  });
+};
+

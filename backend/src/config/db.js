@@ -203,12 +203,22 @@ const mockStore = {
 };
 
 // Seed Users for Sporekart
-const adminPasswordHash = bcrypt.hashSync('admin123', 10);
+const adminPasswordHash = bcrypt.hashSync('123456', 10);
 
 // Seed Buyer User
 mockStore.users.push({
   id: 'user-buyer',
   email: 'buyer@sporekart.com',
+  full_name: 'John Buyer',
+  whatsapp_number: '9876543211',
+  role: 'buyer', // Customer type: Buyer
+  created_at: new Date().toISOString(),
+});
+
+// Seed Buyer User (no .com)
+mockStore.users.push({
+  id: 'user-buyer-short',
+  email: 'buyer@sporekart',
   full_name: 'John Buyer',
   whatsapp_number: '9876543211',
   role: 'buyer', // Customer type: Buyer
@@ -229,6 +239,17 @@ mockStore.users.push({
 mockStore.users.push({
   id: 'user-admin',
   email: 'admin@sporekart.com',
+  password_hash: adminPasswordHash,
+  full_name: 'Sporekart Admin',
+  whatsapp_number: '9876543210',
+  role: 'admin', // Administrator
+  created_at: new Date().toISOString(),
+});
+
+// Seed Admin User (no .com)
+mockStore.users.push({
+  id: 'user-admin-short',
+  email: 'admin@sporekart',
   password_hash: adminPasswordHash,
   full_name: 'Sporekart Admin',
   whatsapp_number: '9876543210',
@@ -344,11 +365,65 @@ class MockQueryBuilder {
   }
 }
 
+/**
+ * Supabase Query Builder Wrapper to make mutations return data transparently in Supabase JS client v2
+ */
+class SupabaseQueryBuilderWrapper {
+  constructor(builder) {
+    this.builder = builder;
+    this.hasMutated = false;
+  }
+
+  select(fields = '*') {
+    this.builder = this.builder.select(fields);
+    return this;
+  }
+
+  insert(rows) {
+    this.builder = this.builder.insert(rows);
+    this.hasMutated = true;
+    return this;
+  }
+
+  update(updates) {
+    this.builder = this.builder.update(updates);
+    this.hasMutated = true;
+    return this;
+  }
+
+  delete() {
+    this.builder = this.builder.delete();
+    this.hasMutated = true;
+    return this;
+  }
+
+  eq(column, value) {
+    this.builder = this.builder.eq(column, value);
+    return this;
+  }
+
+  single() {
+    if (this.hasMutated) {
+      this.builder = this.builder.select().single();
+    } else {
+      this.builder = this.builder.single();
+    }
+    return this.builder;
+  }
+
+  then(onfulfilled, onrejected) {
+    if (this.hasMutated) {
+      this.builder = this.builder.select();
+    }
+    return this.builder.then(onfulfilled, onrejected);
+  }
+}
+
 const db = {
   isMock,
   from: (table) => {
     if (!isMock) {
-      return supabaseInstance.from(table);
+      return new SupabaseQueryBuilderWrapper(supabaseInstance.from(table));
     }
     return new MockQueryBuilder(table);
   },

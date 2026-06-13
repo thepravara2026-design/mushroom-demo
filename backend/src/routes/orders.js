@@ -119,15 +119,29 @@ async function getShippingCharge() {
 router.post('/checkout', authMiddleware, async (req, res) => {
   try {
     const {
-      items, promoCode, delivery_address, delivery_phone,
+      items, promoCode, delivery_phone,
+      address_line1, address_line2, landmark, city, state, pincode
     } = req.body; // items: [{ id, quantity }]
 
     if (!items || !items.length) {
       return respondError(res, 'Cart is empty.', 400);
     }
 
-    // Accept delivery address/phone from request or fallback to user profile when available.
-    const rawAddress = String(delivery_address || (req.user && req.user.address) || '').trim();
+    // Build the combined delivery address
+    const addressParts = [
+      address_line1,
+      address_line2,
+      landmark,
+      city,
+      state,
+      pincode ? `Pincode: ${pincode}` : ''
+    ].filter(Boolean);
+    
+    let rawAddress = addressParts.join(', ');
+    if (!rawAddress) {
+      rawAddress = String(req.body.delivery_address || (req.user && req.user.address) || '').trim();
+    }
+
     const rawPhone = String(
       delivery_phone || (req.user && req.user.whatsapp_number) || '',
     ).trim();
@@ -260,6 +274,19 @@ router.post('/checkout', authMiddleware, async (req, res) => {
       .eq('id', newOrder.id);
 
     newOrder.razorpay_order_id = rzpOrder.id;
+
+    // Sync address back to user profile
+    if (req.user && req.user.userId && rawAddress) {
+      const addressUpdates = { default_address: rawAddress };
+      if (address_line1) addressUpdates.address_line1 = address_line1;
+      if (address_line2) addressUpdates.address_line2 = address_line2;
+      if (landmark) addressUpdates.landmark = landmark;
+      if (city) addressUpdates.city = city;
+      if (state) addressUpdates.state = state;
+      if (pincode) addressUpdates.default_pincode = pincode;
+      
+      await db.from('users').update(addressUpdates).eq('id', req.user.userId);
+    }
 
     return success(res, {
       order: newOrder,
@@ -548,6 +575,24 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
       return respondError(res, 'Order not found.', 404);
     }
 
+    const STATUS_FLOW = ['placed', 'processing', 'shipped', 'in_transit', 'delivered'];
+    const currentStatus = order.delivery_status;
+
+    if (currentStatus === 'cancelled') {
+      return respondError(res, 'Cannot change status of a cancelled order.', 400);
+    }
+
+    const currentIndex = STATUS_FLOW.indexOf(currentStatus);
+    const newIndex = STATUS_FLOW.indexOf(delivery_status);
+
+    if (newIndex === -1 && delivery_status !== 'cancelled') {
+      return respondError(res, 'Invalid delivery status.', 400);
+    }
+
+    if (delivery_status !== 'cancelled' && newIndex < currentIndex) {
+      return respondError(res, 'Cannot move order status backward to a previous stage.', 400);
+    }
+
     const updatePayload = {
       delivery_status,
       updated_at: new Date().toISOString(),
@@ -705,6 +750,10 @@ router.get('/:id/invoice', authMiddleware, async (req, res) => {
       return respondError(res, 'Order not found.', 404);
     }
 
+    if (!['shipped', 'in_transit', 'delivered'].includes(order.delivery_status)) {
+      return respondError(res, 'Invoice can only be generated after the order is shipped.', 403);
+    }
+
     // Fetch user details for invoice billing info
     const { data: user } = await db
       .from('users')
@@ -737,6 +786,10 @@ router.get('/share/:token', async (req, res) => {
       .single();
     if (error || !order) {
       return res.status(404).send('Invoice not found for this token.');
+    }
+
+    if (!['shipped', 'in_transit', 'delivered'].includes(order.delivery_status)) {
+      return res.status(403).send('Invoice is not yet available for this order. It will be generated once shipped.');
     }
 
     const { data: user } = await db
@@ -877,41 +930,66 @@ router.get('/:id/track', authMiddleware, async (req, res) => {
     const diffMin = diffMs / (1000 * 60);
 
     let calculatedStatus = 'placed';
-    let progressPercent = 10;
-    let message = 'Spores picked & prepped. Sterilization check in progress.';
 
     if (diffMin >= 1 && diffMin < 2) {
       calculatedStatus = 'inoculating';
-      progressPercent = 40;
-      message = 'Inoculation complete. Grains seeded with liquid mycelium under laminar flow.';
     } else if (diffMin >= 2 && diffMin < 4) {
       calculatedStatus = 'shipped';
-      progressPercent = 75;
-      message = 'Mycelium fully colonised! Substrate block packaged in thermal safety bag and shipped.';
     } else if (diffMin >= 4) {
       calculatedStatus = 'delivered';
-      progressPercent = 100;
-      message = 'Delivered! Arrived at your facility. Time to slit the bag, mist daily, and start fruiting.';
     }
 
+    const STATUS_INDEX = {
+      'placed': 0,
+      'inoculating': 1,
+      'processing': 1,
+      'shipped': 2,
+      'in_transit': 3,
+      'delivered': 4,
+      'cancelled': 5
+    };
+
     const statusResult = order.delivery_status === 'cancelled' ? 'cancelled' : calculatedStatus;
+    const currentIdx = STATUS_INDEX[order.delivery_status] || 0;
+    const simulatedIdx = STATUS_INDEX[statusResult] || 0;
+
+    let responseStatus = order.delivery_status;
 
     if (
       order.status === 'paid'
-      && order.delivery_status !== statusResult
       && order.delivery_status !== 'cancelled'
+      && simulatedIdx > currentIdx
     ) {
+      responseStatus = statusResult;
       await db
         .from('orders')
         .update({ delivery_status: statusResult })
         .eq('id', order.id);
     }
 
-    const responseStatus = order.delivery_status === 'cancelled' ? 'cancelled' : statusResult;
-    const responseProgress = order.delivery_status === 'cancelled' ? 0 : progressPercent;
-    const responseMessage = order.delivery_status === 'cancelled'
-      ? 'Order was cancelled. Thank you for shopping with us.'
-      : message;
+    const getStatusDetails = (statusVal) => {
+      switch (statusVal) {
+        case 'placed':
+          return { progress: 10, msg: 'Spores picked & prepped. Sterilization check in progress.' };
+        case 'inoculating':
+        case 'processing':
+          return { progress: 40, msg: 'Inoculation complete. Grains seeded with liquid mycelium under laminar flow.' };
+        case 'shipped':
+          return { progress: 75, msg: 'Mycelium fully colonised! Substrate block packaged in thermal safety bag and shipped.' };
+        case 'in_transit':
+          return { progress: 85, msg: 'Fruiting kit is in transit. Package has left the hub and is on its way to your location.' };
+        case 'delivered':
+          return { progress: 100, msg: 'Delivered! Arrived at your facility. Time to slit the bag, mist daily, and start fruiting.' };
+        case 'cancelled':
+          return { progress: 0, msg: 'Order was cancelled. Thank you for shopping with us.' };
+        default:
+          return { progress: 10, msg: 'Spores picked & prepped. Sterilization check in progress.' };
+      }
+    };
+
+    const details = getStatusDetails(responseStatus);
+    const responseProgress = details.progress;
+    const responseMessage = details.msg;
 
     const timeline = [
       {
@@ -934,17 +1012,17 @@ router.get('/:id/track', authMiddleware, async (req, res) => {
       timeline.push({
         status: 'inoculating',
         label: 'Mycelium Inoculated (1 min elapsed)',
-        done: diffMin >= 1,
+        done: diffMin >= 1 || STATUS_INDEX[responseStatus] >= STATUS_INDEX['inoculating'],
       });
       timeline.push({
         status: 'shipped',
         label: 'Fruiting Kit Dispatched (2 mins elapsed)',
-        done: diffMin >= 2,
+        done: diffMin >= 2 || STATUS_INDEX[responseStatus] >= STATUS_INDEX['shipped'],
       });
       timeline.push({
         status: 'delivered',
         label: 'Ready to Harvest! (4 mins elapsed)',
-        done: diffMin >= 4,
+        done: diffMin >= 4 || STATUS_INDEX[responseStatus] >= STATUS_INDEX['delivered'],
       });
     }
 
@@ -992,6 +1070,43 @@ router.get('/events', (req, res) => {
   res.write('\n');
 
   addSseSubscriber(req, res, user);
+});
+
+// POST /api/orders/:id/review
+// Add a rating and review text to a delivered order
+router.post('/:id/review', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rating, reviewText } = req.body;
+
+    const { data: order, error } = await db.from('orders').select('*').eq('id', id).single();
+
+    if (error || !order) {
+      return respondError(res, 'Order not found', 404);
+    }
+
+    if (order.user_id !== req.user.userId) {
+      return respondError(res, 'Unauthorized to review this order', 403);
+    }
+
+    if (order.delivery_status !== 'delivered') {
+      return respondError(res, 'Only delivered orders can be reviewed', 400);
+    }
+
+    const numericRating = parseInt(rating, 10);
+    if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+      return respondError(res, 'Rating must be between 1 and 5', 400);
+    }
+
+    await db.from('orders').update({
+      rating: numericRating,
+      review_text: reviewText || ''
+    }).eq('id', id);
+
+    return success(res, { message: 'Review saved successfully' });
+  } catch (error) {
+    return respondError(res, error.message || 'Failed to save review', 500);
+  }
 });
 
 module.exports = router;

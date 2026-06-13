@@ -112,6 +112,14 @@ class AuthService {
         fullName: user.full_name,
         whatsappNumber: user.whatsapp_number || '',
         role: user.role,
+        avatarUrl: user.avatar_url || '',
+        defaultAddress: user.default_address || '',
+        defaultPincode: user.default_pincode || '',
+        addressLine1: user.address_line1 || '',
+        addressLine2: user.address_line2 || '',
+        landmark: user.landmark || '',
+        city: user.city || '',
+        state: user.state || '',
       },
     };
   }
@@ -120,8 +128,8 @@ class AuthService {
     const emailLower = String(email).toLowerCase();
     const { data: user } = await userRepo.findByEmail(emailLower);
     if (!user || user.role !== 'admin') {
-      const err = new Error('Unauthorized access.');
-      err.status = 401;
+      const err = new Error('Invalid admin credentials.');
+      err.status = 403;
       throw err;
     }
 
@@ -178,6 +186,12 @@ class AuthService {
     if (typeof updates.whatsappNumber === 'string') payload.whatsapp_number = updates.whatsappNumber.trim();
     if (typeof updates.defaultAddress === 'string') payload.default_address = updates.defaultAddress.trim();
     if (typeof updates.defaultPincode === 'string') payload.default_pincode = updates.defaultPincode.trim();
+    if (typeof updates.avatarUrl === 'string') payload.avatar_url = updates.avatarUrl;
+    if (typeof updates.addressLine1 === 'string') payload.address_line1 = updates.addressLine1.trim();
+    if (typeof updates.addressLine2 === 'string') payload.address_line2 = updates.addressLine2.trim();
+    if (typeof updates.landmark === 'string') payload.landmark = updates.landmark.trim();
+    if (typeof updates.city === 'string') payload.city = updates.city.trim();
+    if (typeof updates.state === 'string') payload.state = updates.state.trim();
 
     if (
       current.login_method === 'phone'
