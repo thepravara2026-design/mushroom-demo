@@ -14,6 +14,13 @@ const puppeteer = require('puppeteer');
     const fs = require('fs');
     if (!fs.existsSync(ART_DIR)) fs.mkdirSync(ART_DIR, { recursive: true });
 
+    // Capture console logs and errors to a file
+    const consoleLogPath = require('path').join(
+      ART_DIR,
+      'puppeteer-console.log',
+    );
+    const consoleStream = fs.createWriteStream(consoleLogPath, { flags: 'a' });
+
     // Intercept requests and abort known external assets to avoid flaky network failures
     await page.setRequestInterception(true);
     page.on('request', (req) => {
@@ -28,7 +35,7 @@ const puppeteer = require('puppeteer');
         if (blockedHosts.includes(u.hostname)) {
           const text = `ABORTED EXTERNAL REQUEST: ${url}\n`;
           console.log(text.trim());
-          if (fs && fs.createWriteStream) {
+          if (fs) {
             fs.appendFileSync(consoleLogPath, text);
           }
           return req.abort();
@@ -38,13 +45,6 @@ const puppeteer = require('puppeteer');
       }
       req.continue();
     });
-
-    // Capture console logs and errors to a file
-    const consoleLogPath = require('path').join(
-      ART_DIR,
-      'puppeteer-console.log',
-    );
-    const consoleStream = fs.createWriteStream(consoleLogPath, { flags: 'a' });
 
     page.on('console', (msg) => {
       const text = `BROWSER ${msg.type().toUpperCase()}: ${msg.text()}\n`;

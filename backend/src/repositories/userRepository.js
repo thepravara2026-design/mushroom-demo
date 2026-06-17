@@ -16,7 +16,7 @@ async function findByPhone(phone) {
   const { data, error } = await db
     .from('users')
     .select('*')
-    .eq('whatsapp_number', phone)
+    .eq('whatsapp_number', phone.replace(/^\+91/, '').replace(/\s/g, '').trim())
     .single();
   if (error && error.message === 'No rows found') {
     return { data: null, error: null };
@@ -56,7 +56,7 @@ async function remove(id) {
     return { data: null, error: { message: 'No rows found' } };
   }
 
-  await db.from('users').delete().eq('id', id).single();
+  await db.from('users').delete().eq('id', id);
   return { data: existing, error: null };
 }
 

@@ -1,6 +1,7 @@
 import { authApi } from '../api/authApi.js';
 import { saveAuth, state } from '../utils/state.js';
-import { showErrorToast } from '../utils/notify.js';
+import { showErrorToast, showPopupModal } from '../utils/notify.js';
+import { isValidIndianPhone } from '../utils/validation.js';
 
 export class AuthModal {
   constructor() {
@@ -176,6 +177,16 @@ export class AuthModal {
       titleEl.textContent = 'Grower Portal Access';
     }
 
+    // Hide admin login link for buyer role
+    const adminLink = document.getElementById('link-admin-password');
+    const adminCaution = document.querySelector('.auth-admin-caution');
+    if (adminLink) {
+      adminLink.style.display = role === 'buyer' ? 'none' : '';
+    }
+    if (adminCaution) {
+      adminCaution.style.display = role === 'buyer' ? 'none' : '';
+    }
+
     if (role === 'grower') {
       this.showEmailView();
     } else if (role === 'admin') {
@@ -318,9 +329,9 @@ export class AuthModal {
       .getElementById('auth-phone-fullname')
       ?.value.trim();
 
-    if (!phone || phone.length < 8) {
+    if (!isValidIndianPhone(phone)) {
       if (this.phoneError) {
-        this.phoneError.textContent = 'Please enter a valid phone number.';
+        this.phoneError.textContent = 'Enter a valid Indian phone number (e.g. +91 9876543210).';
         this.phoneError.classList.remove('hidden');
       }
       return;
@@ -411,7 +422,7 @@ export class AuthModal {
       this.adminLoginError?.classList.add('hidden');
       this.close();
       window.dispatchEvent(new Event('auth:changed'));
-      if (this.onSuccessCallback) this.onSuccessCallback();
+      window.location.href = '/admin.html';
     } catch (err) {
       if (this.adminLoginError) {
         this.adminLoginError.textContent = err.message || 'Login failed. Please check your credentials.';
@@ -455,6 +466,13 @@ export class AuthModal {
       this.close();
       window.dispatchEvent(new Event('auth:changed'));
       if (this.onSuccessCallback) this.onSuccessCallback();
+      const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
+      showPopupModal({
+        title: '🎉 Welcome back!',
+        message: `Hello <strong>${userName}</strong>, glad to see you again!`,
+        duration: 2000,
+        refreshOnClose: true,
+      });
     } catch (err) {
       if (this.verifyError) {
         this.verifyError.textContent = err.message;

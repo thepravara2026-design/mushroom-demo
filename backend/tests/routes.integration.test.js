@@ -6,6 +6,10 @@ describe('Backend API integration tests', () => {
   let adminToken;
 
   beforeEach(() => {
+    // Force mock mode by clearing Supabase env vars before modules are loaded
+    process.env.SUPABASE_URL = '';
+    process.env.SUPABASE_ANON_KEY = '';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = '';
     jest.resetModules();
     app = require('../src/server');
     const secret = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
@@ -14,6 +18,32 @@ describe('Backend API integration tests', () => {
       secret,
       { expiresIn: '1h' },
     );
+  });
+
+  test('POST /api/auth/admin-login succeeds with valid admin credentials', async () => {
+    const res = await request(app)
+      .post('/api/auth/admin-login')
+      .send({ email: 'admin@sporekart.com', password: 'admin123' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveProperty('token');
+    expect(res.body.data.user.role).toBe('admin');
+  });
+
+  test('POST /api/auth/admin-login fails with wrong password', async () => {
+    const res = await request(app)
+      .post('/api/auth/admin-login')
+      .send({ email: 'admin@sporekart.com', password: 'wrongpass' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /api/auth/admin-login fails for non-admin user', async () => {
+    const res = await request(app)
+      .post('/api/auth/admin-login')
+      .send({ email: 'buyer@sporekart.com', password: '123456' });
+
+    expect(res.status).toBe(403);
   });
 
   test('GET /api/categories returns a list of categories', async () => {

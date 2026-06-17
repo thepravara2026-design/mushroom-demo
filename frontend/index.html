@@ -81,7 +81,9 @@
           <i class="fa-solid fa-truck-fast"></i>
           <span>Track Order</span>
         </a>
+        <a href="#about" class="nav-link">About Spore</a>
         <a href="#training-section" class="nav-link">Training and Courses</a>
+        <a href="#blogs" class="nav-link">Blogs</a>
         <a href="#footer" class="nav-link">Contact Us</a>
       </div>
       <div class="nav-spacer"></div>
@@ -117,8 +119,8 @@
       <div id="mobile-nav-links" class="mobile-nav-links">
         <!-- main links cloned by JS -->
       </div>
-      <div class="mobile-cat-nav" id="mobile-cat-nav">
-        <div id="mobile-cat-nav-inner"></div>
+      <div class="mobile-cat-nav-overlay">
+        <div class="mobile-cat-nav-inner-overlay"></div>
       </div>
       <div class="mobile-actions">
         <button class="btn btn-block" id="btn-open-auth-mobile">
@@ -200,7 +202,7 @@
       </div>
     </section>
 
-    TRAINING REGISTRATION (Grower Register + OTP/Google)
+    <!-- TRAINING REGISTRATION (Grower Register + OTP/Google)
     ============================================================ -->
     <section class="section-wrap" id="training-register" style="display: none">
       <div class="section-header-center">
@@ -240,7 +242,7 @@
                   <option value="+91">+91</option>
                   <option value="+1">+1</option>
                 </select>
-                <input type="tel" id="reg-phone" required placeholder="Mobile number" />
+                <input type="tel" id="reg-phone" required placeholder="Mobile number" maxlength="10" />
               </div>
             </div>
 
@@ -297,22 +299,89 @@
        TRAINING & COURSES PAGE
   ============================================================ -->
     <section class="section-wrap" id="training-courses" style="display: none">
-      <div class="section-header-center">
-        <div class="section-label">
-          <i class="fa-solid fa-graduation-cap"></i> Trainings
-        </div>
-        <h2 class="section-title">Training & Courses</h2>
-      </div>
-      <div class="container" style="max-width: 1100px; margin: 0 auto">
-        <div id="training-courses-list" style="
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-              gap: 16px;
-            ">
-          <div class="grid-skeleton">
-            <i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...
+      <div class="tr-dashboard">
+        <div class="tr-topbar">
+          <a href="#" class="tr-topbar-logo">
+            <div class="tr-logo-icon-wrap">
+              <i class="fa-solid fa-seedling"></i>
+            </div>
+            <div class="tr-logo-text">
+              <span class="tr-logo-brand">Sporekart</span>
+              <span class="tr-logo-tagline">Training Portal</span>
+            </div>
+          </a>
+          <div class="tr-dash-brand">
+            <div class="tr-dash-icon">
+              <i class="fa-solid fa-graduation-cap"></i>
+            </div>
+            <div>
+              <h2>Training & Courses</h2>
+              <span id="tr-dash-subtitle">Learn. Grow. Thrive.</span>
+            </div>
+          </div>
+          <div class="tr-top-actions">
+            <button class="btn btn-secondary-glow" id="btn-tr-back-shop">
+              <i class="fa-solid fa-store"></i> Back to Shop
+            </button>
           </div>
         </div>
+
+        <div class="tr-tab-bar" id="tr-tab-bar">
+          <button class="tr-tab active" data-tab="future">
+            <i class="fa-solid fa-calendar-day"></i> Future Courses
+          </button>
+          <button class="tr-tab" data-tab="ongoing">
+            <i class="fa-solid fa-play-circle"></i> Ongoing Training
+          </button>
+          <button class="tr-tab" data-tab="completed">
+            <i class="fa-solid fa-check-circle"></i> Completed Training
+          </button>
+        </div>
+
+        <div class="tr-tab-content active" id="tr-content-future">
+          <div class="tr-content-inner">
+            <div class="tr-section-header">
+              <h3><i class="fa-solid fa-calendar-day"></i> Future Courses</h3>
+              <div class="tr-filter-row">
+                <button class="tr-filter-btn active" data-filter="all">All</button>
+                <button class="tr-filter-btn" data-filter="Beginner">Beginner</button>
+                <button class="tr-filter-btn" data-filter="Farmer">Farmer</button>
+                <button class="tr-filter-btn" data-filter="Entrepreneur">Entrepreneur</button>
+                <button class="tr-filter-btn" data-filter="Certification">Certification</button>
+              </div>
+            </div>
+            <div class="tr-course-grid" id="tr-course-grid-future">
+              <div class="tr-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tr-tab-content" id="tr-content-ongoing">
+          <div class="tr-content-inner">
+            <div class="tr-section-header">
+              <h3><i class="fa-solid fa-play-circle"></i> Ongoing Training</h3>
+            </div>
+            <div class="tr-course-grid" id="tr-course-grid-ongoing">
+              <div class="tr-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading your enrollments...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tr-tab-content" id="tr-content-completed">
+          <div class="tr-content-inner">
+            <div class="tr-section-header">
+              <h3><i class="fa-solid fa-check-circle"></i> Completed Training</h3>
+            </div>
+            <div class="tr-course-grid" id="tr-course-grid-completed">
+              <div class="tr-empty-state">
+                <i class="fa-solid fa-check-double"></i>
+                <h4>No completed training yet</h4>
+                <p>Your completed courses will appear here once you finish them.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -433,7 +502,7 @@
             <p>Loading products...</p>
           </div>
         </div>
-        <div id="product-pagination" class="admin-pagination" style="display:block;">
+        <div id="product-pagination" style="display:block;">
           <!-- pagination rendered by JS -->
         </div>
       </div>
@@ -551,9 +620,11 @@
         <div class="section-label">
           <i class="fa-solid fa-images"></i> Training Glimpses
         </div>
-        <h2 class="section-title" style="display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;">
+        <h2 class="section-title"
+          style="display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;">
           Our Training Glimpses
-          <button class="btn btn-secondary-glow" id="tg-admin-edit" style="display: none; padding: 6px 12px; font-size: 0.8rem; height: auto;">
+          <button class="btn btn-secondary-glow" id="tg-admin-edit"
+            style="display: none; padding: 6px 12px; font-size: 0.8rem; height: auto;">
             <i class="fa-solid fa-pen-to-square"></i> Edit Gallery
           </button>
         </h2>
@@ -575,8 +646,349 @@
     </section>
 
     <!-- ============================================================
+       ABOUT SPORE PAGE (Inline on Landing Page)
+   ============================================================ -->
+    <div id="about-landing-page" class="about-page" style="display: block;">
+      <div class="about-layout">
+        <!-- LEFT: Sticky Founder Profile -->
+        <aside class="about-founder-sticky">
+          <div class="about-founder-card">
+            <div class="about-founder-img-wrap">
+              <img src="C:\Users\admin\Downloads/founder.png" alt="Founder - Sporekart(Shriyap Enterprise)" />
+            </div>
+            <h3 class="about-founder-name">Smt. Jyothi R</h3>
+            <span class="about-founder-role">Founder & CEO, Sporekart(Shriyap Enterprise</span>
+            <p class="about-founder-quote">
+              "Every spore we cultivate carries a promise — quality, sustainability, and a better tomorrow for Indian
+              farmers."
+            </p>
+            <div class="about-founder-socials">
+              <a href="#" aria-label="LinkedIn"><i class="fa-brands fa-linkedin-in"></i></a>
+              <a href="#" aria-label="Twitter"><i class="fa-brands fa-twitter"></i></a>
+              <a href="#" aria-label="Instagram"><i class="fa-brands fa-instagram"></i></a>
+            </div>
+          </div>
+        </aside>
+
+        <!-- RIGHT: Scrolling Content -->
+        <div class="about-content">
+
+          <section class="about-block reveal-element">
+            <div class="section-label left">
+              <i class="fa-solid fa-seedling"></i> Our Story
+            </div>
+            <!--   <h2 class="about-heading">Shriyap Enterprise<br />A Journey of Passion, Perseverance, and Women
+              Entrepreneurship</h2>
+            <p class="about-text">
+              Sporekart began in 2016 in a small foultry farm shed in Rampura village, Davangere, Karnataka, Founded By
+              Smt.Jyothi R.
+              Shriyap Enterprise stands today as a remarkable example of how passion for agriculture can evolve into a
+              successful entrepreneurial venture.
+            </p>What began as the dream of a cultivation enthusiast gradually transformed into a thriving enterprise
+            dedicated to mushroom cultivation, spawn production, farmer empowerment, and sustainable agriculture. Driven
+            by determination and guided by a vision to create opportunities through innovative farming practices, Smt.
+            Jyothi R embarked on her entrepreneurial journey with a strong commitment to quality and customer trust.
+            <p class="about-text">In its early stages, Shriyap Enterprise entered the e-commerce ecosystem under the
+              brand Sporekart Spawn Seeds, focusing on high-quality mushroom spawn production and distribution. Through
+              consistent quality standards, customer satisfaction, and technical excellence, Sporekart Spawns quickly
+              earned recognition as a trusted brand among mushroom cultivators across India.
+            </p>
+            <p> Today, Sporekart products are available on leading agricultural and e-commerce platforms such as Amazon,
+              Flipkart, Agribegri, Kisan e-Shop, and several other marketplaces, reaching thousands of farmers,
+              entrepreneurs, and cultivation enthusiasts nationwide.
+              Today, we work with over 500 trained farmers across 50+ cities, supplying lab-tested spawn, dried
+              mushrooms,
+              and complete grow kits — backed by hands-on training and lifetime support.
+              Building upon its online success, Shriyap Enterprise expanded its presence into offline markets, creating
+              a strong distribution network for both fresh and dry mushrooms. The enterprise has established itself as a
+              reliable supplier of mushroom cultivation solutions, serving farmers, agripreneurs, educational
+              institutions, and aspiring business owners.
+            </p>
+            <p>
+              Over the years, Shriyap Enterprise has diversified its offerings to include:
+
+            <p> Supply of all varieties of mushroom spawns</p>
+            <p>Mushroom cultivation units</p>
+            <p>Spawn production units</p>
+            <p>Cultivation infrastructure and equipment</p>
+            <p>Technical training programs</p>
+            <p>End-to-end cultivation guidance and support</p>
+            <p>Farmer and entrepreneur mentoring</p>
+
+
+            </p>
+            <p>
+              Continuing its commitment to innovation, the enterprise has now ventured into the emerging field of
+              Medicinal Mushroom Cultivation, providing specialized cultivation support, training, and technical
+              assistance for medicinal mushroom varieties that offer significant health and commercial value.
+
+              At its heart, Shriyap Enterprise represents the strength of women entrepreneurship in rural India. The
+              journey of Smt. Jyothi R demonstrates that with dedication, continuous learning, and the right guidance,
+              women can successfully lead enterprises that create economic opportunities, promote sustainable
+              agriculture, and inspire future generations.
+
+              Today, Shriyap Enterprise continues its mission of empowering cultivators, supporting agricultural
+              innovation, and delivering quality products and services that contribute to the growth of India's mushroom
+              industry.
+            </p>
+            "From a cultivation enthusiast to a successful entrepreneur, the journey of Shriyap Enterprise is a story
+            of vision, resilience, and empowerment."
+
+            </p>-->
+
+
+            <h2>Shriyap Enterprise – A Journey of Passion, Perseverance, and Women Entrepreneurship</h2>
+
+            <p>
+              Founded in 2016 by <strong>Smt. Jyothi R</strong> in the rural village of
+              <strong>Basapura, Davangere</strong>, Shriyap Enterprise stands today as a
+              remarkable example of how passion for agriculture can evolve into a successful
+              entrepreneurial venture.
+            </p>
+
+            <p>
+              What began as the dream of a cultivation enthusiast gradually transformed into
+              a thriving enterprise dedicated to mushroom cultivation, spawn production,
+              farmer empowerment, and sustainable agriculture. Driven by determination and
+              guided by a vision to create opportunities through innovative farming practices,
+              Smt. Jyothi R embarked on her entrepreneurial journey with a strong commitment
+              to quality and customer trust.
+            </p>
+
+            <p>
+              A significant pillar in this journey has been the valuable guidance and support
+              of <strong>Sri Chethan of Tanvi Biotechnologies, Davangere</strong>, whose
+              mentorship helped shape the foundation and growth of the enterprise.
+            </p>
+
+            <p>
+              In its early stages, Shriyap Enterprise entered the e-commerce ecosystem under
+              the brand <strong>Sporekart Spawn Seeds</strong>, focusing on high-quality
+              mushroom spawn production and distribution. Through consistent quality
+              standards, customer satisfaction, and technical excellence, Sporekart Spawns
+              quickly earned recognition as a trusted brand among mushroom cultivators across
+              India.
+            </p>
+
+            <p>
+              Today, Sporekart products are available on leading agricultural and e-commerce
+              platforms such as <strong>Amazon, Flipkart, Agribegri, Kisan e-Shop</strong>,
+              and several other marketplaces, reaching thousands of farmers, entrepreneurs,
+              and cultivation enthusiasts nationwide.
+            </p>
+
+            <p>
+              Building upon its online success, Shriyap Enterprise expanded its presence into
+              offline markets, creating a strong distribution network for both
+              <strong>fresh and dry mushrooms</strong>. The enterprise has established itself
+              as a reliable supplier of mushroom cultivation solutions, serving farmers,
+              agripreneurs, educational institutions, and aspiring business owners.
+            </p>
+
+            <p>Over the years, Shriyap Enterprise has diversified its offerings to include:</p>
+
+            <ul>
+              <li>Supply of all varieties of mushroom spawns</li>
+              <li>Mushroom cultivation units</li>
+              <li>Spawn production units</li>
+              <li>Cultivation infrastructure and equipment</li>
+              <li>Technical training programs</li>
+              <li>End-to-end cultivation guidance and support</li>
+              <li>Farmer and entrepreneur mentoring</li>
+            </ul>
+
+            <p>
+              Continuing its commitment to innovation, the enterprise has now ventured into
+              the emerging field of <strong>Medicinal Mushroom Cultivation</strong>,
+              providing specialized cultivation support, training, and technical assistance
+              for medicinal mushroom varieties that offer significant health and commercial
+              value.
+            </p>
+
+            <p>
+              At its heart, Shriyap Enterprise represents the strength of women
+              entrepreneurship in rural India. The journey of Smt. Jyothi R demonstrates that
+              with dedication, continuous learning, and the right guidance, women can
+              successfully lead enterprises that create economic opportunities, promote
+              sustainable agriculture, and inspire future generations.
+            </p>
+
+            <p>
+              Today, Shriyap Enterprise continues its mission of empowering cultivators,
+              supporting agricultural innovation, and delivering quality products and
+              services that contribute to the growth of India's mushroom industry.
+            </p>
+
+            <blockquote>
+              "From a cultivation enthusiast to a successful entrepreneur, the journey of
+              Shriyap Enterprise is a story of vision, resilience, and empowerment."
+            </blockquote>
+
+          </section>
+
+          <section class="about-block reveal-element">
+            <div class="section-label left">
+              <i class="fa-solid fa-bullseye"></i> Our Mission
+            </div>
+            <h2 class="about-heading">Empowering Growers, One Spore at a Time</h2>
+            <p class="about-text">
+              We exist to bridge the gap between scientific mycology and grassroots farming. Every product we ship —
+              from
+              spawn seeds to grow kits — goes through rigorous lab quality checks to ensure higher yields and healthier
+              harvests for our growers.
+            </p>
+            <div class="about-stats-grid">
+              <div class="about-stat-card">
+                <strong>1000+</strong>
+                <span>Happy Customers</span>
+              </div>
+              <div class="about-stat-card">
+                <strong>500+</strong>
+                <span>Farmers Trained</span>
+              </div>
+              <div class="about-stat-card">
+                <strong>10+</strong>
+                <span>Mushroom Varieties</span>
+              </div>
+              <div class="about-stat-card">
+                <strong>50+</strong>
+                <span>Cities Delivered</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="about-block reveal-element">
+            <div class="section-label left">
+              <i class="fa-solid fa-flask"></i> What Makes Us Different
+            </div>
+            <h2 class="about-heading">Science-Backed. Farmer-Approved.</h2>
+            <div class="about-feature-list">
+              <div class="about-feature-item">
+                <i class="fa-solid fa-microscope"></i>
+                <div>
+                  <strong>Lab-Tested Spawn</strong>
+                  <p>Every batch is cultured under sterile lab conditions for maximum vigor and contamination
+                    resistance.</p>
+                </div>
+              </div>
+              <div class="about-feature-item">
+                <i class="fa-solid fa-truck-fast"></i>
+                <div>
+                  <strong>Pan-India Delivery</strong>
+                  <p>Cold-chain logistics partners ensure your spawn and fresh produce arrive in peak condition.</p>
+                </div>
+              </div>
+              <div class="about-feature-item">
+                <i class="fa-solid fa-graduation-cap"></i>
+                <div>
+                  <strong>Hands-On Training</strong>
+                  <p>From beginner workshops to advanced business mentorship — we walk with you at every stage.</p>
+                </div>
+              </div>
+              <div class="about-feature-item">
+                <i class="fa-solid fa-leaf"></i>
+                <div>
+                  <strong>100% Organic Practices</strong>
+                  <p>No harmful chemicals. Just clean substrate, clean spawn, and clean harvests.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="about-block reveal-element">
+            <div class="section-label left">
+              <i class="fa-solid fa-users"></i> Meet the Team
+            </div>
+            <h2 class="about-heading">The People Behind the Spores</h2>
+            <div class="about-team-grid">
+              <div class="about-team-card">
+                <img src="https://i.pravatar.cc/200?img=33" alt="Team member" />
+                <strong>Anjali Verma</strong>
+                <span>Head of Cultivation</span>
+              </div>
+              <div class="about-team-card">
+                <img src="https://i.pravatar.cc/200?img=45" alt="Team member" />
+                <strong>Ramesh Patil</strong>
+                <span>Training & Outreach Lead</span>
+              </div>
+              <div class="about-team-card">
+                <img src="https://i.pravatar.cc/200?img=22" alt="Team member" />
+                <strong>Sneha Rao</strong>
+                <span>Quality & Lab Operations</span>
+              </div>
+              <div class="about-team-card">
+                <img src="https://i.pravatar.cc/200?img=14" alt="Team member" />
+                <strong>Vikram Shetty</strong>
+                <span>Logistics & Supply Chain</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="about-block reveal-element about-cta-block">
+            <h2 class="about-heading">Ready to Start Growing?</h2>
+            <p class="about-text">
+              Whether you're a hobbyist, a farmer, or an entrepreneur — Sporekart has the products, training, and
+              support
+              to help you succeed.
+            </p>
+            <div class="about-cta-actions">
+              <a href="#shop" class="btn-primary-hero">Shop Now <i class="fa-solid fa-arrow-right"></i></a>
+              <a href="#training-section" class="btn-outline-hero">Explore Training <i
+                  class="fa-solid fa-arrow-right"></i></a>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+       SUCCESS STORIES SECTION
+   ============================================================ -->
+    <section class="success-section" id="success-section">
+      <div class="success-banner-wrap">
+        <div class="success-banner-overlay"></div>
+        <div class="success-banner-content">
+          <div class="section-label"
+            style="background: rgba(255,255,255,0.15); color: var(--white); padding: 6px 16px; border-radius: 30px; display: inline-flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+            <i class="fa-solid fa-trophy"></i> Real Impact
+          </div>
+          <h2 class="success-heading">Success Stories</h2>
+          <p class="success-subheading">
+            From backyard growers to thriving entrepreneurs — hear directly from the Sporekart community.
+          </p>
+        </div>
+      </div>
+
+      <div class="success-carousel-outer">
+        <button class="success-arrow left" id="success-prev"><i class="fa-solid fa-chevron-left"></i></button>
+        <div class="success-carousel-track" id="success-carousel-track">
+          <!-- Story cards rendered by JS -->
+        </div>
+        <button class="success-arrow right" id="success-next"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+
+      <div class="success-carousel-dots" id="success-carousel-dots"></div>
+
+      <div class="success-view-all-row">
+        <a href="#stories" class="btn-success-view">View All Stories <i class="fa-solid fa-arrow-right"></i></a>
+      </div>
+
+      <!-- Admin Edit Button for Success Stories -->
+      <div class="success-admin-bar" id="success-admin-bar" style="display: none;">
+        <button class="btn btn-secondary-glow" id="btn-admin-add-story" style="padding: 8px 16px; font-size: 0.85rem;">
+          <i class="fa-solid fa-plus"></i> Add Success Story
+        </button>
+        <button class="btn btn-secondary-glow" id="btn-admin-manage-stories"
+          style="padding: 8px 16px; font-size: 0.85rem;">
+          <i class="fa-solid fa-pen-to-square"></i> Manage Stories
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================================================
        STATS BAR
-  ============================================================ -->
+   ============================================================ -->
     <div class="stats-bar">
       <div class="stats-inner">
         <div class="stat-item">
@@ -740,6 +1152,236 @@
       </div>
     </div>
   </div>
+  <!-- ============================================================
+      about section
+  ============================================================ -->
+  <!-- ============================================================
+     ABOUT PAGE
+============================================================ -->
+  <div id="about-page" class="page-section about-page">
+    <div class="about-layout">
+      <!-- LEFT: Sticky Founder Profile -->
+      <aside class="about-founder-sticky">
+        <div class="about-founder-card">
+          <div class="about-founder-img-wrap">
+            <img src="https://i.pravatar.cc/400?img=12" alt="Founder - Sporekart" />
+          </div>
+          <h3 class="about-founder-name">Praveen Kodekal</h3>
+          <span class="about-founder-role">Founder &amp; CEO, Sporekart</span>
+          <p class="about-founder-quote">
+            "Every spore we cultivate carries a promise — quality, sustainability, and a better tomorrow for Indian
+            farmers."
+          </p>
+          <div class="about-founder-socials">
+            <a href="#" aria-label="LinkedIn"><i class="fa-brands fa-linkedin-in"></i></a>
+            <a href="#" aria-label="Twitter"><i class="fa-brands fa-twitter"></i></a>
+            <a href="#" aria-label="Instagram"><i class="fa-brands fa-instagram"></i></a>
+          </div>
+        </div>
+      </aside>
+
+      <!-- RIGHT: Scrolling Content -->
+      <div class="about-content">
+
+        <section class="about-block reveal-element">
+          <div class="section-label left">
+            <i class="fa-solid fa-seedling"></i> Our Story
+          </div>
+          <h2 class="about-heading">From a Backyard Experiment<br />to a Pan-India Movement</h2>
+          <p class="about-text">
+            Sporekart began in 2019 in a small shed in Davangere, Karnataka, with a single tray of oyster mushroom spawn
+            and a simple belief — that mushroom cultivation could change rural livelihoods. What started as a weekend
+            experiment quickly turned into a mission to make premium spawn, fresh mushrooms, and cultivation knowledge
+            accessible to every farmer, hobbyist, and entrepreneur across India.
+          </p>
+          <p class="about-text">
+            Today, we work with over 500 trained farmers across 50+ cities, supplying lab-tested spawn, dried mushrooms,
+            and complete grow kits — backed by hands-on training and lifetime support.
+          </p>
+        </section>
+
+        <section class="about-block reveal-element">
+          <div class="section-label left">
+            <i class="fa-solid fa-bullseye"></i> Our Mission
+          </div>
+          <h2 class="about-heading">Empowering Growers, One Spore at a Time</h2>
+          <p class="about-text">
+            We exist to bridge the gap between scientific mycology and grassroots farming. Every product we ship — from
+            spawn seeds to grow kits — goes through rigorous lab quality checks to ensure higher yields and healthier
+            harvests for our growers.
+          </p>
+          <div class="about-stats-grid">
+            <div class="about-stat-card">
+              <strong>1000+</strong>
+              <span>Happy Customers</span>
+            </div>
+            <div class="about-stat-card">
+              <strong>500+</strong>
+              <span>Farmers Trained</span>
+            </div>
+            <div class="about-stat-card">
+              <strong>10+</strong>
+              <span>Mushroom Varieties</span>
+            </div>
+            <div class="about-stat-card">
+              <strong>50+</strong>
+              <span>Cities Delivered</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="about-block reveal-element">
+          <div class="section-label left">
+            <i class="fa-solid fa-flask"></i> What Makes Us Different
+          </div>
+          <h2 class="about-heading">Science-Backed. Farmer-Approved.</h2>
+          <div class="about-feature-list">
+            <div class="about-feature-item">
+              <i class="fa-solid fa-microscope"></i>
+              <div>
+                <strong>Lab-Tested Spawn</strong>
+                <p>Every batch is cultured under sterile lab conditions for maximum vigor and contamination resistance.
+                </p>
+              </div>
+            </div>
+            <div class="about-feature-item">
+              <i class="fa-solid fa-truck-fast"></i>
+              <div>
+                <strong>Pan-India Delivery</strong>
+                <p>Cold-chain logistics partners ensure your spawn and fresh produce arrive in peak condition.</p>
+              </div>
+            </div>
+            <div class="about-feature-item">
+              <i class="fa-solid fa-graduation-cap"></i>
+              <div>
+                <strong>Hands-On Training</strong>
+                <p>From beginner workshops to advanced business mentorship — we walk with you at every stage.</p>
+              </div>
+            </div>
+            <div class="about-feature-item">
+              <i class="fa-solid fa-leaf"></i>
+              <div>
+                <strong>100% Organic Practices</strong>
+                <p>No harmful chemicals. Just clean substrate, clean spawn, and clean harvests.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="about-block reveal-element">
+          <div class="section-label left">
+            <i class="fa-solid fa-users"></i> Meet the Team
+          </div>
+          <h2 class="about-heading">The People Behind the Spores</h2>
+          <div class="about-team-grid">
+            <div class="about-team-card">
+              <img src="https://i.pravatar.cc/200?img=33" alt="Team member" />
+              <strong>Anjali Verma</strong>
+              <span>Head of Cultivation</span>
+            </div>
+            <div class="about-team-card">
+              <img src="https://i.pravatar.cc/200?img=45" alt="Team member" />
+              <strong>Ramesh Patil</strong>
+              <span>Training &amp; Outreach Lead</span>
+            </div>
+            <div class="about-team-card">
+              <img src="https://i.pravatar.cc/200?img=22" alt="Team member" />
+              <strong>Sneha Rao</strong>
+              <span>Quality &amp; Lab Operations</span>
+            </div>
+            <div class="about-team-card">
+              <img src="https://i.pravatar.cc/200?img=14" alt="Team member" />
+              <strong>Vikram Shetty</strong>
+              <span>Logistics &amp; Supply Chain</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="about-block reveal-element about-cta-block">
+          <h2 class="about-heading">Ready to Start Growing?</h2>
+          <p class="about-text">
+            Whether you're a hobbyist, a farmer, or an entrepreneur — Sporekart has the products, training, and support
+            to help you succeed.
+          </p>
+          <div class="about-cta-actions">
+            <a href="#shop" class="btn-primary-hero">Shop Now <i class="fa-solid fa-arrow-right"></i></a>
+            <a href="#training-section" class="btn-outline-hero">Explore Training <i
+                class="fa-solid fa-arrow-right"></i></a>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+  <!-- ============================================================
+     SUCCESS STORIES PAGE
+============================================================ -->
+  <div id="stories-page" class="page-section stories-page">
+    <div class="stories-page-header">
+      <div class="stories-page-header-content">
+        <div class="section-label"
+          style="background: rgba(255,255,255,0.15); color: var(--white); padding: 6px 16px; border-radius: 30px; display: inline-flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+          <i class="fa-solid fa-trophy"></i> Real Impact
+        </div>
+        <h2 class="stories-page-title">Our Success Stories</h2>
+        <p class="stories-page-subtitle">
+          Real people. Real transformations. Discover how Sporekart is empowering growers across India.
+        </p>
+      </div>
+    </div>
+
+    <div class="stories-grid" id="stories-grid">
+      <!-- Story cards rendered by JS -->
+    </div>
+  </div>
+
+  <!-- ============================================================
+     STORY DETAIL PAGE (Single Story View)
+============================================================ -->
+  <div id="story-detail-page" class="page-section story-detail-page">
+    <div class="story-detail-container">
+      <button class="story-detail-back" id="btn-story-back">
+        <i class="fa-solid fa-arrow-left"></i> Back to Stories
+      </button>
+      <div id="story-detail-content">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+     BLOGS LISTING PAGE
+  ============================================================ -->
+  <div id="blogs-page" class="page-section blogs-page">
+    <div class="container">
+      <header class="blogs-header">
+        <div class="section-label">
+          <i class="fa-solid fa-newspaper"></i> Insights
+        </div>
+        <h1 class="blogs-title">Blogs</h1>
+        <p class="blogs-subtitle">Insights, Updates &amp; Industry Knowledge</p>
+      </header>
+
+      <div class="blogs-list" id="blogs-list">
+        <div class="blogs-loading">
+          <i class="fa-solid fa-spinner fa-spin"></i> Loading blogs...
+        </div>
+      </div>
+
+      <div class="blogs-pagination" id="blogs-pagination"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+     BLOG DETAIL PAGE
+  ============================================================ -->
+  <div id="blog-detail-page" class="page-section blog-detail-page">
+    <div class="container">
+      <div id="blog-detail-content">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
 
   <footer class="site-footer" id="footer">
     <div class="footer-inner">
@@ -761,7 +1403,7 @@
         <div class="footer-socials">
           <a href="https://www.facebook.com/pravaramedia" target="_blank" rel="noopener noreferrer"
             aria-label="Facebook"><i class="fa-brands fa-facebook-f"></i></a>
-          <a href="https://www.instagram.com/pravaramedia" target="_blank" rel="noopener noreferrer"
+          <a href="https://www.instagram.com/sporekart" target="_blank" rel="noopener noreferrer"
             aria-label="Instagram"><i class="fa-brands fa-instagram"></i></a>
           <a href="https://www.youtube.com/@YOUR_CHANNEL" target="_blank" rel="noopener noreferrer"
             aria-label="YouTube"><i class="fa-brands fa-youtube"></i></a>
@@ -808,7 +1450,7 @@
       <div class="footer-col">
         <h4>Information</h4>
         <ul>
-          <li><a href="#">About Us</a></li>
+          <li><a href="#about">About Us</a></li>
           <li><a href="#">Blog</a></li>
           <li><a href="#">Shipping & Delivery</a></li>
           <li><a href="#">Returns & Refunds</a></li>
@@ -1342,37 +1984,46 @@
 
         <div class="input-group">
           <label for="checkout-delivery-phone">Delivery phone</label>
-          <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="15" />
+          <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="10" />
+          <span class="input-error-msg" id="error-checkout-delivery-phone"></span>
         </div>
 
         <div class="input-group">
           <label for="checkout-delivery-pincode">Pincode</label>
           <input type="text" id="checkout-delivery-pincode" placeholder="Enter 6-digit pincode" maxlength="6" />
+          <span class="input-error-msg" id="error-checkout-delivery-pincode"></span>
         </div>
 
         <div class="input-group">
           <label for="checkout-address-line1">Address Line 1 <span style="color:var(--color-danger)">*</span></label>
           <input type="text" id="checkout-address-line1" placeholder="House / Flat no, Building, Street" />
+          <span class="input-error-msg" id="error-checkout-address-line1"></span>
         </div>
 
         <div class="input-group">
           <label for="checkout-address-line2">Address Line 2 <span style="color:var(--color-danger)">*</span></label>
           <input type="text" id="checkout-address-line2" placeholder="Area, Sector, Locality" />
+          <span class="input-error-msg" id="error-checkout-address-line2"></span>
         </div>
 
         <div class="input-group">
           <label for="checkout-landmark">Near by Landmark <span style="color:var(--color-danger)">*</span></label>
           <input type="text" id="checkout-landmark" placeholder="Near XYZ" />
+          <span class="input-error-msg" id="error-checkout-landmark"></span>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
           <div class="input-group">
             <label for="checkout-state">State <span style="color:var(--color-danger)">*</span></label>
-            <select id="checkout-state" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+            <select id="checkout-state"
+              style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+            <span class="input-error-msg" id="error-checkout-state"></span>
           </div>
           <div class="input-group">
             <label for="checkout-city">City <span style="color:var(--color-danger)">*</span></label>
-            <select id="checkout-city" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+            <select id="checkout-city"
+              style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+            <span class="input-error-msg" id="error-checkout-city"></span>
           </div>
         </div>
 
@@ -1406,6 +2057,10 @@
     <div class="mobile-cat-nav-inner" id="mobile-cat-nav-inner">
       <!-- Populated dynamically from API -->
     </div>
+    <button class="mobile-cart-btn" id="btn-mobile-cart">
+      <i class="fa-solid fa-cart-shopping"></i>
+      <span class="mobile-cart-badge" id="mobile-cart-count">0</span>
+    </button>
   </nav>
 
   <!-- HIDDEN: Compatibility stubs for app.js – all required IDs/classes preserved -->
@@ -1430,6 +2085,13 @@
       <span id="res-water"></span>
     </div>
   </div>
+
+  <!-- WhatsApp Floating Icon -->
+  <a href="https://wa.me/917204709870" target="_blank" rel="noopener noreferrer" class="whatsapp-float"
+    aria-label="Chat on WhatsApp">
+    <i class="fa-brands fa-whatsapp"></i>
+    <span class="whatsapp-tooltip">Chat with us!</span>
+  </a>
 
   <script type="module" src="/src/app.js"></script>
   <script>

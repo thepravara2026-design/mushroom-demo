@@ -210,7 +210,7 @@ async function run() {
     method: 'POST',
     body: JSON.stringify({
       email: 'admin@sporekart.com',
-      password: 'admin123',
+      password: '123456',
     }),
   }).catch((e) => fail(e.message));
   pass(

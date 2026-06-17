@@ -2,6 +2,7 @@ import {
   state,
   saveAuth,
   clearAuth,
+  clearCart,
   saveCart,
   saveUserProfile,
 } from './utils/state.js';
@@ -10,8 +11,10 @@ import { traineeAuthModal } from './components/TraineeAuthModal.js';
 import { profileModal } from './components/ProfileModal.js';
 import { authApi } from './api/authApi.js';
 import { trainingApi } from './api/trainingApi.js';
+import { blogApi } from './api/blogApi.js';
 import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
-import { showErrorToast, showSuccessToast } from './utils/notify.js';
+import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal } from './utils/notify.js';
+import { isValidIndianPhone } from './utils/validation.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
@@ -51,6 +54,41 @@ const STATE_CITIES = {
 let _shopInventoryPage = 1;
 let shopPageSize = 10;
 
+// Blog pagination state
+let _blogPage = 1;
+let blogPageSize = 10;
+let _allBlogs = [];
+
+// ── Recently Read Blogs (localStorage) ──
+const RECENTLY_READ_KEY = 'recentlyReadBlogs';
+const MAX_RECENTLY_READ = 20;
+
+function _getRecentlyReadBlogs() {
+  try {
+    const raw = localStorage.getItem(RECENTLY_READ_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function _saveRecentlyReadBlog(slug) {
+  try {
+    let list = _getRecentlyReadBlogs();
+    // Remove existing entry for this slug (to move it to top)
+    list = list.filter(item => item.slug !== slug);
+    // Add to the beginning with current timestamp
+    list.unshift({ slug, timestamp: Date.now() });
+    // Cap the list size
+    if (list.length > MAX_RECENTLY_READ) {
+      list = list.slice(0, MAX_RECENTLY_READ);
+    }
+    localStorage.setItem(RECENTLY_READ_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
 function getShopInventorySortValue() {
   return document.getElementById('shop-inventory-sort')?.value || 'name_asc';
 }
@@ -68,8 +106,51 @@ function applyShopInventorySort(products) {
   });
 }
 
+// ── Inactivity auto-logout ──────────────────────────────────────
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+let _inactivityTimer = null;
+let _inactivityBound = [];
+
+function _clearInactivityTimer() {
+  if (_inactivityTimer) { clearTimeout(_inactivityTimer); _inactivityTimer = null; }
+}
+
+function _removeInactivityListeners() {
+  _inactivityBound.forEach(({ el, type, fn }) => el.removeEventListener(type, fn));
+  _inactivityBound = [];
+}
+
+function _resetInactivityTimer() {
+  if (!state.token || !state.user) return;
+  _clearInactivityTimer();
+  _inactivityTimer = setTimeout(_onInactivityTimeout, SESSION_TIMEOUT_MS);
+}
+
+function _onInactivityTimeout() {
+  saveCart();
+  showInfoToast('Session expired due to inactivity. Your cart has been saved.');
+  logout();
+}
+
+function _startInactivityTracking() {
+  _stopInactivityTracking();
+  _resetInactivityTimer();
+  const events = ['click', 'keydown', 'touchstart', 'mousemove', 'scroll'];
+  const handler = () => _resetInactivityTimer();
+  events.forEach(type => {
+    window.addEventListener(type, handler, { passive: true });
+    _inactivityBound.push({ el: window, type, fn: handler });
+  });
+}
+
+function _stopInactivityTracking() {
+  _clearInactivityTimer();
+  _removeInactivityListeners();
+}
+
 // Initialize App
 function initApp() {
+  window.scrollTo(0, 0);
   initEventListeners();
   loadUser();
   fetchProducts();
@@ -97,6 +178,17 @@ function initApp() {
 
   // Homepage mushroom carousel
   initCarousel();
+
+  // Success Stories carousel on landing page
+  requestAnimationFrame(() => {
+    renderSuccessCarousel();
+  });
+
+  // Wire up admin controls for success stories
+  if (state.user && state.user.role === 'admin') {
+    const adminBar = document.getElementById('success-admin-bar');
+    if (adminBar) adminBar.style.display = 'flex';
+  }
 
   // If hash is present, route to it
   handleRouting();
@@ -186,7 +278,14 @@ function initOrderSse() {
   }
 }
 
-window.addEventListener('auth:changed', () => initOrderSse());
+window.addEventListener('auth:changed', () => {
+  initOrderSse();
+  if (state.token && state.user) {
+    _startInactivityTracking();
+  } else {
+    _stopInactivityTracking();
+  }
+});
 
 // Training feature removed: no fetchTrainings implementation
 try {
@@ -248,7 +347,7 @@ function handleRouting() {
   const pageCheckout = document.getElementById('checkout-page');
   const pageTrack = document.getElementById('tracker-page');
   const pageAdmin = document.getElementById('admin-page');
-
+  const pageAbout = document.getElementById('about-page');
   const heroSection = document.getElementById('hero-section');
 
   // Deactivate all nav links & sections
@@ -260,11 +359,37 @@ function handleRouting() {
   if (pageCheckout) pageCheckout.classList.remove('active');
   pageTrack.classList.remove('active');
   if (pageAdmin) pageAdmin.classList.remove('active');
+  if (pageAbout) pageAbout.classList.remove('active');
 
   if (hash === '#shop' || hash === '') {
     navShop.classList.add('active');
     pageShop.classList.add('active');
     if (heroSection) heroSection.classList.remove('hidden');
+  } else if (hash === '#about') {
+    if (pageAbout) pageAbout.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    requestAnimationFrame(() => {
+      document.querySelectorAll('#about-page .about-block, #about-page .reveal-element').forEach((el) => {
+        el.classList.add('revealed');
+      });
+      if (pageAbout) pageAbout.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  } else if (hash === '#training-section') {
+    navShop.classList.add('active');
+    pageShop.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    requestAnimationFrame(() => {
+      const target = document.getElementById('training-section');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  } else if (hash === '#footer') {
+    navShop.classList.add('active');
+    pageShop.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    requestAnimationFrame(() => {
+      const target = document.getElementById('footer');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   } else if (hash === '#checkout') {
     if (!state.user) {
       authModal.open('buyer', () => {
@@ -283,7 +408,6 @@ function handleRouting() {
     if (pageCheckout) pageCheckout.classList.add('active');
     renderCheckoutPage();
   } else if (hash.startsWith('#track')) {
-    // Access validation for tracking is available to any logged-in user
     if (!state.user) {
       authModal.open('buyer', () => {
         window.location.hash = '#track';
@@ -296,7 +420,6 @@ function handleRouting() {
     if (heroSection) heroSection.classList.add('hidden');
     fetchOrders();
 
-    // Check if tracking specific order from hash (e.g. #track-orderId)
     const match = hash.match(/#track-(.+)/);
     if (match && match[1]) {
       state.activeTrackingId = match[1];
@@ -319,6 +442,67 @@ function handleRouting() {
     /* ignore */
   }
 
+  // Stories page routes
+  const pageStories = document.getElementById('stories-page');
+  const pageStoryDetail = document.getElementById('story-detail-page');
+
+  if (hash === '#stories') {
+    if (pageStories) pageStories.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    pageShop.classList.remove('active');
+    if (pageAbout) pageAbout.classList.remove('active');
+    if (pageTrack) pageTrack.classList.remove('active');
+    if (pageCheckout) pageCheckout.classList.remove('active');
+    renderStoriesGrid();
+    return;
+  }
+
+  const storyMatch = hash.match(/^#story-(.+)/);
+  if (storyMatch && storyMatch[1]) {
+    if (pageStoryDetail) pageStoryDetail.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    pageShop.classList.remove('active');
+    if (pageAbout) pageAbout.classList.remove('active');
+    if (pageTrack) pageTrack.classList.remove('active');
+    if (pageCheckout) pageCheckout.classList.remove('active');
+    if (pageStories) pageStories.classList.remove('active');
+    renderStoryDetail(storyMatch[1]);
+    return;
+  }
+
+  // Blog routes
+  const pageBlogs = document.getElementById('blogs-page');
+  const pageBlogDetail = document.getElementById('blog-detail-page');
+
+  if (hash === '#blogs') {
+    if (pageBlogs) pageBlogs.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    pageShop.classList.remove('active');
+    if (pageAbout) pageAbout.classList.remove('active');
+    if (pageTrack) pageTrack.classList.remove('active');
+    if (pageCheckout) pageCheckout.classList.remove('active');
+    if (pageStories) pageStories.classList.remove('active');
+    if (pageStoryDetail) pageStoryDetail.classList.remove('active');
+    _blogPage = 1;
+    renderBlogsGrid();
+    return;
+  }
+
+  const blogMatch = hash.match(/^#blog-(.+)/);
+  if (blogMatch && blogMatch[1]) {
+    if (pageBlogDetail) pageBlogDetail.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    pageShop.classList.remove('active');
+    if (pageAbout) pageAbout.classList.remove('active');
+    if (pageTrack) pageTrack.classList.remove('active');
+    if (pageCheckout) pageCheckout.classList.remove('active');
+    if (pageStories) pageStories.classList.remove('active');
+    if (pageStoryDetail) pageStoryDetail.classList.remove('active');
+    if (pageBlogs) pageBlogs.classList.remove('active');
+    renderBlogDetail(blogMatch[1]);
+    return;
+  }
+
   // Additional SPA routes for training register and training courses (anchor-based)
   const shopSection = document.getElementById('shop-section');
   const productsSection = document.getElementById('products-section');
@@ -331,13 +515,12 @@ function handleRouting() {
       if (shopSection) shopSection.style.display = 'block';
       if (productsSection) productsSection.style.display = 'block';
       if (heroSection) heroSection.classList.add('hidden');
-      // scroll into view for registration
       regSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     if (hash === '#training-courses') {
-      // Access control: must be logged in as trainee
-      if (!state.token || !state.user || state.user.role !== 'trainee') {
+      // Require authentication for training courses - any authenticated user can access
+      if (!state.token || !state.user) {
         if (regSection) regSection.style.display = 'none';
         if (coursesSection) coursesSection.style.display = 'none';
         if (shopSection) shopSection.style.display = 'block';
@@ -354,11 +537,9 @@ function handleRouting() {
       if (productsSection) productsSection.style.display = 'none';
       if (heroSection) heroSection.classList.add('hidden');
       coursesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // load courses on navigation
       renderTrainingCourses();
       return;
     }
-    // default: hide both
     if (regSection) regSection.style.display = 'none';
     if (coursesSection) coursesSection.style.display = 'none';
     if (shopSection) shopSection.style.display = 'block';
@@ -367,6 +548,7 @@ function handleRouting() {
     // ignore if elements not present
   }
 }
+
 
 // ==========================================================================
 // EVENT LISTENERS
@@ -378,6 +560,7 @@ function initEventListeners() {
   if (btnNavShop) {
     btnNavShop.addEventListener('click', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       const dd = document.getElementById('cat-dropdown-menu');
       if (!dd) return;
       dd.classList.toggle('hidden');
@@ -386,6 +569,18 @@ function initEventListeners() {
       window.location.hash = '#shop';
     });
   }
+
+  // Close category dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    const dd = document.getElementById('cat-dropdown-menu');
+    const btn = document.getElementById('btn-nav-shop');
+    if (dd && !dd.classList.contains('hidden')) {
+      if (!dd.contains(e.target) && !btn?.contains(e.target)) {
+        dd.classList.add('hidden');
+        dd.setAttribute('aria-hidden', 'true');
+      }
+    }
+  });
 
   document.getElementById('btn-nav-track').addEventListener('click', (e) => {
     e.preventDefault();
@@ -396,6 +591,17 @@ function initEventListeners() {
     } else {
       window.location.hash = '#track';
     }
+  });
+
+  // Nav link click handlers (About, Training, Contact, etc.)
+  document.querySelectorAll('.nav-link:not(#btn-nav-track)').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const href = link.getAttribute('href');
+      if (href) {
+        window.location.hash = href;
+      }
+    });
   });
 
   // Training Section Explore button -> open trainee auth modal
@@ -511,9 +717,10 @@ function initEventListeners() {
     window.location.hash = '#shop';
   });
 
-  document
-    .getElementById('hero-shop-btn')
-    .addEventListener('click', () => { window.location.hash = '#shop'; });
+  const heroShopBtn = document.getElementById('hero-shop-btn');
+  if (heroShopBtn) {
+    heroShopBtn.addEventListener('click', () => { window.location.hash = '#shop'; });
+  }
 
   // Listen for global auth changes from new modules
   window.addEventListener('auth:changed', () => {
@@ -525,6 +732,10 @@ function initEventListeners() {
   document
     .getElementById('btn-open-cart')
     .addEventListener('click', () => { toggleCartDrawer(true); });
+  const btnMobileCart = document.getElementById('btn-mobile-cart');
+  if (btnMobileCart) {
+    btnMobileCart.addEventListener('click', () => { toggleCartDrawer(true); });
+  }
   document
     .getElementById('btn-close-cart')
     .addEventListener('click', () => { toggleCartDrawer(false); });
@@ -778,7 +989,9 @@ function initEventListeners() {
       menu.style.gap = '8px';
       menu.innerHTML = `
         <button class="btn btn-secondary-glow" id="auth-choice-user" style="width:100%;">User Login</button>
-        <button class="btn btn-secondary" id="auth-choice-admin" style="width:100%;">Staff / Admin Login</button>
+        <button class="btn btn-secondary" id="auth-choice-trainee" style="width:100%;">Trainee / Grower Login</button>
+        <div style="border-top:1px solid #eee;margin:4px 0"></div>
+        <button class="btn btn-secondary" id="auth-choice-admin" style="width:100%;font-size:0.85rem;">Admin Login</button>
       `;
       document.body.appendChild(menu);
 
@@ -800,6 +1013,12 @@ function initEventListeners() {
       document.getElementById('auth-choice-user')?.addEventListener('click', () => {
         closeMenu();
         authModal.open('buyer');
+      });
+      document.getElementById('auth-choice-trainee')?.addEventListener('click', () => {
+        closeMenu();
+        traineeAuthModal.open(() => {
+          window.location.hash = '#training-courses';
+        });
       });
       document.getElementById('auth-choice-admin')?.addEventListener('click', () => {
         closeMenu();
@@ -876,6 +1095,7 @@ function logout() {
   updateAuthHeaderUI();
   window.location.hash = '#shop';
 }
+window.logout = logout;
 
 function closeUserProfileDropdown() {
   const dropdown = document.getElementById('user-profile-dropdown');
@@ -1105,19 +1325,17 @@ function renderProducts(productsList) {
   const paginationWrap = document.getElementById('product-pagination');
   if (paginationWrap) {
     paginationWrap.innerHTML = `
-      <div class="admin-pagination">
-        <div class="admin-pagination-info">Showing ${start + 1}–${Math.min(start + pageProducts.length, sorted.length)} of ${sorted.length} products</div>
-        <div class="admin-pagination-actions">
-          <button type="button" class="btn btn-secondary" id="shop-page-prev" ${_shopInventoryPage === 1 ? 'disabled' : ''}>
-            <i class="fa-solid fa-chevron-left"></i>
-          </button>
-          <span class="admin-pagination-label">Page ${_shopInventoryPage} of ${totalPages}</span>
-          <button type="button" class="btn btn-secondary" id="shop-page-next" ${_shopInventoryPage === totalPages ? 'disabled' : ''}>
-            <i class="fa-solid fa-chevron-right"></i>
-          </button>
-        </div>
-      </div>
-    `;
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding: 0 4px;">
+    <button type="button" id="shop-page-prev" ${_shopInventoryPage === 1 ? 'disabled' : ''} 
+      style="background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:1.4rem; padding:4px 8px; opacity:${_shopInventoryPage === 1 ? '0.3' : '1'};">
+      <i class="fa-solid fa-chevron-left">prev</i>
+    </button>
+    <button type="button" id="shop-page-next" ${_shopInventoryPage === totalPages ? 'disabled' : ''}
+      style="background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:1.4rem; padding:4px 8px; opacity:${_shopInventoryPage === totalPages ? '0.3' : '1'};">
+      <i class="fa-solid fa-chevron-right">next</i>
+    </button>
+  </div>
+`;
 
     const prev = document.getElementById('shop-page-prev');
     const next = document.getElementById('shop-page-next');
@@ -1503,9 +1721,11 @@ async function fetchShippingSettings() {
 function updateCartUI() {
   const container = document.getElementById('cart-items-container');
   const countBadge = document.getElementById('cart-count');
+  const mobileCountBadge = document.getElementById('mobile-cart-count');
 
   const totalCount = state.cart.reduce((sum, item) => sum + item.quantity, 0);
   countBadge.textContent = totalCount;
+  if (mobileCountBadge) mobileCountBadge.textContent = totalCount;
 
   if (state.cart.length === 0) {
     container.innerHTML = `
@@ -1666,7 +1886,7 @@ function initTrainingRegister() {
     const country = phoneCountryEl?.value || '+91';
     const name = (nameEl?.value || '').trim();
     const trainingRole = roleEl?.value || 'trainee';
-    if (!phone) return showError('Please provide a phone number.');
+    if (!isValidIndianPhone(phone)) return showError('Enter a valid Indian phone number (e.g. +91 9876543210).');
     try {
       phoneOtpBtn.disabled = true;
       phoneOtpBtn.textContent = 'Sending…';
@@ -1750,162 +1970,229 @@ function initTrainingRegister() {
 }
 
 async function renderTrainingCourses() {
-  const list = document.getElementById('training-courses-list');
-  if (!list) return;
-  // Render role-specific plans above the trainings
-  const trainingRole = (state.user && state.user.trainingRole)
-    || localStorage.getItem('training_role')
-    || 'trainee';
-  const plansWrap = list.parentElement;
-  // Add welcome message at top
-  if (!document.getElementById('training-welcome-msg')) {
-    const welcomeDiv = document.createElement('div');
-    welcomeDiv.id = 'training-welcome-msg';
-    welcomeDiv.innerHTML = '<div style="text-align:center;margin-bottom:24px;padding:16px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:8px;color:#fff;"><h3 style="margin:0 0 8px;font-size:1.5rem;">Welcome to Sporekart Training & Courses</h3><p style="margin:0;font-size:0.95rem;">Learn, grow, and build your mushroom business with us</p></div>';
-    plansWrap.insertBefore(welcomeDiv, plansWrap.firstChild);
-  }
+  const dash = document.querySelector('.tr-dashboard');
+  if (!dash) return;
 
-  const plansContainerId = 'training-plans-container';
-  let plansContainer = document.getElementById(plansContainerId);
-  if (!plansContainer) {
-    plansContainer = document.createElement('div');
-    plansContainer.id = plansContainerId;
-    plansContainer.style.display = 'grid';
-    plansContainer.style.gridTemplateColumns = 'repeat(auto-fit,minmax(220px,1fr))';
-    plansContainer.style.gap = '12px';
-    plansWrap.insertBefore(plansContainer, list);
-  }
-  // Define plans per role
-  const plansByRole = {
-    trainee: [
-      {
-        title: 'Starter',
-        price: 'Free',
-        desc: 'Intro modules, community access',
-      },
-      {
-        title: 'Pro Trainee',
-        price: '₹2,499',
-        desc: 'Live workshops + certification',
-      },
-    ],
-    farmer: [
-      {
-        title: 'Field Ready',
-        price: '₹4,999',
-        desc: 'On-farm training + supply chain',
-      },
-      {
-        title: 'Scale Up',
-        price: '₹14,999',
-        desc: 'Business modelling + crop scaling',
-      },
-    ],
-    entrepreneur: [
-      {
-        title: 'Biz Launch',
-        price: '₹9,999',
-        desc: 'Market & product strategy',
-      },
-      {
-        title: 'Growth Partner',
-        price: '₹29,999',
-        desc: 'Mentorship + investor introductions',
-      },
-    ],
-  };
-  const plans = plansByRole[trainingRole] || plansByRole.trainee;
-  plansContainer.innerHTML = plans
-    .map(
-      (p) => `
-    <div class="plan-card" style="padding:12px;border-radius:8px;border:1px solid #eee;background:#fff;">
-      <h4 style="margin:0 0 6px;">${p.title}</h4>
-      <div style="font-weight:700;margin-bottom:6px;">${p.price}</div>
-      <div style="color:#4b5563;font-size:0.95rem;">${p.desc}</div>
-      <div style="margin-top:8px;"><button class="btn btn-primary btn-plan-choose">Choose</button></div>
-    </div>
-  `,
-    )
-    .join('');
+  const futureGrid = document.getElementById('tr-course-grid-future');
+  const ongoingGrid = document.getElementById('tr-course-grid-ongoing');
+  const completedGrid = document.getElementById('tr-course-grid-completed');
+  if (!futureGrid || !ongoingGrid) return;
 
-  plansContainer.querySelectorAll('.btn-plan-choose').forEach((b) => {
-    b.addEventListener('click', () => showSuccessToast('Plan selection saved. Admin will contact you.'));
-  });
-  list.innerHTML = '<div class="grid-skeleton"><i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...</div>';
+  let allTrainings = [];
+  let enrolledIds = new Set();
+
   try {
     const trainings = await trainingApi.getTrainings();
-    const trainingRole = (state.user && state.user.trainingRole)
-      || localStorage.getItem('training_role')
-      || 'trainee';
-    const visibleTrainingsAll = Array.isArray(trainings) ? trainings : [];
-    const visibleTrainings = visibleTrainingsAll.filter(
-      (t) => !t.allowed_roles
-        || t.allowed_roles.length === 0
-        || (t.allowed_roles || []).includes(trainingRole),
-    );
-    if (!Array.isArray(visibleTrainings) || visibleTrainings.length === 0) {
-      list.innerHTML = '<div class="grid-skeleton">No trainings available at the moment.</div>';
+    allTrainings = Array.isArray(trainings) ? trainings : [];
+
+    if (state.user) {
+      try {
+        const enrollments = await trainingApi.getMyEnrollments();
+        if (Array.isArray(enrollments)) {
+          enrolledIds = new Set(enrollments.map(e => e.training_id));
+        }
+      } catch (e) {
+        /* non-critical */
+      }
+    }
+  } catch (err) {
+    futureGrid.innerHTML = '<div class="tr-loading" style="color:#e74c3c;">Failed to load trainings.</div>';
+    return;
+  }
+
+  // ── Tab Switching (once) ──
+  const tabBar = document.getElementById('tr-tab-bar');
+  if (tabBar && !tabBar.dataset.bound) {
+    tabBar.dataset.bound = '1';
+    tabBar.querySelectorAll('.tr-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabBar.querySelectorAll('.tr-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('.tr-tab-content').forEach(c => c.classList.remove('active'));
+        const target = document.getElementById(`tr-content-${tab.dataset.tab}`);
+        if (target) target.classList.add('active');
+      });
+    });
+  }
+
+  // ── Back to Shop (once) ──
+  const backBtn = document.getElementById('btn-tr-back-shop');
+  if (backBtn && !backBtn.dataset.bound) {
+    backBtn.dataset.bound = '1';
+    backBtn.addEventListener('click', () => {
+      window.location.hash = '#shop';
+    });
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  function getDate(dateStr) {
+    const d = new Date(dateStr);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  // ── Render Future Courses ──
+  function renderFutureCourses(filter) {
+    const category = filter || 'all';
+    const visible = allTrainings.filter(t => {
+      if (!t.start_date) return false;
+      if (category !== 'all' && (t.category || '').toLowerCase() !== category.toLowerCase()) return false;
+      return getDate(t.start_date) >= today;
+    });
+
+    if (visible.length === 0) {
+      futureGrid.innerHTML = `<div class="tr-empty-state">
+        <i class="fa-solid fa-calendar-day"></i>
+        <h4>No courses found</h4>
+        <p>${category === 'all' ? 'No trainings available at the moment.' : `No ${category} courses available.`}</p>
+      </div>`;
       return;
     }
 
-    list.innerHTML = visibleTrainings
-      .map(
-        (t) => `
-      <div class="training-card" data-id="${t.id}" style="padding:12px;border-radius:8px;border:1px solid #eee;background:#fff;">
-        <img src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}" style="width:100%;height:160px;object-fit:cover;border-radius:6px;margin-bottom:8px;">
-        <h4>${t.title}</h4>
-        <p style="color:#4b5563;font-size:0.95rem;">${t.description || ''}</p>
-        <div style="margin-top:8px;display:flex;gap:8px;">
-          <button class="btn btn-primary btn-enroll" data-id="${t.id}">Enroll</button>
-          <button class="btn btn-outline btn-shop-from-training">Shop Now</button>
+    futureGrid.innerHTML = visible.map(t => buildCourseCard(t, enrolledIds)).join('');
+    wireEnrollButtons(futureGrid);
+  }
+
+  // ── Render Ongoing ──
+  function renderOngoing() {
+    const enrolled = allTrainings.filter(t =>
+      enrolledIds.has(t.id) &&
+      t.start_date && getDate(t.start_date) <= today &&
+      t.end_date && getDate(t.end_date) >= today
+    );
+    if (enrolled.length === 0) {
+      ongoingGrid.innerHTML = `<div class="tr-empty-state">
+        <i class="fa-solid fa-play-circle"></i>
+        <h4>No ongoing training</h4>
+        <p>Enroll in a course to get started with your training journey.</p>
+      </div>`;
+      return;
+    }
+    ongoingGrid.innerHTML = enrolled.map(t => buildCourseCard(t, enrolledIds, true)).join('');
+    wireEnrollButtons(ongoingGrid);
+  }
+
+  // ── Render Completed ──
+  function renderCompleted() {
+    const completed = allTrainings.filter(t =>
+      enrolledIds.has(t.id) &&
+      t.end_date && getDate(t.end_date) < today
+    );
+    if (completed.length === 0) {
+      completedGrid.innerHTML = `<div class="tr-empty-state">
+        <i class="fa-solid fa-check-double"></i>
+        <h4>No completed training yet</h4>
+        <p>Your completed courses will appear here once you finish them.</p>
+      </div>`;
+      return;
+    }
+    completedGrid.innerHTML = completed.map(t => buildCourseCard(t, enrolledIds, true, true)).join('');
+    wireEnrollButtons(completedGrid);
+  }
+
+  // ── Filter Buttons ──
+  const filterRow = document.querySelector('.tr-filter-row');
+  if (filterRow) {
+    filterRow.querySelectorAll('.tr-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterRow.querySelectorAll('.tr-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderFutureCourses(btn.dataset.filter);
+      });
+    });
+  }
+
+  // Initial render
+  renderFutureCourses('all');
+  renderOngoing();
+  renderCompleted();
+}
+
+function buildCourseCard(t, enrolledIds, isOngoing, isCompleted) {
+  const cat = t.category || 'Beginner';
+  const catLower = cat.toLowerCase();
+  const catClass = catLower === 'beginner' ? 'beginner'
+    : catLower === 'farmer' ? 'farmer'
+    : catLower === 'entrepreneur' ? 'entrepreneur'
+    : catLower === 'certification' ? 'certification'
+    : 'beginner';
+  const isEnrolled = enrolledIds.has(t.id);
+
+  const imgHtml = t.image_url
+    ? `<img class="tr-course-img" src="${t.image_url}" alt="${t.title}" loading="lazy">`
+    : `<div class="tr-course-img-placeholder"><i class="fa-solid fa-graduation-cap"></i></div>`;
+
+  let actionHtml;
+  if (isCompleted) {
+    actionHtml = `<span class="tr-enrolled-badge" style="background:#e0e7ff;color:#3730a3;"><i class="fa-solid fa-check-double"></i> Completed</span>`;
+  } else if (isOngoing) {
+    actionHtml = `<span class="tr-enrolled-badge"><i class="fa-solid fa-play"></i> Ongoing</span>`;
+  } else if (isEnrolled) {
+    actionHtml = `<span class="tr-enrolled-badge"><i class="fa-solid fa-check"></i> Enrolled</span>`;
+  } else {
+    actionHtml = `<button class="tr-enroll-btn" data-id="${t.id}">Enroll Now</button>`;
+  }
+
+  const priceHtml = (t.price_strikeout && t.price_actual)
+    ? `<div class="tr-course-price"><span class="tr-price-strikeout">₹${Number(t.price_strikeout).toLocaleString()}</span><span class="tr-price-actual">₹${Number(t.price_actual).toLocaleString()}</span></div>`
+    : '';
+
+  const dateHtml = (t.start_date || t.end_date) ? `
+    <div class="tr-course-dates">
+      ${t.start_date ? `<span><i class="fa-solid fa-calendar-day"></i> ${formatDate(t.start_date)}</span>` : ''}
+      ${t.end_date ? `<span><i class="fa-solid fa-calendar-check"></i> ${formatDate(t.end_date)}</span>` : ''}
+      ${t.duration_days ? `<span><i class="fa-solid fa-clock"></i> ${t.duration_days} days</span>` : ''}
+    </div>` : '';
+
+  return `
+    <div class="tr-course-card">
+      ${imgHtml}
+      <div class="tr-course-body">
+        <span class="tr-course-category ${catClass}">${cat}</span>
+        <h4 class="tr-course-title">${t.title}</h4>
+        ${dateHtml}
+        <p class="tr-course-desc">${t.description || ''}</p>
+        ${priceHtml}
+        <div class="tr-course-actions">
+          ${actionHtml}
         </div>
       </div>
-    `,
-      )
-      .join('');
+    </div>
+  `;
+}
 
-    list.querySelectorAll('.btn-enroll').forEach((b) => {
-      b.addEventListener('click', async (e) => {
-        const id = b.getAttribute('data-id');
-        if (!state.user) {
-          // Keep buyer login separate: open buyer login modal
-          authModal.open('buyer', () => {
-            window.location.hash = '#training-courses';
-          });
-          return;
-        }
-
-        try {
-          b.disabled = true;
-          b.textContent = 'Enrolling…';
-          const role = state.user.trainingRole
-            || localStorage.getItem('training_role')
-            || 'trainee';
-          const res = await trainingApi.enroll(id, { role });
-          showSuccessToast('Enrolled — admin will contact you.');
-        } catch (err) {
-          showErrorToast('Enrollment failed. Try again.');
-        } finally {
-          b.disabled = false;
-          b.textContent = 'Enroll';
-        }
-      });
+function wireEnrollButtons(grid) {
+  grid.querySelectorAll('.tr-enroll-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (!state.user) {
+        authModal.open('buyer', () => {
+          window.location.hash = '#training-courses';
+        });
+        return;
+      }
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Enrolling…';
+        const role = state.user.trainingRole || localStorage.getItem('training_role') || 'trainee';
+        await trainingApi.enroll(id, { role });
+        showSuccessToast('Successfully enrolled!');
+        btn.outerHTML = `<span class="tr-enrolled-badge"><i class="fa-solid fa-check"></i> Enrolled</span>`;
+      } catch (err) {
+        showErrorToast('Enrollment failed. Try again.');
+        btn.disabled = false;
+        btn.textContent = 'Enroll Now';
+      }
     });
-    // Add Shop Now button handler - requires login as buyer
-    list.querySelectorAll('.btn-shop-from-training').forEach((b) => {
-      b.addEventListener('click', () => {
-        if (!state.user || state.user.role !== 'buyer') {
-          authModal.open('buyer', () => {
-            window.location.hash = '#shop';
-          });
-          return;
-        }
-        window.location.hash = '#shop';
-      });
-    });
-  } catch (err) {
-    list.innerHTML = '<div class="grid-skeleton">Failed to load trainings.</div>';
-  }
+  });
 }
 
 window.changeQty = changeQuantity;
@@ -2439,6 +2726,39 @@ function renderCheckoutPage() {
       <div class="checkout-summary-total"><span>Total</span><strong>₹${total.toFixed(2)}</strong></div>
     </div>
   `;
+
+  const checkoutFields = [
+    { id: 'checkout-delivery-phone', validator: (v) => isValidIndianPhone(v.trim()) || !v.trim() ? '' : 'Enter a valid Indian phone number.' },
+    { id: 'checkout-delivery-pincode', validator: (v) => !v.trim() || /^\d{6}$/.test(v.trim()) ? '' : 'Enter a valid 6-digit pincode.' },
+    { id: 'checkout-address-line1', validator: (v) => v.trim() ? '' : 'Address Line 1 is required.' },
+    { id: 'checkout-address-line2', validator: (v) => v.trim() ? '' : 'Address Line 2 is required.' },
+    { id: 'checkout-landmark', validator: (v) => v.trim() ? '' : 'Landmark is required.' },
+    { id: 'checkout-state', validator: (v) => v.trim() ? '' : 'Please select a state.' },
+    { id: 'checkout-city', validator: (v) => v.trim() ? '' : 'Please select a city.' },
+  ];
+
+  checkoutFields.forEach(({ id, validator }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('blur', () => {
+      const feedback = document.getElementById('checkout-page-feedback');
+      if (feedback) { feedback.textContent = ''; feedback.classList.add('hidden'); }
+      const errEl = document.getElementById(`error-${id}`);
+      const msg = validator(el.value);
+      if (msg) {
+        el.classList.add('input-error');
+        if (errEl) { errEl.textContent = msg; errEl.classList.add('visible'); }
+      } else {
+        el.classList.remove('input-error');
+        if (errEl) { errEl.textContent = ''; errEl.classList.remove('visible'); }
+      }
+    });
+    el.addEventListener('focus', () => {
+      el.classList.remove('input-error');
+      const errEl = document.getElementById(`error-${id}`);
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('visible'); }
+    });
+  });
 }
 
 async function handlePaymentContinue() {
@@ -2449,38 +2769,66 @@ async function handlePaymentContinue() {
   const city = document.getElementById('checkout-city')?.value.trim() || '';
   const stateVal = document.getElementById('checkout-state')?.value.trim() || '';
   const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
-  const feedback = document.getElementById('checkout-page-feedback');
 
-  if (feedback) {
-    feedback.textContent = '';
-    feedback.classList.add('hidden');
+  function clearFieldErrors() {
+    document.querySelectorAll('.checkout-page .input-error').forEach(el => el.classList.remove('input-error'));
+    document.querySelectorAll('.checkout-page .input-error-msg').forEach(el => { el.textContent = ''; el.classList.remove('visible'); });
   }
 
-  if (
-    !deliveryPhone
-    || deliveryPhone.replace(/\D/g, '').length < 10
-    || deliveryPhone.replace(/\D/g, '').length > 15
-  ) {
-    if (feedback) {
-      feedback.textContent = 'Enter a valid delivery phone number (10-15 digits).';
-      feedback.classList.remove('hidden');
-    }
-    return;
+  function markFieldError(id, message) {
+    const input = document.getElementById(id);
+    const error = document.getElementById(`error-${id}`);
+    if (input) input.classList.add('input-error');
+    if (error) { error.textContent = message; error.classList.add('visible'); }
+  }
+
+  clearFieldErrors();
+
+  let hasError = false;
+
+  if (!isValidIndianPhone(deliveryPhone)) {
+    markFieldError('checkout-delivery-phone', 'Enter a valid Indian phone number (e.g. +91 9876543210).');
+    hasError = true;
   }
 
   if (!deliveryPincode || !/^\d{6}$/.test(deliveryPincode)) {
-    if (feedback) {
-      feedback.textContent = 'Enter a valid 6-digit pincode.';
-      feedback.classList.remove('hidden');
-    }
-    return;
+    markFieldError('checkout-delivery-pincode', 'Enter a valid 6-digit pincode.');
+    hasError = true;
   }
 
-  if (!addressLine1 || !addressLine2 || !landmark || !city || !stateVal) {
+  if (!addressLine1) {
+    markFieldError('checkout-address-line1', 'Address Line 1 is required.');
+    hasError = true;
+  }
+
+  if (!addressLine2) {
+    markFieldError('checkout-address-line2', 'Address Line 2 is required.');
+    hasError = true;
+  }
+
+  if (!landmark) {
+    markFieldError('checkout-landmark', 'Landmark is required.');
+    hasError = true;
+  }
+
+  if (!stateVal) {
+    markFieldError('checkout-state', 'Please select a state.');
+    hasError = true;
+  }
+
+  if (!city) {
+    markFieldError('checkout-city', 'Please select a city.');
+    hasError = true;
+  }
+
+  if (hasError) {
+    const feedback = document.getElementById('checkout-page-feedback');
     if (feedback) {
-      feedback.textContent = 'All fields (Address Line 1, Address Line 2, Landmark, Pincode, City, State) are mandatory.';
+      feedback.textContent = 'Please fix the highlighted fields above.';
       feedback.classList.remove('hidden');
     }
+    const firstError = document.querySelector('.checkout-page .input-error');
+    if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
@@ -3194,8 +3542,7 @@ async function completeOrderPayment(orderId, paymentId, signature) {
     const data = await res.json();
     if (res.ok) {
       // Clear cart
-      state.cart = [];
-      saveCart();
+      clearCart();
       updateCartUI();
       state.activePromo = null;
       state.promoDiscountPct = 0;
@@ -3256,8 +3603,7 @@ async function completeOrderPayment(orderId, paymentId, signature) {
         }
       }
 
-      // Show success notification
-      showSuccessToast('🎉 Order placed successfully! Payment confirmed.');
+      const userName = state.user?.fullName || state.user?.full_name || 'Valued Cultivator';
 
       // Notify other tabs (admin) that orders have been updated
       try {
@@ -3267,20 +3613,14 @@ async function completeOrderPayment(orderId, paymentId, signature) {
         // ignore if BroadcastChannel isn't available
       }
 
-      // Admin and Growers can track orders; Buyers go back to shop
-      if (
-        state.user
-        && (state.user.role === 'admin' || state.user.role === 'grower')
-      ) {
-        window.location.hash = `#track-${data.order.id}`;
-      } else {
-        window.location.hash = '#shop';
-        setTimeout(() => {
-          if (window.profileModal) {
-            window.profileModal.open('details');
-          }
-        }, 100);
-      }
+      // Show thank you popup then redirect
+      const isAdminOrGrower = state.user && (state.user.role === 'admin' || state.user.role === 'grower');
+      showPopupModal({
+        title: '🎉 Thank you for your order!',
+        message: `<strong>${userName}</strong>, your order is confirmed. We are updating your shipping status and will notify you soon.`,
+        duration: 1000,
+        redirectHash: isAdminOrGrower ? `#track-${data.order.id}` : '#shop',
+      });
     } else {
       showErrorToast(data.error || 'Payment verification failed.');
     }
@@ -3307,6 +3647,7 @@ async function fetchOrders() {
       state.orders = await res.json();
       renderOrdersSidebar();
       checkAndShowReviewModal();
+      window.dispatchEvent(new CustomEvent('orders:refreshed', { detail: { orders: state.orders } }));
     }
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
@@ -3345,6 +3686,7 @@ function renderOrdersSidebar() {
         </div>
         <div class="order-card-date">${dateFormatted}</div>
         <div class="order-card-total">₹${order.total.toFixed(2)} (${order.items.length} culture${order.items.length > 1 ? 's' : ''})</div>
+        ${order.expected_delivery_date && ['shipped', 'in_transit'].includes(order.delivery_status) ? `<div class="order-card-delivery">Expected: ${new Date(order.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${order.delivery_days_text ? ' (' + order.delivery_days_text + ')' : ''}</div>` : ''}
         ${order.delivery_status === 'cancelled' && order.cancel_reason ? `<div class="order-card-reason">Reason: ${order.cancel_reason}</div>` : ''}
       </div>
     `;
@@ -3422,9 +3764,7 @@ function renderTrackingDetails(track) {
     })
     .join('');
 
-  const canCancel = !['shipped', 'delivered', 'cancelled'].includes(
-    track.deliveryStatus,
-  );
+  const canCancel = track.deliveryStatus === 'processing';
   const cancelReason = track.cancelReason || '';
 
   container.innerHTML = `
@@ -3474,23 +3814,7 @@ function renderTrackingDetails(track) {
           <strong>Cancellation reason:</strong> ${cancelReason || 'Not provided'}
         </div>
       `
-      : `
-        <div class="input-field">
-          <label for="cancel-reason-select">Reason for cancellation</label>
-          <select id="cancel-reason-select">
-            <option value="">Select reason</option>
-            <option value="Delivery cost is high">Delivery cost is high</option>
-            <option value="Not interested in product">Not interested in product</option>
-            <option value="Not available on the expected delivery date">Not available on the expected delivery date</option>
-            <option value="Taking too much time to deliver">Taking too much time to deliver</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
-        <div class="input-field hidden" id="cancel-reason-other-wrap">
-          <label for="cancel-reason-other">Please specify your reason</label>
-          <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
-        </div>
-      `
+      : ''
     }
     </div>
 
@@ -3503,7 +3827,7 @@ function renderTrackingDetails(track) {
       <button class="btn btn-whatsapp-action" onclick="window.whatsappQuickMessage('${track.orderId}')">
         <i class="fa-brands fa-whatsapp"></i> Update via WhatsApp
       </button>
-      ${canCancel ? `<button class="btn btn-cancel" onclick="window.cancelOrder('${track.orderId}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
+      ${canCancel ? `<button class="btn btn-cancel" onclick="window.openCancelModal('${track.orderId}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
     </div>
   `;
 
@@ -3520,35 +3844,72 @@ function renderTrackingDetails(track) {
     }
   });
 
-  const reasonSelect = document.getElementById('cancel-reason-select');
-  const otherWrap = document.getElementById('cancel-reason-other-wrap');
-  if (reasonSelect && otherWrap) {
-    reasonSelect.addEventListener('change', () => {
-      if (reasonSelect.value === 'Other') {
-        otherWrap.classList.remove('hidden');
-      } else {
-        otherWrap.classList.add('hidden');
-      }
-    });
-  }
 }
 
-async function cancelOrder(orderId) {
-  const confirmation = confirm(
-    'Cancel this order? This will stop processing if it has not shipped yet.',
-  );
-  if (!confirmation) return;
+function openCancelModal(orderId) {
+  const existing = document.getElementById('cancel-order-modal');
+  if (existing) existing.remove();
 
-  try {
-    const reasonSelect = document.getElementById('cancel-reason-select');
-    const otherInput = document.getElementById('cancel-reason-other');
-    let reason = reasonSelect ? reasonSelect.value : '';
+  const modal = document.createElement('div');
+  modal.id = 'cancel-order-modal';
+  modal.className = 'modal-overlay open';
+  modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
 
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:460px;">
+      <button class="modal-close" id="cancel-modal-close" type="button">&times;</button>
+      <h3 style="margin:0 0 8px;font-size:1.2rem;color:#b91c1c;">
+        <i class="fa-solid fa-ban"></i> Cancel Order
+      </h3>
+      <p style="margin:0 0 18px;color:var(--text-mid);font-size:0.92rem;">
+        This will stop processing and cannot be undone. Please tell us why you are cancelling.
+      </p>
+      <div class="input-field">
+        <label for="cancel-reason-select">Cancellation reason</label>
+        <select id="cancel-reason-select">
+          <option value="">Select a reason</option>
+          <option value="Delivery cost is high">Delivery cost is high</option>
+          <option value="Not interested in product">Not interested in product</option>
+          <option value="Not available on the expected delivery date">Not available on the expected delivery date</option>
+          <option value="Taking too much time to deliver">Taking too much time to deliver</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="input-field hidden" id="cancel-reason-other-wrap">
+        <label for="cancel-reason-other">Please specify your reason</label>
+        <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+        <button class="btn btn-secondary" id="cancel-modal-keep-btn" type="button">Keep order</button>
+        <button class="btn btn-cancel" id="cancel-modal-confirm-btn" type="button">
+          <i class="fa-solid fa-ban"></i> Confirm cancellation
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const reasonSelect = modal.querySelector('#cancel-reason-select');
+  const otherWrap = modal.querySelector('#cancel-reason-other-wrap');
+  const otherInput = modal.querySelector('#cancel-reason-other');
+
+  reasonSelect.addEventListener('change', () => {
+    otherWrap.classList.toggle('hidden', reasonSelect.value !== 'Other');
+  });
+
+  const closeModal = () => modal.remove();
+
+  modal.querySelector('#cancel-modal-close').addEventListener('click', closeModal);
+  modal.querySelector('#cancel-modal-keep-btn').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  modal.querySelector('#cancel-modal-confirm-btn').addEventListener('click', async () => {
+    let reason = reasonSelect.value;
     if (!reason) {
-      showErrorToast('Please choose a cancellation reason.');
+      showErrorToast('Please select a cancellation reason.');
       return;
     }
-
     if (reason === 'Other') {
       reason = otherInput?.value.trim() || '';
       if (!reason) {
@@ -3557,30 +3918,22 @@ async function cancelOrder(orderId) {
       }
     }
 
-    const res = await fetch(`${API_BASE}/orders/${orderId}/cancel`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.token}`,
-      },
-      body: JSON.stringify({ reason }),
-    });
+    modal.remove();
 
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.error || 'Unable to cancel order');
+    try {
+      await fetchWithAuth(`/orders/${orderId}/cancel`, {
+        method: 'PUT',
+        body: JSON.stringify({ reason }),
+      });
+      showSuccessToast('✅ Order cancelled successfully.');
+      await fetchOrders();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Unable to cancel order at this time.');
     }
-
-    showSuccessToast(
-      '✅ Order cancellation request submitted. Refreshing tracking...',
-    );
-    await pollTrackingData(orderId);
-  } catch (err) {
-    showErrorToast(
-      getApiErrorMessage(err) || 'Unable to cancel order at this time.',
-    );
-  }
+  });
 }
+
+window.openCancelModal = openCancelModal;
 
 async function viewInvoice(orderId) {
   const modal = document.getElementById('invoice-modal');
@@ -3824,6 +4177,7 @@ async function fetchCategories() {
 
     renderCategoryGrid(categories);
     populateCategoryDropdown(categories);
+    renderMobileCategoryNav(categories);
   } catch (error) {
     showErrorToast(getApiErrorMessage(error));
   }
@@ -4111,11 +4465,12 @@ function initScrollReveal() {
     document.getElementById('calculator-anchor'),
     document.querySelector('.tracker-layout'),
     document.querySelector('.calc-header'),
+    ...document.querySelectorAll('.about-block'),
   ].filter((el) => el !== null);
 
   const observerOptions = {
     root: null,
-    rootMargin: '0px',
+    rootMargin: '0px 0px -60px 0px',
     threshold: 0.1,
   };
 
@@ -4317,12 +4672,484 @@ window.openReviewModal = function (orderId) {
       });
       showSuccessToast('Thank you for your review!');
       modal.remove();
-      fetchOrders(); // Refresh to update profile modal
+      fetchOrders();
     } catch (err) {
       showErrorToast(getApiErrorMessage(err));
       submitBtn.disabled = false;
       submitBtn.innerHTML = 'Submit Review';
     }
   });
-};
+}
+
+// ============================================================
+// SUCCESS STORIES DATA & RENDERING
+// ============================================================
+const SUCCESS_STORIES = [
+  {
+    id: 'story-1',
+    name: 'Ramesh Patil',
+    role: 'Farmer',
+    headline: 'From 1 tray to 500 trays — mushroom farming changed my life.',
+    description: 'Ramesh Patil, a small farmer from Davangere, started with just one tray of oyster mushroom spawn from Sporekart in 2020. With hands-on training and continuous support from the Sporekart team, he now operates 500 trays producing over 200 kg of fresh mushrooms every month. His annual income has tripled, and he now employs 4 people from his village. "Sporekart didn\'t just sell me spawn — they showed me a path to prosperity."',
+    image: 'https://i.pravatar.cc/400?img=11',
+    badge: 'Beginner to Entrepreneur',
+    cta: null,
+    ctaText: null,
+  },
+  {
+    id: 'story-2',
+    name: 'Anjali Verma',
+    role: 'Home Grower',
+    headline: 'I turned my balcony into a mini mushroom farm and now supply to local restaurants.',
+    description: 'Anjali, a software professional from Bengaluru, started mushroom cultivation as a weekend hobby. She purchased a mushroom grow kit from Sporekart and was amazed by the results. Within 6 months, she scaled up and now supplies fresh oyster mushrooms to 3 local restaurants. "The training videos and WhatsApp support made it so easy. I never imagined my balcony could be this productive!"',
+    image: 'https://i.pravatar.cc/400?img=9',
+    badge: 'Hobby to Business',
+    cta: '#shop-section',
+    ctaText: 'Start Your Grow Kit',
+  },
+  {
+    id: 'story-3',
+    name: 'Vikram Shetty',
+    role: 'Entrepreneur',
+    headline: 'Built a mushroom agri-business employing 12 women from my village.',
+    description: 'After attending Sporekart\'s advanced training program, Vikram established a full-scale mushroom farm with spawn production unit in Dakshina Kannada. Today, his enterprise produces spawn, grows fresh mushrooms, and provides training to other farmers. He has successfully created employment for 12 women from his village. "The mentorship from Sporekart was invaluable. They helped me with everything from setup to market linkages."',
+    image: 'https://i.pravatar.cc/400?img=12',
+    badge: 'Startup Success',
+    cta: null,
+    ctaText: null,
+  },
+  {
+    id: 'story-4',
+    name: 'Sunita Devi',
+    role: 'Rural Farmer',
+    headline: 'Mushroom farming gave me financial independence and respect in my community.',
+    description: 'Sunita Devi from rural Karnataka joined Sporekart\'s training program for women farmers. Starting with just 10 spawn bags, she now manages a thriving mushroom farm that brings in a steady monthly income. She has become a role model for other women in her village. "I used to depend on my husband for every expense. Now I manage my own finances and my children\'s education. Mushroom farming set me free."',
+    image: 'https://i.pravatar.cc/400?img=5',
+    badge: 'Women Empowerment',
+    cta: null,
+    ctaText: null,
+  },
+];
+
+function renderSuccessStoryCard(story, target) {
+  const card = document.createElement('div');
+  card.className = 'success-card';
+  card.dataset.storyId = story.id;
+  const img = story.image || 'https://i.pravatar.cc/400?img=1';
+  card.innerHTML = `
+    <div class="success-card-img-wrap">
+      <img src="${img}" alt="${story.name}" loading="lazy" />
+      <span class="success-card-badge">${story.badge}</span>
+    </div>
+    <div class="success-card-body">
+      <h3 class="success-card-name">${story.name}</h3>
+      <span class="success-card-role">${story.role}</span>
+      <p class="success-card-headline">"${story.headline}"</p>
+    </div>
+  `;
+  card.addEventListener('click', () => {
+    window.location.hash = `#story-${story.id}`;
+  });
+  target.appendChild(card);
+}
+
+let ssCarouselIndex = 0;
+let ssCarouselTimer = null;
+
+function renderSuccessCarousel() {
+  const track = document.getElementById('success-carousel-track');
+  if (!track) return;
+  track.innerHTML = '';
+
+  // Render original cards
+  SUCCESS_STORIES.forEach(story => renderSuccessStoryCard(story, track));
+
+  // Clone all cards and append for infinite loop
+  // This creates: [card1, card2, card3, card4, card1_clone, card2_clone, card3_clone, card4_clone]
+  SUCCESS_STORIES.forEach(story => {
+    const clone = renderSuccessStoryCardClone(story);
+    track.appendChild(clone);
+  });
+
+  ssCarouselIndex = 0;
+  renderSuccessDots();
+  updateCarouselArrows();
+  startCarouselAutoScroll();
+}
+
+function renderSuccessStoryCardClone(story) {
+  const card = document.createElement('div');
+  card.className = 'success-card';
+  card.dataset.storyId = story.id;
+  card.setAttribute('data-clone', 'true');
+  const img = story.image || 'https://i.pravatar.cc/400?img=1';
+  card.innerHTML = `
+    <div class="success-card-img-wrap">
+      <img src="${img}" alt="${story.name}" loading="lazy" />
+      <span class="success-card-badge">${story.badge}</span>
+    </div>
+    <div class="success-card-body">
+      <h3 class="success-card-name">${story.name}</h3>
+      <span class="success-card-role">${story.role}</span>
+      <p class="success-card-headline">"${story.headline}"</p>
+    </div>
+  `;
+  card.addEventListener('click', () => {
+    window.location.hash = `#story-${story.id}`;
+  });
+  return card;
+}
+
+function renderSuccessDots() {
+  const dotsContainer = document.getElementById('success-carousel-dots');
+  if (!dotsContainer) return;
+  dotsContainer.innerHTML = '';
+  for (let i = 0; i < SUCCESS_STORIES.length; i++) {
+    const dot = document.createElement('button');
+    dot.className = 'success-dot' + (i === 0 ? ' active' : '');
+    dot.ariaLabel = `Slide ${i + 1}`;
+    dot.addEventListener('click', () => {
+      ssCarouselIndex = i;
+      updateSSCarousel(false);
+      resetSSCarouselAutoplay();
+    });
+    dotsContainer.appendChild(dot);
+  }
+}
+
+function updateCarouselDots(activeIndex) {
+  const normalizedIndex = activeIndex % SUCCESS_STORIES.length;
+  document.querySelectorAll('.success-dot').forEach((d, i) => {
+    d.classList.toggle('active', i === normalizedIndex);
+  });
+}
+
+function updateSSCarousel(instant) {
+  const track = document.getElementById('success-carousel-track');
+  if (!track) return;
+  const cards = track.querySelectorAll('.success-card');
+  if (cards.length === 0) return;
+
+  const gap = 20;
+  const cardWidth = cards[0].offsetWidth || 320;
+  const offset = ssCarouselIndex * (cardWidth + gap);
+
+  if (instant) {
+    track.style.transition = 'none';
+  } else {
+    track.style.transition = 'transform 0.5s ease';
+  }
+  track.style.transform = `translateX(-${offset}px)`;
+
+  updateCarouselDots(ssCarouselIndex);
+}
+
+function updateCarouselArrows() {
+  const prev = document.getElementById('success-prev');
+  const next = document.getElementById('success-next');
+  if (prev) prev.addEventListener('click', () => {
+    ssCarouselIndex++;
+    if (ssCarouselIndex >= SUCCESS_STORIES.length) {
+      // At cloned section, instantly jump back to start
+      ssCarouselIndex = 0;
+      updateSSCarousel(true);
+      // Reset autoplay
+      resetSSCarouselAutoplay();
+    } else {
+      updateSSCarousel(false);
+      resetSSCarouselAutoplay();
+    }
+  });
+  if (next) next.addEventListener('click', () => {
+    ssCarouselIndex++;
+    if (ssCarouselIndex >= SUCCESS_STORIES.length) {
+      ssCarouselIndex = 0;
+      updateSSCarousel(true);
+      resetSSCarouselAutoplay();
+    } else {
+      updateSSCarousel(false);
+      resetSSCarouselAutoplay();
+    }
+  });
+}
+
+function startCarouselAutoScroll() {
+  stopSSCarouselAutoplay();
+  ssCarouselTimer = setInterval(() => {
+    ssCarouselIndex++;
+    if (ssCarouselIndex >= SUCCESS_STORIES.length) {
+      // We've reached the cloned cards, animate to them first
+      updateSSCarousel(false);
+      // After the transition completes, instantly jump back to the real cards
+      setTimeout(() => {
+        ssCarouselIndex = 0;
+        updateSSCarousel(true);
+      }, 550); // slightly longer than the 0.5s transition
+    } else {
+      updateSSCarousel(false);
+    }
+  }, 2000);
+}
+
+function stopSSCarouselAutoplay() {
+  if (ssCarouselTimer) { clearInterval(ssCarouselTimer); ssCarouselTimer = null; }
+}
+
+function resetSSCarouselAutoplay() { stopSSCarouselAutoplay(); startCarouselAutoScroll(); }
+
+function renderStoriesGrid() {
+  const grid = document.getElementById('stories-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  SUCCESS_STORIES.forEach(story => {
+    const card = document.createElement('div');
+    card.className = 'success-card';
+    card.dataset.storyId = story.id;
+    const img = story.image || 'https://i.pravatar.cc/400?img=1';
+    card.innerHTML = `
+      <div class="success-card-img-wrap">
+        <img src="${img}" alt="${story.name}" loading="lazy" />
+        <span class="success-card-badge">${story.badge}</span>
+      </div>
+      <div class="success-card-body">
+        <h3 class="success-card-name">${story.name}</h3>
+        <span class="success-card-role">${story.role}</span>
+        <p class="success-card-headline">"${story.headline}"</p>
+      </div>
+    `;
+    card.addEventListener('click', () => {
+      window.location.hash = `#story-${story.id}`;
+    });
+    grid.appendChild(card);
+  });
+}
+
+function renderStoryDetail(storyId) {
+  const container = document.getElementById('story-detail-content');
+  if (!container) return;
+  const story = SUCCESS_STORIES.find(s => s.id === storyId);
+  if (!story) {
+    container.innerHTML = '<p style="text-align:center;padding:60px 0;color:var(--text-soft);">Story not found.</p>';
+    return;
+  }
+  const img = story.image || 'https://i.pravatar.cc/400?img=1';
+  container.innerHTML = `
+    <div class="story-detail-card">
+      <img src="${img}" alt="${story.name}" />
+      <div class="story-detail-card-body">
+        <span class="story-detail-badge">${story.badge}</span>
+        <h2>"${story.headline}"</h2>
+        <p class="story-detail-name">${story.name}</p>
+        <p class="story-detail-role">${story.role}</p>
+        <p class="story-detail-headline">${story.headline}</p>
+        <p class="story-detail-description">${story.description}</p>
+        ${story.cta ? `<a href="${story.cta}" class="story-detail-cta">${story.ctaText || 'Learn More'} <i class="fa-solid fa-arrow-right"></i></a>` : ''}
+      </div>
+    </div>
+  `;
+  document.getElementById('btn-story-back').addEventListener('click', (e) => {
+    e.preventDefault();
+    window.location.hash = '#shop';
+  });
+}
+
+// ==========================================================================
+// BLOGS RENDERING
+// ==========================================================================
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+async function renderBlogsGrid() {
+  const list = document.getElementById('blogs-list');
+  const pagination = document.getElementById('blogs-pagination');
+  if (!list) return;
+
+  list.innerHTML = `
+    <div class="blogs-loading">
+      <i class="fa-solid fa-spinner fa-spin"></i> Loading blogs...
+    </div>
+  `;
+
+  try {
+    // Fetch all blogs at once so we can reorder client-side with recently read on top
+    const result = await blogApi.getBlogs({ page: 1, limit: 1000 });
+    _allBlogs = result.blogs || result.data || result || [];
+
+    if (!_allBlogs.length) {
+      list.innerHTML = `
+        <div class="blogs-empty">
+          <i class="fa-solid fa-newspaper"></i>
+          <p>No blogs published yet.</p>
+        </div>
+      `;
+      if (pagination) pagination.innerHTML = '';
+      return;
+    }
+
+    // Reorder: recently read blogs appear at the top, rest follow in original order
+    const recentlyRead = _getRecentlyReadBlogs();
+    const readSlugs = new Set(recentlyRead.map(item => item.slug));
+
+    // Build the reordered list: recently read first (in most-recently-read order), then unread blogs
+    const recentlyReadBlogs = recentlyRead
+      .map(item => _allBlogs.find(blog => blog.slug === item.slug))
+      .filter(Boolean);
+    const unreadBlogs = _allBlogs.filter(blog => !readSlugs.has(blog.slug));
+    const renderedBlogs = [...recentlyReadBlogs, ...unreadBlogs];
+
+    // Client-side pagination
+    const total = renderedBlogs.length;
+    const totalPages = Math.max(1, Math.ceil(total / blogPageSize));
+    if (_blogPage > totalPages) _blogPage = totalPages;
+    const start = (_blogPage - 1) * blogPageSize;
+    const pageBlogs = renderedBlogs.slice(start, start + blogPageSize);
+
+    list.innerHTML = pageBlogs.map(blog => {
+      const isRecent = readSlugs.has(blog.slug);
+      return `
+        <article class="blog-row-card ${isRecent ? 'blog-row-recent' : ''}" data-slug="${blog.slug}">
+          <div class="blog-row-left">
+            <h3 class="blog-row-title">${blog.title}</h3>
+          </div>
+          <div class="blog-row-right">
+            <div class="blog-row-meta">
+              ${isRecent ? '<span class="blog-row-recent-badge"><i class="fa-solid fa-clock-rotate-left"></i> Recently Read</span>' : ''}
+              <span class="blog-row-author"><i class="fa-solid fa-user"></i> ${blog.author || 'Admin'}</span>
+              <span class="blog-row-date"><i class="fa-solid fa-calendar"></i> ${formatDate(blog.published_at || blog.created_at)}</span>
+            </div>
+            <a href="#blog-${blog.slug}" class="blog-row-readmore">Read More <i class="fa-solid fa-arrow-right"></i></a>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    // Add click handlers for blog rows
+    list.querySelectorAll('.blog-row-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (!e.target.closest('.blog-row-readmore')) {
+          const slug = card.dataset.slug;
+          window.location.hash = `#blog-${slug}`;
+        }
+      });
+    });
+
+    // Render pagination
+    if (pagination) {
+      pagination.innerHTML = `
+        <div class="blogs-pagination-controls">
+          <button class="btn btn-secondary" id="blog-page-prev" ${_blogPage === 1 ? 'disabled' : ''}>
+            <i class="fa-solid fa-chevron-left"></i> Previous
+          </button>
+          <span class="blogs-page-info">Page ${_blogPage} of ${totalPages}</span>
+          <button class="btn btn-secondary" id="blog-page-next" ${_blogPage >= totalPages ? 'disabled' : ''}>
+            Next <i class="fa-solid fa-chevron-right"></i>
+          </button>
+        </div>
+      `;
+
+      document.getElementById('blog-page-prev')?.addEventListener('click', () => {
+        if (_blogPage > 1) {
+          _blogPage--;
+          renderBlogsGrid();
+        }
+      });
+
+      document.getElementById('blog-page-next')?.addEventListener('click', () => {
+        if (_blogPage < totalPages) {
+          _blogPage++;
+          renderBlogsGrid();
+        }
+      });
+    }
+  } catch (err) {
+    list.innerHTML = `
+      <div class="blogs-error">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <p>Failed to load blogs. Please try again.</p>
+      </div>
+    `;
+    console.error('Failed to fetch blogs:', err);
+  }
+}
+
+async function renderBlogDetail(slug) {
+  const container = document.getElementById('blog-detail-content');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="blog-detail-loading">
+      <i class="fa-solid fa-spinner fa-spin"></i> Loading blog...
+    </div>
+  `;
+
+  try {
+    const blog = await blogApi.getBlog(slug);
+
+    // Track this blog as recently read
+    _saveRecentlyReadBlog(slug);
+
+    // Update page title for SEO
+    document.title = `${blog.title} | Sporekart`;
+
+    // Check if blog is locked
+    const isLocked = blog.locked === true;
+    const publishedAt = new Date(blog.published_at).getTime();
+    const twelveHours = 12 * 60 * 60 * 1000;
+    const isLockedByTime = blog.status === 'published' && (Date.now() - publishedAt > twelveHours);
+
+    container.innerHTML = `
+      <article class="blog-detail-article">
+        <header class="blog-detail-header">
+          <span class="blog-detail-category">Blog</span>
+          <h1 class="blog-detail-title">${blog.title}</h1>
+          <div class="blog-detail-meta">
+            <span class="blog-detail-author"><i class="fa-solid fa-user"></i> ${blog.author || 'Admin'}</span>
+            <span class="blog-detail-date"><i class="fa-solid fa-calendar"></i> ${formatDate(blog.published_at)}</span>
+            ${isLocked || isLockedByTime ? '<span class="blog-detail-locked"><i class="fa-solid fa-lock"></i> Locked</span>' : ''}
+          </div>
+        </header>
+
+        ${blog.featured_image ? `
+          <figure class="blog-detail-featured-image">
+            <img src="${blog.featured_image}" alt="${blog.title}" loading="lazy" />
+          </figure>
+        ` : ''}
+
+        <div class="blog-detail-content">
+          ${blog.content}
+        </div>
+
+        <footer class="blog-detail-footer">
+          <a href="#blogs" class="blog-back-link">
+            <i class="fa-solid fa-arrow-left"></i> Back to Blogs
+          </a>
+        </footer>
+      </article>
+    `;
+
+    // Add scroll reveal for content
+    requestAnimationFrame(() => {
+      container.querySelectorAll('.blog-detail-content').forEach(el => {
+        el.classList.add('revealed');
+      });
+    });
+
+  } catch (err) {
+    container.innerHTML = `
+      <div class="blog-detail-error">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <h3>Blog Not Found</h3>
+        <p>The blog you're looking for doesn't exist or has been removed.</p>
+        <a href="#blogs" class="btn btn-primary">Back to Blogs</a>
+      </div>
+    `;
+    console.error('Failed to fetch blog:', err);
+  }
+}
 

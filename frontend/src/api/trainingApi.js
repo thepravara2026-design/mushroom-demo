@@ -12,4 +12,5 @@ export const trainingApi = {
     method: 'POST',
     body: JSON.stringify(body),
   }),
+  getMyEnrollments: () => fetchWithAuth('/trainings/my-enrollments'),
 };

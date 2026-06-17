@@ -5,6 +5,114 @@ const authService = require('../services/authService');
 const authMiddleware = require('../middleware/auth');
 const { success, error: respondError } = require('../lib/response');
 const db = require('../config/db');
+const { supabaseAdmin, supabaseAnon } = require('../config/supabase');
+
+/**
+ * POST /api/auth/register
+ * Supabase-native registration: creates user in Supabase Auth + inserts profile row in users table.
+ * Returns { message, user: { id, email } }
+ */
+router.post('/register', async (req, res) => {
+  if (db.isMock || !supabaseAdmin) {
+    return respondError(res, 'Registration via Supabase Auth requires live Supabase credentials.', 503);
+  }
+
+  const { email, password, name, role = 'buyer' } = req.body;
+  if (!email || !password || !name) {
+    return respondError(res, 'email, password and name are required.', 400);
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name, role },
+    });
+
+    if (error) return respondError(res, error.message, 400);
+
+    // Upsert profile row in the custom users table
+    await db.from('users').insert({
+      id: data.user.id,
+      email: data.user.email,
+      full_name: name,
+      role,
+    });
+
+    return success(res, {
+      message: 'Account created successfully.',
+      user: { id: data.user.id, email: data.user.email },
+    }, {}, 201);
+  } catch (err) {
+    return respondError(res, err.message || 'Registration failed', 500);
+  }
+});
+
+/**
+ * POST /api/auth/login
+ * Supabase-native email+password login via signInWithPassword.
+ * Returns { token, user } in the same shape as the OTP verify-otp flow.
+ */
+router.post('/login', async (req, res) => {
+  if (db.isMock || !supabaseAnon) {
+    // In mock mode: fall through to the OTP/admin-login flow instead
+    return respondError(res, 'Email+password login requires live Supabase credentials. Use /auth/request-otp for mock mode.', 503);
+  }
+
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return respondError(res, 'email and password are required.', 400);
+  }
+
+  try {
+    const { data, error } = await supabaseAnon.auth.signInWithPassword({ email, password });
+    if (error) return respondError(res, error.message, 401);
+
+    // Fetch user profile from our custom users table for role, fullName, etc.
+    const { data: dbUser } = await db.from('users').select('*').eq('email', data.user.email).single();
+
+    return success(res, {
+      token: data.session.access_token,
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        fullName: dbUser ? dbUser.full_name : (data.user.user_metadata?.name || ''),
+        role: dbUser ? dbUser.role : (data.user.app_metadata?.role || 'buyer'),
+        whatsappNumber: dbUser ? (dbUser.whatsapp_number || '') : '',
+        avatarUrl: dbUser ? (dbUser.avatar_url || '') : '',
+        defaultAddress: dbUser ? (dbUser.default_address || '') : '',
+      },
+    });
+  } catch (err) {
+    return respondError(res, err.message || 'Login failed', 500);
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Stateless logout — frontend clears token from localStorage.
+ * If using Supabase sessions, also revokes the server-side session.
+ */
+router.post('/logout', async (req, res) => {
+  try {
+    // Attempt to revoke Supabase session if live mode
+    if (!db.isMock && supabaseAdmin) {
+      const authHeader = req.headers.authorization;
+      const token = authHeader && authHeader.split(' ')[1];
+      if (token) {
+        // Get user to find their session
+        const { data: { user } } = await supabaseAdmin.auth.getUser(token);
+        if (user) {
+          await supabaseAdmin.auth.admin.signOut(user.id);
+        }
+      }
+    }
+  } catch {
+    // Ignore errors — logout should always succeed from client's perspective
+  }
+  return success(res, { message: 'Logged out successfully.' });
+});
 
 /**
  * POST /api/auth/request-otp

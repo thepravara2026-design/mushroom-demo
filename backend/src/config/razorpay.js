@@ -51,6 +51,16 @@ const razorpayMock = {
 
       return generated_signature === razorpay_signature;
     },
+    refund: async (paymentId, options) => {
+      console.warn('⚠️ Razorpay Mock Payment Refund:', { paymentId, options });
+      return {
+        id: `rfnd_${Math.random().toString(36).substr(2, 12)}`,
+        payment_id: paymentId,
+        amount: options.amount || 0,
+        status: 'processed',
+        created_at: Math.floor(Date.now() / 1000),
+      };
+    },
   },
 };
 
@@ -70,5 +80,6 @@ module.exports = isMock
           .digest('hex');
         return generated_signature === razorpay_signature;
       },
+      refund: (paymentId, options) => razorpayInstance.payments.refund(paymentId, options),
     },
   };

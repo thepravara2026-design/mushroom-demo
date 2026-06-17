@@ -2,13 +2,16 @@ import { state, saveAuth, clearAuth } from './utils/state.js';
 import { authApi } from './api/authApi.js';
 import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
 import { trainingApi } from './api/trainingApi.js';
+import { blogApi } from './api/blogApi.js';
 import { showErrorToast, showSuccessToast } from './utils/notify.js';
+import { isValidIndianPhone } from './utils/validation.js';
 
 globalThis.state = state;
 
 let _adminProducts = [];
 let _adminCategories = [];
 let _adminTrainings = [];
+let _adminBlogs = [];
 let pendingCategoryEditId = null;
 let adminOrdersCache = [];
 let adminHistoryPage = 1;
@@ -17,6 +20,7 @@ let adminHistorySort = 'date_desc';
 let _adminInventoryPage = 1;
 let adminInventoryPageSize = 10;
 let productImagePreviewValid = false;
+let trainImagePreviewValid = false;
 
 const loginPanel = document.getElementById('admin-login-panel');
 const dashboard = document.getElementById('admin-dashboard');
@@ -44,6 +48,16 @@ const trainDesc = document.getElementById('admin-train-desc');
 const trainImage = document.getElementById('admin-train-image');
 const trainContent = document.getElementById('admin-train-content');
 const trainListWrap = document.getElementById('admin-trainings-list');
+const trainIdDisplay = document.getElementById('admin-train-id-display');
+const trainStartDate = document.getElementById('admin-train-start-date');
+const trainEndDate = document.getElementById('admin-train-end-date');
+const trainDuration = document.getElementById('admin-train-duration');
+const trainPriceStrikeout = document.getElementById('admin-train-price-strikeout');
+const trainPriceActual = document.getElementById('admin-train-price-actual');
+const trainImageUrl = document.getElementById('admin-train-image-url');
+const trainImageBrowse = document.getElementById('admin-train-image-browse');
+const trainImageFile = document.getElementById('admin-train-image-file');
+const trainImagePreview = document.getElementById('admin-train-img-preview');
 const productImageBrowse = document.getElementById('admin-prod-image-browse');
 const productImageFile = document.getElementById('admin-prod-image-file');
 const categoryUidInput = document.getElementById('admin-cat-uid');
@@ -55,6 +69,29 @@ const shippingChargeInput = document.getElementById('admin-shipping-charge');
 const saveShippingChargeBtn = document.getElementById(
   'admin-save-shipping-charge',
 );
+// Blog DOM elements
+const blogModal = document.getElementById('admin-blog-modal');
+const blogModalTitle = document.getElementById('admin-blog-modal-title');
+const blogModalClose = document.getElementById('admin-blog-modal-close');
+const blogForm = document.getElementById('form-admin-blog');
+const blogEditId = document.getElementById('admin-blog-edit-id');
+const blogTitleInput = document.getElementById('admin-blog-title');
+const blogSlugInput = document.getElementById('admin-blog-slug');
+const blogAuthorInput = document.getElementById('admin-blog-author');
+const blogImageUrl = document.getElementById('admin-blog-image-url');
+const blogImageBrowse = document.getElementById('admin-blog-image-browse');
+const blogImageFile = document.getElementById('admin-blog-image-file');
+const blogImagePreview = document.getElementById('admin-blog-img-preview');
+const blogContentInput = document.getElementById('admin-blog-content');
+const blogIdInput = document.getElementById('admin-blog-id');
+const blogResetBtn = document.getElementById('admin-blog-reset');
+const blogSubmitBtn = document.getElementById('admin-blog-submit');
+const blogSubmitLabel = document.getElementById('admin-blog-submit-label');
+const blogFeedback = document.getElementById('admin-blog-feedback');
+const blogFeedbackText = document.getElementById('admin-blog-feedback-text');
+const btnCreateBlog = document.getElementById('btn-admin-create-blog');
+const blogsListWrap = document.getElementById('admin-blogs-list');
+let blogImagePreviewValid = false;
 let bcCategories = null;
 try {
   bcCategories = new BroadcastChannel('spore-categories');
@@ -155,6 +192,7 @@ async function fetchDashboardData() {
     fetchAdminOrders(),
     fetchAdminCategories(),
     fetchAdminTrainings().catch(() => { }),
+    fetchAdminBlogs().catch(() => { }),
   ]);
 }
 
@@ -345,6 +383,70 @@ function renderUploadPreview(preview, file, url, label) {
   preview.innerHTML = `<i class="fa-solid fa-image"></i><span>${label}</span>`;
   preview.dataset.previewValid = 'false';
   productImagePreviewValid = false;
+}
+
+function updateTrainingImagePreview() {
+  const preview = trainImagePreview;
+  if (!preview) return;
+  const file = trainImageFile?.files?.[0];
+  let url = trainImageUrl?.value.trim();
+
+  if (file) {
+    const reader = new FileReader();
+    trainImagePreviewValid = false;
+    reader.onload = () => {
+      preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
+      preview.dataset.previewValid = 'true';
+      trainImagePreviewValid = true;
+      const hidden = document.getElementById('admin-train-image');
+      if (hidden) hidden.value = String(reader.result);
+    };
+    reader.onerror = () => {
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Unable to read image file</span>';
+      preview.dataset.previewValid = 'false';
+      trainImagePreviewValid = false;
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
+
+  if (url) {
+    if (url.startsWith('//')) url = `https:${url}`;
+    else if (!/^https?:\/\//i.test(url) && !/^data:/i.test(url) && !/^blob:/i.test(url) && url.includes('.')) url = `https://${url}`;
+
+    preview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
+    preview.dataset.previewValid = 'false';
+    trainImagePreviewValid = false;
+
+    const img = new Image();
+    let handled = false;
+    img.onload = () => {
+      if (handled) return;
+      handled = true;
+      preview.innerHTML = `<img src="${url}" alt="Preview">`;
+      preview.dataset.previewValid = 'true';
+      trainImagePreviewValid = true;
+      const hidden = document.getElementById('admin-train-image');
+      if (hidden) hidden.value = url;
+    };
+    img.onerror = () => {
+      if (handled) return;
+      handled = true;
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image</span>';
+      preview.dataset.previewValid = 'false';
+      trainImagePreviewValid = false;
+    };
+    try { img.src = url; } catch (e) {
+      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
+      preview.dataset.previewValid = 'false';
+      trainImagePreviewValid = false;
+    }
+    return;
+  }
+
+  preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+  preview.dataset.previewValid = 'false';
+  trainImagePreviewValid = false;
 }
 
 async function readFileAsDataUrl(file) {
@@ -597,13 +699,12 @@ async function handleAdminAddProduct(event) {
     if (res.ok) {
       showSuccessToast(editId ? '✅ Product updated successfully!' : '✅ Product published successfully!');
       resetAdminForm();
-      fetchAdminInventory();
       try {
         bcProducts?.postMessage({ type: 'products:updated' });
       } catch (e) {
         console.warn(e);
       }
-      activateAdminTab('products');
+      window.location.href = '/';
     } else {
       feedback.textContent = data.error || 'Failed to save product.';
       feedback.classList.remove('hidden');
@@ -641,11 +742,12 @@ function renderAdminOrders(orders) {
     return;
   }
 
-  const statusSteps = ['placed', 'processing', 'shipped', 'delivered'];
+  const statusSteps = ['placed', 'processing', 'shipped', 'in_transit', 'delivered'];
   const statusLabels = {
     placed: 'Placed',
     processing: 'Processing',
     shipped: 'Shipped',
+    in_transit: 'In Transit',
     delivered: 'Delivered',
   };
 
@@ -713,6 +815,7 @@ function renderAdminOrders(orders) {
             <p><strong>${customerName}</strong></p>
             <p>${phone}</p>
             <p class="admin-order-address">${address}</p>
+            ${o.expected_delivery_date ? `<p class="admin-order-delivery-date"><strong>Expected delivery:</strong> ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</p>` : ''}
           </div>
 
           <div class="admin-order-card-section admin-order-actions-panel">
@@ -730,8 +833,16 @@ function renderAdminOrders(orders) {
                 <option value="placed" ${o.delivery_status === 'placed' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 0 ? 'disabled' : ''}>Placed</option>
                 <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 1 ? 'disabled' : ''}>Processing</option>
                 <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 2 ? 'disabled' : ''}>Shipped</option>
-                <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 3 ? 'disabled' : ''}>Delivered</option>
+                <option value="in_transit" ${o.delivery_status === 'in_transit' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 3 ? 'disabled' : ''}>In Transit</option>
+                <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 4 ? 'disabled' : ''}>Delivered</option>
               </select>
+              <div class="admin-delivery-input-wrap" style="margin-top:8px;${['shipped', 'in_transit'].includes(o.delivery_status) ? '' : 'display:none;'}" id="admin-delivery-wrap-${o.id}">
+                <label class="admin-cancel-label" for="admin-delivery-days-${o.id}">Expected delivery (days)</label>
+                <select id="admin-delivery-days-${o.id}" class="admin-cancel-select" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+                  <option value="">Select days</option>
+                  ${[1,2,3,4,5,6,7].map(d => `<option value="${d} day${d > 1 ? 's' : ''}" ${o.delivery_days_text === `${d} day${d > 1 ? 's' : ''}` ? 'selected' : ''}>${d} day${d > 1 ? 's' : ''}</option>`).join('')}
+                </select>
+              </div>
               <div class="admin-order-cancel-controls">
                 <label class="admin-cancel-label" for="admin-cancel-reason-${o.id}">Cancel reason</label>
                 <select id="admin-cancel-reason-${o.id}" class="admin-cancel-select" onchange="globalThis.adminToggleCancelReason('${o.id}', this.value)">
@@ -781,7 +892,7 @@ function renderAdminOrders(orders) {
     })
     .join('');
 }
-
+/*
 function copyInvoiceLink(token) {
   if (!token) return;
   const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${token}`;
@@ -799,21 +910,39 @@ function copyInvoiceLink(token) {
     textarea.remove();
     showSuccessToast('Invoice share link copied to clipboard.');
   }
-}
+} */
 
 async function adminUpdateShipping(orderId, status) {
   try {
+    let delivery_days_text = '';
+    if (status === 'shipped' || status === 'in_transit') {
+      const input = document.getElementById(`admin-delivery-days-${orderId}`);
+      if (input) delivery_days_text = input.value.trim();
+    }
+
+    if (status === 'shipped' && !delivery_days_text) {
+      showErrorToast('Please select delivery days before marking as shipped.');
+      return;
+    }
+
+    const body = { delivery_status: status };
+    if (delivery_days_text) body.delivery_days_text = delivery_days_text;
+
     const res = await fetch(`${API_BASE}/orders/${orderId}/status`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${state.token}`,
       },
-      body: JSON.stringify({ delivery_status: status }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error('Failed');
     showSuccessToast(`📦 Shipment status updated to "${status}"`);
-    fetchAdminOrders();
+    if (status === 'delivered') {
+      window.location.href = '/';
+    } else {
+      fetchAdminOrders();
+    }
   } catch (err) {
     console.error(err);
     showErrorToast('Failed to update shipping status.');
@@ -1114,10 +1243,19 @@ function renderAdminHistoryPagination(totalPages, currentPage, totalCount) {
 function renderAdminHistory() {
   const wrap = document.getElementById('admin-history-list');
   if (!wrap) return;
+  /*
+    const deliveredOrders = adminOrdersCache.filter(
+      (order) => String(order.delivery_status || '').toLowerCase() === 'delivered',
+    );
+    */
 
-  const deliveredOrders = adminOrdersCache.filter(
-    (order) => String(order.delivery_status || '').toLowerCase() === 'delivered',
-  );
+  const selectedStatus = document.getElementById('admin-history-status-filter')?.value || '';
+  const deliveredOrders = adminOrdersCache.filter((order) => {
+    const s = String(order.delivery_status || '').toLowerCase();
+    if (selectedStatus) return s === selectedStatus;
+    return s === 'delivered' || s === 'cancelled';
+  });
+
   if (!deliveredOrders.length) {
     wrap.innerHTML = '<div class="admin-loading">No delivered orders found.</div>';
     document.getElementById('admin-history-summary').textContent = '';
@@ -1259,7 +1397,7 @@ async function adminDeleteProduct(productId) {
 
     if (res.ok) {
       showSuccessToast('🗑️ Product successfully deleted.');
-      fetchAdminInventory();
+      window.location.href = '/';
     } else {
       const data = await res.json();
       showErrorToast(data.error || 'Failed to remove item.');
@@ -1305,6 +1443,12 @@ async function fetchAdminTrainings() {
   }
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 function renderAdminTrainings() {
   const list = document.getElementById('admin-trainings-list');
   if (!list) return;
@@ -1316,11 +1460,22 @@ function renderAdminTrainings() {
     .map(
       (t) => `
     <div class="admin-training-row" data-id="${t.id}">
-      <div style="display:flex;gap:12px;align-items:center;">
-        <img src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;">
-        <div>
+      <div style="display:flex;gap:12px;align-items:center;flex:1;">
+        <img src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;">
+        <div style="flex:1;min-width:0;">
           <strong>${t.title}</strong>
-          <div style="font-size:0.9rem;color:#475569">${t.category} · ${t.description || ''}</div>
+          <div style="font-size:0.82rem;color:#475569;display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;">
+            <span>${t.category}</span>
+            <span>·</span>
+            <span style="font-family:monospace;font-size:0.78rem;color:#6b7280;">${t.training_id || '—'}</span>
+            <span>·</span>
+            <span>${formatDate(t.start_date)} – ${formatDate(t.end_date)}</span>
+            <span>·</span>
+            <span><strong>${t.duration_days || '—'}</strong> days</span>
+            ${(t.price_strikeout && t.price_actual)
+              ? `<span>·</span><span style="text-decoration:line-through;color:#9ca3af;">₹${Number(t.price_strikeout).toLocaleString()}</span><span style="color:var(--color-primary);font-weight:600;">₹${Number(t.price_actual).toLocaleString()}</span>`
+              : ''}
+          </div>
         </div>
       </div>
       <div class="admin-row-actions">
@@ -1345,12 +1500,23 @@ async function handleAdminSaveTraining(event) {
   const description = (
     document.getElementById('admin-train-desc').value || ''
   ).trim();
-  const image_url = (
-    document.getElementById('admin-train-image').value || ''
-  ).trim();
+  const hiddenImage = document.getElementById('admin-train-image');
+  const image_url = (hiddenImage?.value || '').trim();
   const content_url = (
     document.getElementById('admin-train-content').value || ''
   ).trim();
+  const start_date = (
+    document.getElementById('admin-train-start-date').value || ''
+  ).trim();
+  const end_date = (
+    document.getElementById('admin-train-end-date').value || ''
+  ).trim();
+  const price_strikeout = parseFloat(
+    (document.getElementById('admin-train-price-strikeout')?.value || '').trim()
+  );
+  const price_actual = parseFloat(
+    (document.getElementById('admin-train-price-actual')?.value || '').trim()
+  );
   // collect allowed roles
   const allowed = [];
   if (document.getElementById('admin-train-role-trainee')?.checked) allowed.push('trainee');
@@ -1362,37 +1528,113 @@ async function handleAdminSaveTraining(event) {
     return;
   }
 
+  if (!category) {
+    showErrorToast('Category is required');
+    return;
+  }
+
+  if (!description) {
+    showErrorToast('Description is required');
+    return;
+  }
+
+  if (!start_date || !end_date) {
+    showErrorToast('Start date and end date are required');
+    return;
+  }
+
+  if (isNaN(price_strikeout) || !price_strikeout) {
+    showErrorToast('Price (Strikeout) is required and must be a valid number');
+    return;
+  }
+
+  if (isNaN(price_actual) || !price_actual) {
+    showErrorToast('Actual Price is required and must be a valid number');
+    return;
+  }
+
+  if (price_strikeout < price_actual * 1.1) {
+    showErrorToast('Strikeout price must be at least 10% higher than the actual price.');
+    return;
+  }
+
+  if (!trainImagePreviewValid) {
+    showErrorToast('Please provide a valid training image (upload or URL).');
+    return;
+  }
+
+  if (!allowed.length) {
+    showErrorToast('Select at least one allowed role.');
+    return;
+  }
+
+  // Client-side date validation
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(start_date);
+  start.setHours(0, 0, 0, 0);
+  if (start < today) {
+    showErrorToast('Start date cannot be in the past.');
+    return;
+  }
+  const end = new Date(end_date);
+  end.setHours(0, 0, 0, 0);
+  if (end < start) {
+    showErrorToast('End date must be on or after the start date.');
+    return;
+  }
+
   try {
+    const payload = {
+      title,
+      category,
+      description,
+      image_url,
+      content_url,
+      allowed_roles: allowed,
+      start_date,
+      end_date,
+      price_strikeout,
+      price_actual,
+    };
     if (editId) {
-      await trainingApi.updateTraining(editId, {
-        title,
-        category,
-        description,
-        image_url,
-        content_url,
-        allowed_roles: allowed,
-      });
+      await trainingApi.updateTraining(editId, payload);
       showSuccessToast('Training updated');
     } else {
-      await trainingApi.createTraining({
-        title,
-        category,
-        description,
-        image_url,
-        content_url,
-        allowed_roles: allowed,
-      });
+      await trainingApi.createTraining(payload);
       showSuccessToast('Training created');
     }
     document.getElementById('admin-train-edit-id').value = '';
     document.getElementById('admin-train-title').value = '';
     document.getElementById('admin-train-desc').value = '';
-    document.getElementById('admin-train-image').value = '';
+    document.getElementById('admin-train-category').value = '';
+    hiddenImage.value = '';
     document.getElementById('admin-train-content').value = '';
+    document.getElementById('admin-train-start-date').value = '';
+    document.getElementById('admin-train-end-date').value = '';
+    document.getElementById('admin-train-duration').value = '';
+    document.getElementById('admin-train-id-display').value = '';
+    document.getElementById('admin-train-price-strikeout').value = '';
+    document.getElementById('admin-train-price-actual').value = '';
+    if (trainImageUrl) trainImageUrl.value = '';
+    if (trainImageFile) trainImageFile.value = '';
+    updateTrainingImagePreview();
+    const roleChecks = ['admin-train-role-trainee', 'admin-train-role-farmer', 'admin-train-role-entrepreneur'];
+    roleChecks.forEach(id => { const el = document.getElementById(id); if (el) el.checked = false; });
     fetchAdminTrainings();
   } catch (err) {
     showErrorToast(getApiErrorMessage(err) || 'Failed to save training');
   }
+}
+
+function calcDuration(startVal, endVal) {
+  if (!startVal || !endVal) return '';
+  const s = new Date(startVal);
+  const e = new Date(endVal);
+  s.setHours(0, 0, 0, 0);
+  e.setHours(0, 0, 0, 0);
+  const days = Math.floor((e - s) / (1000 * 60 * 60 * 24)) + 1;
+  return days > 0 ? days : '';
 }
 
 function adminEditTraining(id) {
@@ -1402,13 +1644,23 @@ function adminEditTraining(id) {
   document.getElementById('admin-train-title').value = t.title || '';
   document.getElementById('admin-train-category').value = t.category || '';
   document.getElementById('admin-train-desc').value = t.description || '';
-  document.getElementById('admin-train-image').value = t.image_url || '';
+  if (trainImageUrl) trainImageUrl.value = t.image_url || '';
+  if (trainImageFile) trainImageFile.value = '';
+  const hidden = document.getElementById('admin-train-image');
+  if (hidden) hidden.value = t.image_url || '';
   document.getElementById('admin-train-content').value = t.content_url || '';
+  document.getElementById('admin-train-id-display').value = t.training_id || '—';
+  document.getElementById('admin-train-start-date').value = t.start_date || '';
+  document.getElementById('admin-train-end-date').value = t.end_date || '';
+  document.getElementById('admin-train-duration').value = t.duration_days ? `${t.duration_days} days` : '';
+  document.getElementById('admin-train-price-strikeout').value = t.price_strikeout ?? '';
+  document.getElementById('admin-train-price-actual').value = t.price_actual ?? '';
   // set allowed roles
   const allowed = t.allowed_roles || [];
   document.getElementById('admin-train-role-trainee').checked = allowed.includes('trainee');
   document.getElementById('admin-train-role-farmer').checked = allowed.includes('farmer');
   document.getElementById('admin-train-role-entrepreneur').checked = allowed.includes('entrepreneur');
+  updateTrainingImagePreview();
 }
 
 async function adminDeleteTraining(id) {
@@ -1420,6 +1672,313 @@ async function adminDeleteTraining(id) {
   } catch (err) {
     showErrorToast(getApiErrorMessage(err) || 'Failed to delete training');
   }
+}
+
+// =====================
+// Blogs (Admin)
+// =====================
+async function fetchAdminBlogs() {
+  const list = document.getElementById('admin-blogs-list');
+  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading blogs...</div>';
+  try {
+    const result = await blogApi.getBlogs({ limit: 100, page: 1, status: 'all' });
+    const blogs = result.blogs || result.data || result || [];
+    _adminBlogs = blogs;
+    renderAdminBlogs(blogs);
+    return blogs;
+  } catch (err) {
+    console.error(err);
+    if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;">Failed to load blogs.</div>';
+    return [];
+  }
+}
+
+function renderAdminBlogs(blogs) {
+  const list = document.getElementById('admin-blogs-list');
+  if (!list) return;
+  if (!blogs?.length) {
+    list.innerHTML = '<div class="admin-loading">No blogs yet. Click "Create Blog" to publish your first blog post.</div>';
+    return;
+  }
+
+  list.innerHTML = `
+    <div class="admin-blog-table">
+      ${blogs.map(blog => {
+    return `
+          <div class="admin-blog-row" data-id="${blog.id}">
+            <div class="admin-blog-info">
+              <div class="admin-blog-thumb">
+                ${blog.featured_image
+        ? `<img src="${blog.featured_image}" alt="${blog.title}" loading="lazy">`
+        : '<i class="fa-solid fa-newspaper"></i>'
+      }
+              </div>
+              <div class="admin-blog-details">
+                <h4>${blog.title}</h4>
+                <div class="admin-blog-meta-row">
+                  <span>${blog.author || 'Admin'}</span>
+                  <span>·</span>
+                  <span>${formatAdminDate(blog.published_at || blog.created_at)}</span>
+                </div>
+              </div>
+            </div>
+            <div class="admin-blog-actions">
+              <button class="btn-admin-delete" onclick="globalThis.adminDeleteBlog('${blog.id}')"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        `;
+  }).join('')}
+    </div>
+  `;
+}
+
+function formatAdminDate(dateString) {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function setBlogFeedback(msg) {
+  if (blogFeedbackText) blogFeedbackText.textContent = msg;
+  else blogFeedback.textContent = msg;
+  blogFeedback.classList.remove('hidden');
+}
+
+function resetAdminBlogForm() {
+  blogEditId.value = '';
+  if (blogIdInput) blogIdInput.value = '';
+  blogTitleInput.value = '';
+  blogSlugInput.value = '';
+  blogAuthorInput.value = 'Admin';
+  blogImageUrl.value = '';
+  blogImageFile.value = '';
+  blogContentInput.value = '';
+  blogImagePreview.innerHTML = '<div class="blog-image-preview-placeholder"><i class="fa-solid fa-image"></i><span>Featured image preview</span></div>';
+  blogImagePreviewValid = false;
+  blogFeedback.classList.add('hidden');
+  if (blogFeedbackText) blogFeedbackText.textContent = '';
+  blogSubmitLabel.textContent = 'Publish Blog';
+  blogModalTitle.innerHTML = 'Create New Blog Post';
+}
+
+function openAdminBlogModal() {
+  resetAdminBlogForm();
+  blogModal.classList.remove('hidden');
+  blogModal.classList.add('active');
+}
+
+function closeAdminBlogModal() {
+  blogModal.classList.remove('active');
+  blogModal.classList.add('hidden');
+}
+
+function updateBlogSlugFromTitle() {
+  const title = blogTitleInput.value.trim();
+  if (!title) {
+    blogSlugInput.value = '';
+    return;
+  }
+  blogSlugInput.value = title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function updateBlogImagePreview() {
+  if (!blogImagePreview) return;
+  const file = blogImageFile?.files?.[0];
+  let url = blogImageUrl?.value.trim();
+
+  if (file) {
+    const reader = new FileReader();
+    blogImagePreviewValid = false;
+    reader.onload = () => {
+      blogImagePreview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
+      blogImagePreviewValid = true;
+    };
+    reader.onerror = () => {
+      blogImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Unable to read image file</span>';
+      blogImagePreviewValid = false;
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
+
+  if (url) {
+    if (url.startsWith('//')) url = `https:${url}`;
+    else if (!/^https?:\/\//i.test(url) && url.includes('.')) url = `https://${url}`;
+
+    blogImagePreview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
+    blogImagePreviewValid = false;
+
+    const img = new Image();
+    let handled = false;
+    img.onload = () => {
+      if (handled) return;
+      handled = true;
+      blogImagePreview.innerHTML = `<img src="${url}" alt="Preview">`;
+      blogImagePreviewValid = true;
+    };
+    img.onerror = () => {
+      if (handled) return;
+      handled = true;
+      blogImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image from URL</span>';
+      blogImagePreviewValid = false;
+    };
+    try { img.src = url; } catch (e) {
+      blogImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
+      blogImagePreviewValid = false;
+    }
+    return;
+  }
+
+  blogImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+  blogImagePreviewValid = false;
+}
+
+async function handleAdminSaveBlog(event) {
+  event.preventDefault();
+  blogFeedback.classList.add('hidden');
+
+  const editId = blogEditId.value;
+  const blogId = blogIdInput?.value.trim() || '';
+  const title = blogTitleInput.value.trim();
+  const slug = blogSlugInput.value.trim();
+  const author = blogAuthorInput.value.trim() || 'Admin';
+  const content = blogContentInput.value.trim();
+  let featured_image = blogImageUrl.value.trim();
+  const imageFile = blogImageFile?.files?.[0];
+
+  if (!title) {
+    setBlogFeedback('Blog title is required.');
+    return;
+  }
+
+  if (!content) {
+    setBlogFeedback('Blog content is required.');
+    return;
+  }
+
+  try {
+    if (imageFile) {
+      console.log('[BlogUpload] Reading local file as data URL...');
+      featured_image = await readFileAsDataUrl(imageFile);
+      console.log('[BlogUpload] File read successfully, data URL length:', featured_image?.length);
+    }
+
+    if (editId) {
+      await blogApi.updateBlog(editId, {
+        title,
+        content,
+        featured_image,
+        image_source: featured_image ? 'url' : 'upload',
+      });
+      showSuccessToast('✅ Blog updated successfully!');
+    } else {
+      const created = await blogApi.createBlog({
+        blog_id: blogId || undefined,
+        title,
+        content,
+        featured_image,
+        image_source: featured_image ? 'url' : 'upload',
+        author,
+      });
+      console.log('[BlogUpload] Blog created:', created);
+      // Publish the blog immediately using the returned blog ID
+      if (created && created.id) {
+        await blogApi.publishBlog(created.id);
+        console.log('[BlogUpload] Blog published:', created.id);
+      }
+      showSuccessToast('✅ Blog published successfully!');
+    }
+
+    closeAdminBlogModal();
+    fetchAdminBlogs();
+  } catch (err) {
+    setBlogFeedback(err.message || 'Failed to save blog.');
+    console.error('[BlogUpload] Error:', err);
+  }
+}
+
+function adminEditBlog(id) {
+  const blog = _adminBlogs.find(b => b.id === id);
+  if (!blog) return;
+
+  // Check if blog is locked
+  const isLocked = blog.locked === true;
+  const publishedAt = new Date(blog.published_at).getTime();
+  const twelveHours = 12 * 60 * 60 * 1000;
+  const isLockedByTime = blog.status === 'published' && (Date.now() - publishedAt > twelveHours);
+
+  if (isLocked || isLockedByTime) {
+    showErrorToast('This blog is locked and cannot be edited.');
+    return;
+  }
+
+  openAdminBlogModal();
+
+  blogEditId.value = blog.id;
+  if (blogIdInput) blogIdInput.value = blog.blog_id || blog.id || '';
+  blogTitleInput.value = blog.title;
+  blogSlugInput.value = blog.slug;
+  blogAuthorInput.value = blog.author || 'Admin';
+  blogImageUrl.value = blog.featured_image || '';
+  blogContentInput.value = blog.content;
+  blogSubmitLabel.textContent = 'Update Blog';
+  blogModalTitle.innerHTML = '<i class="fa-solid fa-pen"></i> Edit Blog';
+
+  if (blog.featured_image) {
+    blogImagePreview.innerHTML = `<img src="${blog.featured_image}" alt="Preview">`;
+    blogImagePreviewValid = true;
+  }
+}
+
+async function adminDeleteBlog(id) {
+  // Create confirmation modal
+  const existingConfirm = document.getElementById('admin-blog-confirm-modal');
+  if (existingConfirm) existingConfirm.remove();
+
+  const confirmModal = document.createElement('div');
+  confirmModal.id = 'admin-blog-confirm-modal';
+  confirmModal.className = 'modal-overlay active';
+  confirmModal.innerHTML = `
+    <div class="modal-content modal-confirm-content">
+      <h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--color-danger);"></i> Delete Blog</h3>
+      <p>Are you sure you want to delete this blog? This action cannot be undone.</p>
+      <div class="modal-confirm-actions">
+        <button class="btn btn-secondary" id="btn-confirm-cancel">Cancel</button>
+        <button class="btn btn-primary" id="btn-confirm-delete" style="background:var(--color-danger);">
+          <i class="fa-solid fa-trash"></i> Delete
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(confirmModal);
+
+  return new Promise((resolve) => {
+    document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
+      confirmModal.remove();
+      resolve(false);
+    });
+    document.getElementById('btn-confirm-delete').addEventListener('click', async () => {
+      try {
+        await blogApi.deleteBlog(id);
+        showSuccessToast('✅ Blog deleted successfully!');
+        fetchAdminBlogs();
+        confirmModal.remove();
+        resolve(true);
+      } catch (err) {
+        showErrorToast(err.message || 'Failed to delete blog.');
+        confirmModal.remove();
+        resolve(false);
+      }
+    });
+  });
 }
 
 function renderAdminCategoriesList(categories) {
@@ -1642,8 +2201,7 @@ async function adminDeleteCategory(catId) {
     }
 
     showSuccessToast('✅ Category removed successfully.');
-    fetchAdminCategories();
-    fetchCategories();
+    window.location.href = '/';
   } catch (err) {
     showErrorToast(getApiErrorMessage(err) || 'Unable to delete category.');
   }
@@ -1821,6 +2379,28 @@ function setupAdminEventHandlers() {
   if (saveCatBtn) saveCatBtn.addEventListener('click', handleAdminSaveCategory);
   if (resetCatBtn) resetCatBtn.addEventListener('click', resetAdminCatForm);
 
+  // Blog event handlers
+  if (btnCreateBlog) btnCreateBlog.addEventListener('click', openAdminBlogModal);
+  if (blogModalClose) blogModalClose.addEventListener('click', closeAdminBlogModal);
+  if (blogForm) blogForm.addEventListener('submit', handleAdminSaveBlog);
+  if (blogResetBtn) blogResetBtn.addEventListener('click', resetAdminBlogForm);
+  if (blogTitleInput) blogTitleInput.addEventListener('input', updateBlogSlugFromTitle);
+  if (blogImageBrowse) blogImageBrowse.addEventListener('click', () => blogImageFile?.click());
+  if (blogImageFile) blogImageFile.addEventListener('change', updateBlogImagePreview);
+  if (blogImageUrl) {
+    blogImageUrl.addEventListener('input', () => {
+      if (blogImageFile?.files?.length) blogImageFile.value = '';
+      updateBlogImagePreview();
+    });
+  }
+
+  // Close blog modal on outside click
+  if (blogModal) {
+    blogModal.addEventListener('click', (e) => {
+      if (e.target === blogModal) closeAdminBlogModal();
+    });
+  }
+
   // Training form
   if (trainForm) trainForm.addEventListener('submit', handleAdminSaveTraining);
   const resetTrainBtn = document.getElementById('btn-admin-reset-train');
@@ -1829,10 +2409,38 @@ function setupAdminEventHandlers() {
       document.getElementById('admin-train-edit-id').value = '';
       document.getElementById('admin-train-title').value = '';
       document.getElementById('admin-train-desc').value = '';
-      document.getElementById('admin-train-image').value = '';
+      document.getElementById('admin-train-category').value = '';
+      const hiddenImg = document.getElementById('admin-train-image');
+      if (hiddenImg) hiddenImg.value = '';
+      if (trainImageUrl) trainImageUrl.value = '';
+      if (trainImageFile) trainImageFile.value = '';
+      updateTrainingImagePreview();
       document.getElementById('admin-train-content').value = '';
+      document.getElementById('admin-train-start-date').value = '';
+      document.getElementById('admin-train-end-date').value = '';
+      document.getElementById('admin-train-duration').value = '';
+      document.getElementById('admin-train-id-display').value = '';
+      document.getElementById('admin-train-price-strikeout').value = '';
+      document.getElementById('admin-train-price-actual').value = '';
+      ['admin-train-role-trainee', 'admin-train-role-farmer', 'admin-train-role-entrepreneur'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+      });
     });
   }
+
+  // Auto-calculate duration on date change
+  function updateDuration() {
+    const s = document.getElementById('admin-train-start-date')?.value;
+    const e = document.getElementById('admin-train-end-date')?.value;
+    const d = document.getElementById('admin-train-duration');
+    if (d) {
+      const days = calcDuration(s, e);
+      d.value = days ? `${days} days` : '';
+    }
+  }
+  document.getElementById('admin-train-start-date')?.addEventListener('change', updateDuration);
+  document.getElementById('admin-train-end-date')?.addEventListener('change', updateDuration);
 
   // Product/category image preview wiring
   if (productImageBrowse) productImageBrowse.addEventListener('click', () => productImageFile?.click());
@@ -1846,6 +2454,21 @@ function setupAdminEventHandlers() {
   }
   if (categoryImageFile) categoryImageFile.addEventListener('change', updateCategoryImagePreview);
   if (categoryImageUrl) categoryImageUrl.addEventListener('input', updateCategoryImagePreview);
+
+  // Training image preview wiring
+  if (trainImageBrowse) trainImageBrowse.addEventListener('click', () => trainImageFile?.click());
+  if (trainImageFile) {
+    trainImageFile.addEventListener('change', () => {
+      if (trainImageUrl) trainImageUrl.value = '';
+      updateTrainingImagePreview();
+    });
+  }
+  if (trainImageUrl) {
+    trainImageUrl.addEventListener('input', () => {
+      if (trainImageFile?.files?.length) trainImageFile.value = '';
+      updateTrainingImagePreview();
+    });
+  }
 
   const adminSearchProd = document.getElementById('admin-search-prod');
   const adminFilterCat = document.getElementById('admin-filter-cat');
@@ -1866,6 +2489,50 @@ function setupAdminEventHandlers() {
   if (adminHistoryPageSize) adminHistoryPageSize.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistory(); });
   if (adminHistoryClear) adminHistoryClear.addEventListener('click', clearAdminHistoryFilters);
 
+  // changes to ordershipment page modifications-pravara
+  // Shipping sub-tabs
+  document.querySelectorAll('.ship-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ship-tab').forEach((t) => t.classList.remove('active'));
+      btn.classList.add('active');
+      const target = btn.dataset.shipTab;
+      document.querySelectorAll('.ship-panel').forEach((p) => p.classList.remove('active'));
+      const panel = document.getElementById(`ship-panel-${target}`);
+      if (panel) panel.classList.add('active');
+    });
+  });
+
+  // Status pills — current orders
+  document.querySelectorAll('.ship-status-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.ship-status-pill').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      const status = pill.dataset.status;
+      if (status === 'all') {
+        renderAdminOrders(adminOrdersCache);
+        return;
+      }
+    const statusMap = {
+      placed: ['placed'],
+      processing: ['processing'],
+      shipped: ['shipped', 'in_transit'],
+      delivered: ['delivered'],
+      cancelled: ['cancelled'],
+    };
+      const allowed = statusMap[status] || [status];
+      const filtered = adminOrdersCache.filter((o) => allowed.includes(o.delivery_status));
+      renderAdminOrders(filtered);
+    });
+  });
+
+  // Recent orders status dropdown-pravara
+  const historyStatusFilter = document.getElementById('admin-history-status-filter');
+  if (historyStatusFilter) {
+    historyStatusFilter.addEventListener('change', () => {
+      adminHistoryPage = 1;
+      renderAdminHistory();
+    });
+  }
   // Expose globals
   globalThis.adminEditProduct = adminEditProduct;
   globalThis.adminDeleteProduct = adminDeleteProduct;
@@ -1876,7 +2543,11 @@ function setupAdminEventHandlers() {
   globalThis.adminDeleteCategory = adminDeleteCategory;
   globalThis.adminEditTraining = adminEditTraining;
   globalThis.adminDeleteTraining = adminDeleteTraining;
+  globalThis.adminEditBlog = adminEditBlog;
+  globalThis.adminDeleteBlog = adminDeleteBlog;
+  globalThis.fetchAdminBlogs = fetchAdminBlogs;
   globalThis.copyInvoiceLink = copyInvoiceLink;
+  globalThis.renderAdminOrders = renderAdminOrders;
 }
 
 function initAdminPage() {

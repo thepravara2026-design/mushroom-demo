@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS settings CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
+DROP TABLE IF EXISTS blogs CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
 -- 2. CREATE TABLES WITH TEXT IDENTIFIERS FOR COMPATIBILITY
@@ -85,6 +86,8 @@ CREATE TABLE IF NOT EXISTS orders (
   cancelled_at TIMESTAMP WITH TIME ZONE,
   whatsapp_sent BOOLEAN DEFAULT false NOT NULL,
   invoice_token TEXT,
+  expected_delivery_date TIMESTAMP WITH TIME ZONE,
+  delivery_days_text TEXT DEFAULT '',
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
@@ -106,6 +109,39 @@ CREATE TABLE IF NOT EXISTS trainings (
   content_url TEXT,
   allowed_roles JSONB DEFAULT '[]'::JSONB NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+-- Create Blogs Table
+CREATE TABLE IF NOT EXISTS blogs (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  author TEXT NOT NULL DEFAULT 'Admin',
+  content TEXT NOT NULL,
+  featured_image TEXT,
+  image_source TEXT DEFAULT 'upload',
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'locked')),
+  published_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  locked BOOLEAN DEFAULT FALSE
+);
+
+-- Create Refunds Table
+CREATE TABLE IF NOT EXISTS refunds (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  razorpay_payment_id TEXT,
+  razorpay_refund_id TEXT,
+  amount NUMERIC(10, 2) NOT NULL,
+  status TEXT DEFAULT 'initiated' NOT NULL,
+  cancelled_by TEXT,
+  admin_note TEXT,
+  initiated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  processed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
 -- Create Enrollments Table
@@ -266,6 +302,43 @@ INSERT INTO trainings (id, title, category, description, image_url, content_url,
 )
 ON CONFLICT (id) DO NOTHING;
 
+-- Seed Blogs
+INSERT INTO blogs (id, title, slug, author, content, featured_image, image_source, status, published_at) VALUES
+(
+  'blog-1',
+  'How AI is Transforming E-Commerce',
+  'how-ai-is-transforming-ecommerce',
+  'Admin',
+  '<h2>Introduction</h2><p>Artificial Intelligence is revolutionizing the way we shop online. From personalized recommendations to intelligent chatbots, AI is making e-commerce more efficient and customer-centric.</p><h2>Key AI Applications</h2><ul><li><strong>Personalization:</strong> AI algorithms analyze user behavior to deliver tailored product recommendations.</li><li><strong>Chatbots:</strong> 24/7 customer support without human operators on duty.</li><li><strong>Inventory Management:</strong> Predictive analytics optimize stock levels.</li><li><strong>Dynamic Pricing:</strong> Real-time price adjustments based on demand.</li></ul><h2>Conclusion</h2><p>Businesses that embrace AI will have a competitive advantage in the digital marketplace.</p>',
+  'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=800',
+  'url',
+  'published',
+  NOW() - INTERVAL '2 days'
+),
+(
+  'blog-2',
+  'The Future of Mushroom Farming',
+  'future-of-mushroom-farming',
+  'Admin',
+  '<h2>Sustainable Agriculture</h2><p>Mushroom farming is emerging as a key player in sustainable agriculture. With minimal land and water requirements, mushrooms offer high nutritional value per square foot.</p><h2>Technological Advances</h2><p>Modern cultivation techniques include climate-controlled environments, automated substrate preparation, and IoT monitoring systems.</p><h2>Market Growth</h2><p>The global mushroom market is projected to reach $80 billion by 2028, driven by increasing demand for plant-based proteins.</p>',
+  'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=800',
+  'url',
+  'published',
+  NOW() - INTERVAL '5 days'
+),
+(
+  'blog-3',
+  '5 Tips for Successful Spawn Production',
+  '5-tips-successful-spawn-production',
+  'Admin',
+  '<h2>Tip 1: Sterile Environment</h2><p>Maintain a completely sterile workspace to prevent contamination.</p><h2>Tip 2: Quality Substrate</h2><p>Use high-quality grains or sawdust as your substrate base.</p><h2>Tip 3: Proper Incubation</h2><p>Control temperature and humidity for optimal mycelium growth.</p><h2>Tip 4: Regular Monitoring</h2><p>Check your cultures daily for signs of contamination or healthy growth.</p><h2>Tip 5: Documentation</h2><p>Keep detailed records of each batch for continuous improvement.</p>',
+  'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=800',
+  'url',
+  'published',
+  NOW() - INTERVAL '10 days'
+)
+ON CONFLICT (id) DO NOTHING;
+
 -- Seed Users
 -- The password hash for admin123 is: $2a$10$V36GomwF7q.bE8g1tW0Xdu7yTpeGf37Wb/nre2h6K6lqgZ7m99aUq
 INSERT INTO users (id, email, password_hash, full_name, whatsapp_number, role) VALUES
@@ -273,3 +346,156 @@ INSERT INTO users (id, email, password_hash, full_name, whatsapp_number, role) V
 ('user-grower', 'grower@sporekart.com', NULL, 'Sam Grower', '9876543212', 'grower'),
 ('user-admin', 'admin@sporekart.com', '$2a$10$V36GomwF7q.bE8g1tW0Xdu7yTpeGf37Wb/nre2h6K6lqgZ7m99aUq', 'Sporekart Admin', '9876543210', 'admin')
 ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
+-- 4. ROW LEVEL SECURITY (RLS) — Defense in depth
+-- The service_role key (used by Express backend) bypasses these.
+-- These policies protect tables if ever called directly with anon key.
+-- Run this section separately after table creation if needed.
+-- ============================================================
+
+-- Enable RLS on all tables
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trainings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blogs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE refunds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enrollments ENABLE ROW LEVEL SECURITY;
+
+-- ── PRODUCTS ─────────────────────────────────────────────────
+-- Public can read all active products (no auth required)
+DROP POLICY IF EXISTS "Public can read products" ON products;
+CREATE POLICY "Public can read products"
+  ON products FOR SELECT USING (true);
+
+-- Only admins can create/update/delete products
+DROP POLICY IF EXISTS "Admins can manage products" ON products;
+CREATE POLICY "Admins can manage products"
+  ON products FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── CATEGORIES ───────────────────────────────────────────────
+DROP POLICY IF EXISTS "Public can read categories" ON categories;
+CREATE POLICY "Public can read categories"
+  ON categories FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admins can manage categories" ON categories;
+CREATE POLICY "Admins can manage categories"
+  ON categories FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── ORDERS ───────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Users view own orders" ON orders;
+CREATE POLICY "Users view own orders"
+  ON orders FOR SELECT
+  USING (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Users create own orders" ON orders;
+CREATE POLICY "Users create own orders"
+  ON orders FOR INSERT
+  WITH CHECK (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Admins manage all orders" ON orders;
+CREATE POLICY "Admins manage all orders"
+  ON orders FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── BLOGS ────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Public can read published blogs" ON blogs;
+CREATE POLICY "Public can read published blogs"
+  ON blogs FOR SELECT USING (status = 'published');
+
+DROP POLICY IF EXISTS "Admins can manage blogs" ON blogs;
+CREATE POLICY "Admins can manage blogs"
+  ON blogs FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── TRAININGS ────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Authenticated users can view trainings" ON trainings;
+CREATE POLICY "Authenticated users can view trainings"
+  ON trainings FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admins can manage trainings" ON trainings;
+CREATE POLICY "Admins can manage trainings"
+  ON trainings FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── ENROLLMENTS ──────────────────────────────────────────────
+DROP POLICY IF EXISTS "Users view own enrollments" ON enrollments;
+CREATE POLICY "Users view own enrollments"
+  ON enrollments FOR SELECT
+  USING (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Users create own enrollments" ON enrollments;
+CREATE POLICY "Users create own enrollments"
+  ON enrollments FOR INSERT
+  WITH CHECK (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Admins manage all enrollments" ON enrollments;
+CREATE POLICY "Admins manage all enrollments"
+  ON enrollments FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── USERS ────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Users view own profile" ON users;
+CREATE POLICY "Users view own profile"
+  ON users FOR SELECT USING (auth.uid()::text = id);
+
+DROP POLICY IF EXISTS "Users update own profile" ON users;
+CREATE POLICY "Users update own profile"
+  ON users FOR UPDATE USING (auth.uid()::text = id);
+
+DROP POLICY IF EXISTS "Admins manage all users" ON users;
+CREATE POLICY "Admins manage all users"
+  ON users FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── REFUNDS ──────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Users view own refunds" ON refunds;
+CREATE POLICY "Users view own refunds"
+  ON refunds FOR SELECT
+  USING (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Admins manage all refunds" ON refunds;
+CREATE POLICY "Admins manage all refunds"
+  ON refunds FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ── SETTINGS ─────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Admins manage settings" ON settings;
+CREATE POLICY "Admins manage settings"
+  ON settings FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- ============================================================
+-- 5. STORED FUNCTIONS
+-- ============================================================
+
+-- Atomic stock decrement with insufficient-stock guard.
+-- Called via: supabaseAdmin.rpc('decrement_stock', { p_product_id, p_quantity })
+-- SECURITY DEFINER: runs with table-owner privileges, bypasses RLS.
+CREATE OR REPLACE FUNCTION decrement_stock(p_product_id TEXT, p_quantity INT)
+RETURNS void AS $$
+BEGIN
+  UPDATE products
+  SET stock = stock - p_quantity
+  WHERE id = p_product_id AND stock >= p_quantity;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Insufficient stock for product %', p_product_id;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================
+-- 6. SET ADMIN ROLE IN SUPABASE AUTH (run once per admin user)
+-- Replace the email below with your actual admin email.
+-- ============================================================
+-- UPDATE auth.users
+-- SET raw_app_meta_data = raw_app_meta_data || '{"role": "admin"}'::jsonb
+-- WHERE email = 'admin@sporekart.com';
+

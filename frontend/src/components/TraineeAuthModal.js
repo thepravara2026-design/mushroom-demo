@@ -1,6 +1,7 @@
 import { traineeApi } from '../api/traineeApi.js';
 import { saveAuth, state } from '../utils/state.js';
-import { showErrorToast, showSuccessToast } from '../utils/notify.js';
+import { showErrorToast, showSuccessToast, showPopupModal } from '../utils/notify.js';
+import { isValidIndianPhone } from '../utils/validation.js';
 
 // === KARNATAKA CITIES DATABASE ===
 const KARNATAKA_CITIES = [
@@ -54,6 +55,8 @@ class TraineeAuthModal {
         this._activeMethod = 'email'; // 'email' | 'phone'
         this._pendingEmail = null;
         this._pendingPhone = null;
+        this._registeredEmail = null;
+        this._registeredPhone = null;
         this._initStateCity();
     }
 
@@ -194,6 +197,18 @@ class TraineeAuthModal {
         this._hideAllViews();
         document.getElementById('trainee-login-view').classList.remove('hidden');
         this.currentView = 'login';
+
+        // Pre-fill registered email or phone if returning from signup success
+        if (this._registeredEmail) {
+            const emailInput = document.getElementById('trainee-email-input');
+            if (emailInput) emailInput.value = this._registeredEmail;
+        }
+        if (this._registeredPhone) {
+            const phoneInput = document.getElementById('trainee-phone');
+            if (phoneInput) phoneInput.value = this._registeredPhone;
+        }
+        this._registeredEmail = null;
+        this._registeredPhone = null;
     }
 
     showPhoneView() {
@@ -266,8 +281,8 @@ class TraineeAuthModal {
         const fullPhone = `${country}${phone}`;
         const errorEl = document.getElementById('trainee-phone-error');
 
-        if (!phone || phone.length < 8) {
-            if (errorEl) { errorEl.textContent = 'Please enter a valid phone number.'; errorEl.classList.remove('hidden'); }
+        if (!isValidIndianPhone(phone)) {
+            if (errorEl) { errorEl.textContent = 'Enter a valid Indian phone number (e.g. +91 9876543210).'; errorEl.classList.remove('hidden'); }
             return;
         }
 
@@ -347,8 +362,8 @@ class TraineeAuthModal {
             return;
         }
 
-        if (phone.length < 10) {
-            if (errorEl) { errorEl.textContent = 'Please enter a valid 10-digit phone number.'; errorEl.classList.remove('hidden'); }
+        if (!isValidIndianPhone(phone)) {
+            if (errorEl) { errorEl.textContent = 'Enter a valid Indian phone number (e.g. +91 9876543210).'; errorEl.classList.remove('hidden'); }
             return;
         }
 
@@ -357,9 +372,20 @@ class TraineeAuthModal {
 
         try {
             await traineeApi.signup({ fullName, phone, email, roleType, city, state: stateVal });
-            showSuccessToast('Registration successful! Please login.');
+
+            showSuccessToast('Registration successful! Please login to continue.');
+            this._registeredEmail = email;
+            this._registeredPhone = phone;
             this.showSignupSuccess();
         } catch (err) {
+            const message = (err.message || '').toLowerCase();
+            // If the user is already registered, auto-request OTP and go to verify view
+            // This breaks the loop: signup says "already registered" → login says "needs signup" → loop
+            if (message.includes('already registered') || message.includes('already exists') || message.includes('already taken')) {
+                showSuccessToast('You already have an account! Please login.');
+                this.showLogin();
+                return;
+            }
             if (errorEl) { errorEl.textContent = err.message || 'Registration failed. Please try again.'; errorEl.classList.remove('hidden'); }
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = 'Register & Continue'; }
@@ -397,6 +423,13 @@ class TraineeAuthModal {
             window.dispatchEvent(new Event('auth:changed'));
             showSuccessToast('Welcome back, Trainee!');
             if (this.onSuccessCallback) this.onSuccessCallback();
+            const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
+            showPopupModal({
+              title: '🎉 Welcome!',
+              message: `Hello <strong>${userName}</strong>, welcome to your training dashboard!`,
+              duration: 2000,
+              refreshOnClose: true,
+            });
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message || 'OTP verification failed.'; errorEl.classList.remove('hidden'); }
         } finally {

@@ -7,6 +7,8 @@ const razorpay = require('../config/razorpay');
 const authMiddleware = require('../middleware/auth');
 const { success, error: respondError } = require('../lib/response');
 const jwt = require('jsonwebtoken');
+const { supabaseAdmin } = require('../config/supabase');
+const { sendInvoiceWhatsApp } = require('../services/notificationService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
 
@@ -136,7 +138,7 @@ router.post('/checkout', authMiddleware, async (req, res) => {
       state,
       pincode ? `Pincode: ${pincode}` : ''
     ].filter(Boolean);
-    
+
     let rawAddress = addressParts.join(', ');
     if (!rawAddress) {
       rawAddress = String(req.body.delivery_address || (req.user && req.user.address) || '').trim();
@@ -284,7 +286,7 @@ router.post('/checkout', authMiddleware, async (req, res) => {
       if (city) addressUpdates.city = city;
       if (state) addressUpdates.state = state;
       if (pincode) addressUpdates.default_pincode = pincode;
-      
+
       await db.from('users').update(addressUpdates).eq('id', req.user.userId);
     }
 
@@ -353,25 +355,43 @@ router.post('/verify-payment', async (req, res) => {
         );
       }
 
-      // Decrement product stock for purchased items when payment is confirmed
+      // Decrement product stock for purchased items when payment is confirmed.
+      // Live mode: uses atomic DB function (race-condition safe).
+      // Mock mode: manual read-then-write fallback.
       if (updatedOrder && Array.isArray(updatedOrder.items)) {
-        for (const item of updatedOrder.items) {
-          const { data: productData, error: productErr } = await db
-            .from('products')
-            .select('stock')
-            .eq('id', item.productId)
-            .single();
+        if (!db.isMock && supabaseAdmin) {
+          // ── Supabase live: atomic stock decrement via stored function ─────
+          for (const item of updatedOrder.items) {
+            try {
+              await supabaseAdmin.rpc('decrement_stock', {
+                p_product_id: item.productId,
+                p_quantity: item.quantity,
+              });
+            } catch (rpcErr) {
+              // Log but don't fail the payment — stock can be reconciled manually
+              console.error(`[orders] decrement_stock RPC failed for ${item.productId}:`, rpcErr.message);
+            }
+          }
+        } else {
+          // ── Mock mode: read-then-write fallback ───────────────────────────
+          for (const item of updatedOrder.items) {
+            const { data: productData, error: productErr } = await db
+              .from('products')
+              .select('stock')
+              .eq('id', item.productId)
+              .single();
 
-          if (productErr || !productData) continue;
+            if (productErr || !productData) continue;
 
-          const newStock = Math.max(
-            0,
-            (productData.stock || 0) - item.quantity,
-          );
-          await db
-            .from('products')
-            .update({ stock: newStock })
-            .eq('id', item.productId);
+            const newStock = Math.max(
+              0,
+              (productData.stock || 0) - item.quantity,
+            );
+            await db
+              .from('products')
+              .update({ stock: newStock })
+              .eq('id', item.productId);
+          }
         }
       }
 
@@ -561,7 +581,7 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
       return respondError(res, 'Access denied. Admins only.', 403);
     }
 
-    const { delivery_status } = req.body;
+    const { delivery_status, delivery_days_text } = req.body;
     if (!delivery_status) {
       return respondError(res, 'Delivery status is required.', 400);
     }
@@ -598,6 +618,19 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
       updated_at: new Date().toISOString(),
     };
 
+    if (delivery_days_text) {
+      updatePayload.delivery_days_text = delivery_days_text.trim().slice(0, 100);
+      const daysMatch = delivery_days_text.match(/(\d+)/);
+      if (daysMatch) {
+        const days = parseInt(daysMatch[1], 10);
+        if (!isNaN(days) && days > 0) {
+          const expectedDate = new Date();
+          expectedDate.setDate(expectedDate.getDate() + days);
+          updatePayload.expected_delivery_date = expectedDate.toISOString();
+        }
+      }
+    }
+
     if (!order.invoice_token) {
       updatePayload.invoice_token = crypto.randomBytes(12).toString('hex');
     }
@@ -623,6 +656,28 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
       // ignore SSE errors
     }
 
+    // Send invoice via WhatsApp when order is shipped
+    if (delivery_status === 'shipped' && !order.whatsapp_sent) {
+      try {
+        const { data: user } = await db
+          .from('users')
+          .select('*')
+          .eq('id', order.user_id)
+          .single();
+        if (user) {
+          const result = await sendInvoiceWhatsApp(updatedOrder, user, req);
+          if (result.success) {
+            await db
+              .from('orders')
+              .update({ whatsapp_sent: true, updated_at: new Date().toISOString() })
+              .eq('id', order.id);
+          }
+        }
+      } catch (waErr) {
+        console.error('[orders] Failed to send WhatsApp invoice:', waErr.message);
+      }
+    }
+
     return success(res, {
       message: 'Order status updated successfully.',
       order: updatedOrder,
@@ -635,7 +690,7 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
     );
   }
 });
-
+/*
 // PUT /api/orders/:id/cancel
 // Allow buyers to cancel an order before it ships
 router.put('/:id/cancel', authMiddleware, async (req, res) => {
@@ -734,6 +789,231 @@ router.put('/:id/cancel', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     return respondError(res, error.message || 'Order cancellation failed', 500);
+  }
+});
+*/
+
+// for refund of amound implemented-pravara
+// PUT /api/orders/:id/cancel
+// Allow buyers and admins to cancel an order + auto-initiate refund if paid
+router.put('/:id/cancel', authMiddleware, async (req, res) => {
+  try {
+    const { data: order, error: orderErr } = await db
+      .from('orders')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (orderErr || !order) {
+      return respondError(res, 'Order not found.', 404);
+    }
+
+    const isAdmin = req.user.role === 'admin';
+    const isOwner = order.user_id === req.user.userId;
+
+    if (!isAdmin && !isOwner) {
+      return respondError(res, 'Access denied. You do not have permission to cancel this order.', 403);
+    }
+
+    // Users can only cancel during 'processing'; admins can cancel anytime before shipped
+    if (!isAdmin && order.delivery_status !== 'processing') {
+      return respondError(res, 'Order can be cancelled only when the order is in processing stage.', 400);
+    }
+
+    if (['shipped', 'delivered', 'cancelled'].includes(order.delivery_status)) {
+      return respondError(res, 'Order cannot be cancelled at this stage.', 400);
+    }
+
+    // Prevent double-cancel
+    if (order.refund_status === 'initiated' || order.refund_status === 'processed') {
+      return respondError(res, 'A refund has already been initiated for this order.', 400);
+    }
+
+    const { reason, adminNote } = req.body;
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      return respondError(res, 'Cancellation reason is required.', 400);
+    }
+
+    // ── Refund logic (only if payment was confirmed) ──────────────────────
+    let refundRecord = null;
+
+    if (order.status === 'paid' && order.razorpay_payment_id) {
+      try {
+        const amountInPaise = Math.round(order.total * 100);
+
+        // Call Razorpay refund API
+        const rzpRefund = await razorpay.payments.refund(
+          order.razorpay_payment_id,
+          {
+            amount: amountInPaise,
+            speed: 'normal',
+            notes: {
+              orderId: order.id,
+              reason: reason.trim(),
+              cancelledBy: isAdmin ? 'admin' : 'user',
+            },
+          }
+        );
+
+        // Save refund record to DB
+        const { data: newRefund, error: refundErr } = await db
+          .from('refunds')
+          .insert({
+            order_id: order.id,
+            user_id: order.user_id,
+            razorpay_payment_id: order.razorpay_payment_id,
+            razorpay_refund_id: rzpRefund.id,
+            amount: order.total,
+            status: 'initiated',
+            cancelled_by: isAdmin ? 'admin' : 'user',
+            admin_note: isAdmin ? (adminNote || reason).trim().slice(0, 500) : null,
+            initiated_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (refundErr) throw new Error(refundErr.message);
+        refundRecord = newRefund;
+
+      } catch (refundError) {
+        // Refund initiation failed — still cancel the order but flag it
+        console.error('Razorpay refund initiation failed:', refundError.message);
+        // Continue with cancellation; admin can retry refund manually
+      }
+    }
+
+    // ── Cancel the order ──────────────────────────────────────────────────
+    const cancelPayload = {
+      status: 'cancelled',
+      delivery_status: 'cancelled',
+      cancel_reason: reason.trim().slice(0, 255),
+      cancelled_by: isAdmin ? 'admin' : 'user',
+      cancelled_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      refund_status: refundRecord ? 'initiated' : (order.status === 'paid' ? 'failed' : 'none'),
+      ...(refundRecord && { refund_id: refundRecord.id }),
+    };
+
+    const { data: cancelledOrder, error: cancelErr } = await db
+      .from('orders')
+      .update(cancelPayload)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (cancelErr) {
+      return respondError(res, cancelErr.message || 'Failed to cancel order', 500);
+    }
+
+    // ── Restock items ─────────────────────────────────────────────────────
+    if (order.status === 'paid' && Array.isArray(order.items)) {
+      for (const item of order.items) {
+        const { data: productData } = await db
+          .from('products')
+          .select('stock')
+          .eq('id', item.productId)
+          .single();
+
+        if (!productData) continue;
+        await db
+          .from('products')
+          .update({ stock: (productData.stock || 0) + item.quantity })
+          .eq('id', item.productId);
+      }
+    }
+
+    // ── SSE broadcast ─────────────────────────────────────────────────────
+    try {
+      sendSseEvent(
+        'order:updated',
+        { order: cancelledOrder, refund: refundRecord },
+        (sub) =>
+          (sub.user && sub.user.role === 'admin') ||
+          (sub.user && sub.user.userId === cancelledOrder.user_id),
+      );
+    } catch (e) { /* ignore */ }
+
+    return success(res, {
+      message: refundRecord
+        ? 'Order cancelled. Refund initiated — expect 5–7 business days.'
+        : 'Order cancelled successfully.',
+      order: cancelledOrder,
+      refund: refundRecord,
+    });
+
+  } catch (error) {
+    return respondError(res, error.message || 'Order cancellation failed', 500);
+  }
+});
+
+//refund implementation-pravara
+// GET /api/orders/:id/refund
+// Fetch refund details for an order (owner or admin)
+router.get('/:id/refund', authMiddleware, async (req, res) => {
+  try {
+    const { data: order, error: orderErr } = await db
+      .from('orders')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (orderErr || !order) return respondError(res, 'Order not found.', 404);
+
+    const isAdmin = req.user.role === 'admin';
+    const isOwner = order.user_id === req.user.userId;
+
+    if (!isAdmin && !isOwner) {
+      return respondError(res, 'Access denied.', 403);
+    }
+
+    if (!order.refund_id) {
+      return success(res, { refund: null, message: 'No refund associated with this order.' });
+    }
+
+    const { data: refund, error: refundErr } = await db
+      .from('refunds')
+      .select('*')
+      .eq('id', order.refund_id)
+      .single();
+
+    if (refundErr) return respondError(res, 'Failed to fetch refund.', 500);
+
+    return success(res, { refund });
+  } catch (error) {
+    return respondError(res, error.message || 'Failed to fetch refund', 500);
+  }
+});
+
+// GET /api/orders/admin/refunds
+// Admin: list all refunds across all orders
+router.get('/admin/refunds', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return respondError(res, 'Access denied. Admins only.', 403);
+    }
+
+    const { data: refunds, error } = await db
+      .from('refunds')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) return respondError(res, error.message, 500);
+
+    // Enrich with order and user info
+    const enriched = await Promise.all(
+      refunds.map(async (r) => {
+        const { data: user } = await db
+          .from('users')
+          .select('email, full_name')
+          .eq('id', r.user_id)
+          .single();
+        return { ...r, user_email: user?.email, user_name: user?.full_name };
+      })
+    );
+
+    return success(res, enriched);
+  } catch (error) {
+    return respondError(res, error.message || 'Failed to fetch refunds', 500);
   }
 });
 
@@ -866,8 +1146,8 @@ router.get('/share/:token', async (req, res) => {
         </thead>
         <tbody>
           ${inv.items
-    .map(
-      (item, idx) => `
+        .map(
+          (item, idx) => `
             <tr>
               <td>${idx + 1}</td>
               <td>${item.name}</td>
@@ -877,8 +1157,8 @@ router.get('/share/:token', async (req, res) => {
               <td class="text-right">₹${item.total.toFixed(2)}</td>
             </tr>
           `,
-    )
-    .join('')}
+        )
+        .join('')}
         </tbody>
       </table>
     </div>
@@ -1108,5 +1388,85 @@ router.post('/:id/review', authMiddleware, async (req, res) => {
     return respondError(res, error.message || 'Failed to save review', 500);
   }
 });
+
+//razorpay webhook refund -pravara
+// POST /api/orders/webhook/razorpay
+// Razorpay webhook — updates refund status when processed/failed
+// IMPORTANT: Register this URL in Razorpay dashboard > Webhooks
+// Use express.raw() — must be registered before express.json() in server.js
+router.post(
+  '/webhook/razorpay',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+      const signature = req.headers['x-razorpay-signature'];
+
+      // Always verify signature in production
+      if (secret && signature) {
+        const expected = crypto
+          .createHmac('sha256', secret)
+          .update(req.body)
+          .digest('hex');
+        if (expected !== signature) {
+          return res.status(400).json({ error: 'Invalid webhook signature' });
+        }
+      }
+
+      const event = JSON.parse(req.body);
+      const refundEntity = event?.payload?.refund?.entity;
+
+      if (!refundEntity) return res.json({ received: true });
+
+      const { id: razorpayRefundId } = refundEntity;
+
+      if (event.event === 'refund.processed') {
+        const { data: refund } = await db
+          .from('refunds')
+          .update({ status: 'processed', processed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('razorpay_refund_id', razorpayRefundId)
+          .select()
+          .single();
+
+        if (refund) {
+          await db
+            .from('orders')
+            .update({ refund_status: 'processed', updated_at: new Date().toISOString() })
+            .eq('id', refund.order_id);
+
+          // SSE notify user + admin
+          sendSseEvent(
+            'refund:updated',
+            { refund },
+            (sub) =>
+              (sub.user && sub.user.role === 'admin') ||
+              (sub.user && sub.user.userId === refund.user_id),
+          );
+        }
+      }
+
+      if (event.event === 'refund.failed') {
+        const { data: refund } = await db
+          .from('refunds')
+          .update({ status: 'failed', updated_at: new Date().toISOString() })
+          .eq('razorpay_refund_id', razorpayRefundId)
+          .select()
+          .single();
+
+        if (refund) {
+          await db
+            .from('orders')
+            .update({ refund_status: 'failed', updated_at: new Date().toISOString() })
+            .eq('id', refund.order_id);
+        }
+      }
+
+      return res.json({ received: true });
+    } catch (err) {
+      console.error('Webhook error:', err.message);
+      return res.status(500).json({ error: 'Webhook processing failed' });
+    }
+  }
+);
 
 module.exports = router;

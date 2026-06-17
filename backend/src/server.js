@@ -13,6 +13,8 @@ const orderRoutes = require('./routes/orders');
 const categoryRoutes = require('./routes/categories');
 const trainingRoutes = require('./routes/trainings');
 const traineeRoutes = require('./routes/trainee');
+const blogRoutes = require('./routes/blogs');
+const { startBlogLockScheduler } = require('./services/blogService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -49,6 +51,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/trainings', trainingRoutes);
 app.use('/api/trainee', traineeRoutes);
+app.use('/api/blogs', blogRoutes);
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -86,6 +89,9 @@ function startServer(port, attempts = 0) {
     console.log(
       `💳 Payment Mode:  ${razorpay.isMock ? '⚠️  MOCK (Simulator)' : '✅ Razorpay'}`,
     );
+    if (!db.isMock) {
+      startBlogLockScheduler();
+    }
     console.log('==================================================');
   });
 

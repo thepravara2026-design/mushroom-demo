@@ -36,6 +36,18 @@ class AppError extends Error {
   static notFound(message = 'Resource not found', details = null) {
     return new AppError(message, 404, 'NOT_FOUND', details);
   }
+
+  static internal(message = 'Internal server error', details = null) {
+    return new AppError(message, 500, 'INTERNAL_ERROR', details);
+  }
+
+  static conflict(message = 'Conflict', details = null) {
+    return new AppError(message, 409, 'CONFLICT', details);
+  }
+
+  static forbidden(message = 'Forbidden', details = null) {
+    return new AppError(message, 403, 'FORBIDDEN', details);
+  }
 }
 
 module.exports = AppError;

@@ -1,6 +1,6 @@
 export const state = {
-  token: localStorage.getItem('jwt_token') || null,
-  user: JSON.parse(localStorage.getItem('user_data')) || null,
+  token: sessionStorage.getItem('jwt_token') || null,
+  user: JSON.parse(sessionStorage.getItem('user_data')) || null,
   cart: JSON.parse(localStorage.getItem('cart_data')) || [],
   products: [],
   orders: [],
@@ -15,11 +15,11 @@ export function saveAuth(token, user) {
   state.token = token;
   state.user = user;
   if (token) {
-    localStorage.setItem('jwt_token', token);
-    localStorage.setItem('user_data', JSON.stringify(user));
+    try { sessionStorage.setItem('jwt_token', token); } catch (e) { /* quota */ }
+    try { sessionStorage.setItem('user_data', JSON.stringify(user)); } catch (e) { /* quota */ }
   } else {
-    localStorage.removeItem('jwt_token');
-    localStorage.removeItem('user_data');
+    sessionStorage.removeItem('jwt_token');
+    sessionStorage.removeItem('user_data');
   }
   try {
     window.dispatchEvent(new CustomEvent('auth:changed', { detail: { token, user } }));
@@ -29,12 +29,16 @@ export function saveAuth(token, user) {
 }
 
 export function saveCart() {
-  localStorage.setItem('cart_data', JSON.stringify(state.cart));
+  try { localStorage.setItem('cart_data', JSON.stringify(state.cart)); } catch (e) { /* quota */ }
 }
 
 export function clearAuth() {
   saveAuth(null, null);
   state.orders = [];
+  // Cart is preserved across logout so unfinished shopping survives
+}
+
+export function clearCart() {
   state.cart = [];
   saveCart();
 }
@@ -43,14 +47,14 @@ export function clearAuth() {
 export function saveUserProfile(user) {
   state.user = user || null;
   if (user) {
-    localStorage.setItem('user_data', JSON.stringify(user));
+    try { sessionStorage.setItem('user_data', JSON.stringify(user)); } catch (e) { /* quota */ }
   } else {
-    localStorage.removeItem('user_data');
+    sessionStorage.removeItem('user_data');
   }
 }
 
 // Delete local profile (and optionally remote account if implemented)
 export function deleteUserProfile() {
   state.user = null;
-  localStorage.removeItem('user_data');
+  sessionStorage.removeItem('user_data');
 }

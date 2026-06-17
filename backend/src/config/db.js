@@ -1,15 +1,23 @@
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
+const { supabaseAdmin } = require('./supabase');
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-const isMock = !supabaseUrl || supabaseUrl.includes('your-supabase-url') || !supabaseKey;
+// Mock mode: no real Supabase credentials present
+const isMock =
+  !supabaseUrl
+  || supabaseUrl.includes('your-supabase-url')
+  || !supabaseServiceKey
+  || !supabaseAdmin;
 
 let supabaseInstance = null;
 if (!isMock) {
-  supabaseInstance = createClient(supabaseUrl, supabaseKey);
+  // Use the admin client — service_role key bypasses RLS; safe because this only runs server-side
+  supabaseInstance = supabaseAdmin;
 }
+
 
 // In-memory data store for Mock Mode
 const mockStore = {
@@ -170,6 +178,7 @@ const mockStore = {
     },
   ],
 
+  refunds: [],
   settings: [
     {
       key: 'shipping_charge',
@@ -177,33 +186,162 @@ const mockStore = {
     },
   ],
   orders: [],
-  enrollments: [],
+  enrollments: [
+    {
+      id: 'enroll-1',
+      training_id: 'train-1',
+      user_id: 'user-buyer',
+      role: 'trainee',
+      created_at: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'enroll-2',
+      training_id: 'train-5',
+      user_id: 'user-buyer',
+      role: 'trainee',
+      created_at: new Date(Date.now() - 50 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+  ],
+  blogs: [
+    {
+      id: 'blog-1',
+      title: 'How AI is Transforming E-Commerce',
+      slug: 'how-ai-is-transforming-ecommerce',
+      author: 'Admin',
+      content: '<h2>Introduction</h2><p>Artificial Intelligence is revolutionizing the way we shop online.</p>',
+      featured_image: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=800',
+      image_source: 'url',
+      status: 'published',
+      published_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      locked: false,
+    },
+    {
+      id: 'blog-2',
+      title: 'The Future of Mushroom Farming',
+      slug: 'future-of-mushroom-farming',
+      author: 'Admin',
+      content: '<h2>Sustainable Agriculture</h2><p>Mushroom farming is emerging as a key player in sustainable agriculture.</p>',
+      featured_image: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=800',
+      image_source: 'url',
+      status: 'published',
+      published_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      locked: false,
+    },
+    {
+      id: 'blog-3',
+      title: '5 Tips for Successful Spawn Production',
+      slug: '5-tips-successful-spawn-production',
+      author: 'Admin',
+      content: '<h2>Tip 1: Sterile Environment</h2><p>Maintain a completely sterile workspace to prevent contamination.</p>',
+      featured_image: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=800',
+      image_source: 'url',
+      status: 'published',
+      published_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      locked: true,
+    },
+  ],
   trainings: [
     {
       id: 'train-1',
-      title: 'Beginner Mushroom Cultivation',
+      training_id: 'spore-a1b2c3d4',
+      title: 'Mushroom Cultivation Fundamentals',
       category: 'Beginner',
-      description:
-        'A hands-on introduction to mushroom farming for new growers.',
+      description: 'A hands-on introduction to mushroom farming for new growers. Covers spawn preparation, substrate management, and harvesting techniques.',
       image_url: '/images/training_farm.png',
       content_url: '',
       allowed_roles: ['trainee', 'farmer'],
+      start_date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      duration_days: 31,
+      price_strikeout: 1999,
+      price_actual: 999,
     },
     {
       id: 'train-2',
-      title: 'Commercial Farming for Entrepreneurs',
+      training_id: 'spore-e5f6g7h8',
+      title: 'Commercial Mushroom Farming',
+      category: 'Farmer',
+      description: 'Scale up your production with advanced growing rooms, climate control, bulk substrate preparation and disease management.',
+      image_url: '/images/training_farm.png',
+      content_url: '',
+      allowed_roles: ['farmer'],
+      start_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 54 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      duration_days: 25,
+      price_strikeout: 4999,
+      price_actual: 2999,
+    },
+    {
+      id: 'train-3',
+      training_id: 'spore-i9j0k1l2',
+      title: 'Mushroom Business Masterclass',
       category: 'Entrepreneur',
-      description:
-        'Scaling up production, post-harvest handling and business models.',
+      description: 'Business models, marketing strategies, distribution channels and financial planning for mushroom entrepreneurs.',
       image_url: '/images/training_business.png',
       content_url: '',
       allowed_roles: ['entrepreneur'],
+      start_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 76 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      duration_days: 32,
+      price_strikeout: 6999,
+      price_actual: 3999,
+    },
+    {
+      id: 'train-4',
+      training_id: 'spore-m3n4o5p6',
+      title: 'Certified Mushroom Grower Program',
+      category: 'Certification',
+      description: 'Comprehensive certification covering end-to-end mushroom production. Includes lab work, farm visit and final assessment.',
+      image_url: '/images/training_farm.png',
+      content_url: '',
+      allowed_roles: ['trainee', 'farmer', 'entrepreneur'],
+      start_date: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 74 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      duration_days: 15,
+      price_strikeout: 12999,
+      price_actual: 7999,
+    },
+    {
+      id: 'train-5',
+      training_id: 'spore-q7r8s9t0',
+      title: 'Intro to Mushroom Growing',
+      category: 'Beginner',
+      description: 'Perfect for hobbyists. Learn the complete lifecycle from spore to harvest with hands-on demonstrations.',
+      image_url: '/images/training_farm.png',
+      content_url: '',
+      allowed_roles: ['trainee'],
+      start_date: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      end_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      duration_days: 16,
+      price_strikeout: 1499,
+      price_actual: 799,
+    },
+    {
+      id: 'train-6',
+      training_id: 'spore-u1v2w3x4',
+      title: 'Advanced Spawn Production Lab',
+      category: 'Certification',
+      description: 'Master sterile techniques, culture isolation, grain spawn production and quality testing in a professional lab setting.',
+      image_url: '/images/training_business.png',
+      content_url: '',
+      allowed_roles: ['farmer', 'entrepreneur'],
+      start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      end_date: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      duration_days: 16,
+      price_strikeout: 5999,
+      price_actual: 3499,
     },
   ],
 };
 
 // Seed Users for Sporekart
-const adminPasswordHash = bcrypt.hashSync('123456', 10);
+const adminPasswordHash = bcrypt.hashSync('admin123', 10);
 
 // Seed Buyer User
 mockStore.users.push({
@@ -270,7 +408,8 @@ class MockQueryBuilder {
     this.shouldDelete = false;
   }
 
-  select(fields = '*') {
+  select(fields = '*', opts = {}) {
+    this._count = opts.count || null;
     return this;
   }
 
@@ -352,6 +491,49 @@ class MockQueryBuilder {
     return this;
   }
 
+  order(column, opts = { ascending: true }) {
+    const { ascending = true, nullsFirst = false } = opts;
+    this.data.sort((a, b) => {
+      const valA = a[column];
+      const valB = b[column];
+      const aIsNull = valA === null || valA === undefined;
+      const bIsNull = valB === null || valB === undefined;
+      if (aIsNull && bIsNull) return 0;
+      if (aIsNull) return nullsFirst ? -1 : 1;
+      if (bIsNull) return nullsFirst ? 1 : -1;
+      if (valA < valB) return ascending ? -1 : 1;
+      if (valA > valB) return ascending ? 1 : -1;
+      return 0;
+    });
+    return this;
+  }
+
+  range(from, to) {
+    this.data = this.data.slice(from, to + 1);
+    return this;
+  }
+
+  ilike(column, pattern) {
+    const regex = new RegExp(pattern.replace(/%/g, '.*'), 'i');
+    this.data = this.data.filter((item) => regex.test(item[column] || ''));
+    return this;
+  }
+
+  neq(column, value) {
+    this.data = this.data.filter((item) => item[column] !== value);
+    return this;
+  }
+
+  lt(column, value) {
+    this.data = this.data.filter((item) => item[column] < value);
+    return this;
+  }
+
+  gt(column, value) {
+    this.data = this.data.filter((item) => item[column] > value);
+    return this;
+  }
+
   delete() {
     this.shouldDelete = true;
     return this;
@@ -359,9 +541,11 @@ class MockQueryBuilder {
 
   then(onfulfilled) {
     this.execute();
-    return Promise.resolve({ data: this.data, error: this.error }).then(
-      onfulfilled,
-    );
+    const result = { data: this.data, error: this.error };
+    if (this._count === 'exact') {
+      result.count = this.data.length;
+    }
+    return Promise.resolve(result).then(onfulfilled);
   }
 }
 
@@ -399,6 +583,36 @@ class SupabaseQueryBuilderWrapper {
 
   eq(column, value) {
     this.builder = this.builder.eq(column, value);
+    return this;
+  }
+
+  neq(column, value) {
+    this.builder = this.builder.neq(column, value);
+    return this;
+  }
+
+  lt(column, value) {
+    this.builder = this.builder.lt(column, value);
+    return this;
+  }
+
+  gt(column, value) {
+    this.builder = this.builder.gt(column, value);
+    return this;
+  }
+
+  ilike(column, pattern) {
+    this.builder = this.builder.ilike(column, pattern);
+    return this;
+  }
+
+  order(column, opts) {
+    this.builder = this.builder.order(column, opts);
+    return this;
+  }
+
+  range(from, to) {
+    this.builder = this.builder.range(from, to);
     return this;
   }
 

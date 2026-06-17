@@ -1,4 +1,4 @@
-import { state } from './state.js';
+import { state, clearAuth } from './state.js';
 
 export function isAuthenticated() {
   return Boolean(state && state.token && state.user);
@@ -23,8 +23,7 @@ export function requireAnyRole(roles = []) {
 }
 
 export function logoutAndRedirect() {
-  localStorage.removeItem('jwt_token');
-  localStorage.removeItem('user_data');
+  clearAuth();
   window.location.hash = '#shop';
   window.location.reload();
 }

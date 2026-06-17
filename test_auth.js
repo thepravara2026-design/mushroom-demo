@@ -12,22 +12,36 @@ const puppeteer = require('puppeteer');
     await page.goto('http://localhost:3000', { waitUntil: 'networkidle2' });
 
     console.log('Testing Admin Hidden Login Flow...');
-    await page.goto('http://localhost:3000/#admin-login', {
+    // Open auth modal by triggering buyer checkout gate
+    await page.goto('http://localhost:3000/#checkout', {
       waitUntil: 'networkidle0',
     });
-    const isAdminModalVisible = await page.$eval('#admin-login-modal', (el) => el.classList.contains('open'));
-    console.log('Admin Modal Visible:', isAdminModalVisible);
+    let modalOpen = await page.$eval('#auth-modal', (el) => el.classList.contains('open'));
+    console.log('Auth Modal Opened:', modalOpen);
 
-    console.log('Testing Grower Gating...');
+    // Switch to admin password view
+    if (modalOpen) {
+      await page.click('#link-admin-password');
+      await new Promise((r) => setTimeout(r, 300));
+      const isAdminViewVisible = await page.$eval(
+        '#auth-admin-password-view',
+        (el) => !el.classList.contains('hidden'),
+      );
+      console.log('Admin Password View Visible:', isAdminViewVisible);
+      await page.click('#btn-close-auth');
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    console.log('Testing Grower/Trainee Gating...');
     await page.goto('http://localhost:3000', { waitUntil: 'networkidle0' });
     await page.click('.btn-training'); // Training explore button
     await new Promise((r) => setTimeout(r, 500));
-    const authTitleGrower = await page.$eval(
-      '#auth-modal-title',
-      (el) => el.textContent,
+    const traineeModalOpen = await page.$eval(
+      '#trainee-auth-modal',
+      (el) => el.classList.contains('open'),
     );
-    console.log('Grower Modal Opened with Title:', authTitleGrower);
-    await page.click('#btn-close-auth'); // Close modal
+    console.log('Trainee Modal Opened:', traineeModalOpen);
+    await page.click('#btn-close-trainee-auth'); // Close trainee modal
     await new Promise((r) => setTimeout(r, 500));
 
     console.log('Testing Buyer Checkout Gating...');
@@ -35,11 +49,11 @@ const puppeteer = require('puppeteer');
     await new Promise((r) => setTimeout(r, 500));
     await page.click('#btn-checkout'); // Click checkout
     await new Promise((r) => setTimeout(r, 500));
-    const authTitleBuyer = await page.$eval(
-      '#auth-modal-title',
-      (el) => el.textContent,
+    const buyerModalOpen = await page.$eval(
+      '#auth-modal',
+      (el) => el.classList.contains('open'),
     );
-    console.log('Buyer Checkout Modal Opened with Title:', authTitleBuyer);
+    console.log('Auth Modal Opened for Checkout:', buyerModalOpen);
 
     await browser.close();
     console.log('Authentication gates verified successfully!');

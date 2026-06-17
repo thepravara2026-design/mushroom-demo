@@ -2,11 +2,14 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('../config/db');
 const userRepo = require('../repositories/userRepository');
+const { supabaseAnon } = require('../config/supabase');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
 
 // In-memory OTP store for simulation (email -> { otp, expiresAt, role, fullName })
 const otpStore = new Map();
+
+
 
 class AuthService {
   /**
@@ -126,6 +129,42 @@ class AuthService {
 
   async adminLogin(email, password) {
     const emailLower = String(email).toLowerCase();
+
+    // ── LIVE SUPABASE MODE ─────────────────────────────────────────────
+    if (!db.isMock && supabaseAnon) {
+      const { data, error } = await supabaseAnon.auth.signInWithPassword({
+        email: emailLower,
+        password,
+      });
+      if (error) {
+        const err = new Error('Invalid admin credentials.');
+        err.status = 401;
+        throw err;
+      }
+
+      // Fetch profile from custom users table
+      const { data: dbUser } = await userRepo.findByEmail(emailLower);
+
+      // Verify role is admin via app_metadata or DB fallback
+      const role = data.user.app_metadata?.role || (dbUser ? dbUser.role : '');
+      if (role !== 'admin') {
+        const err = new Error('Invalid admin credentials.');
+        err.status = 403;
+        throw err;
+      }
+
+      return {
+        token: data.session.access_token,
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          fullName: dbUser ? dbUser.full_name : (data.user.user_metadata?.name || ''),
+          role: 'admin',
+        },
+      };
+    }
+
+    // ── MOCK MODE ─────────────────────────────────────────────────────
     const { data: user } = await userRepo.findByEmail(emailLower);
     if (!user || user.role !== 'admin') {
       const err = new Error('Invalid admin credentials.');
@@ -146,15 +185,7 @@ class AuthService {
       { expiresIn: '7d' },
     );
 
-    return {
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.full_name,
-        role: user.role,
-      },
-    };
+    return { token, user: { id: user.id, email: user.email, fullName: user.full_name, role: user.role } };
   }
 
   async getUserById(userId) {

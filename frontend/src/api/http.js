@@ -1,6 +1,6 @@
 import { state, clearAuth } from '../utils/state.js';
 
-export const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

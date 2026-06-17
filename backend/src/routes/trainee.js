@@ -30,10 +30,8 @@ router.post('/signup', async (req, res) => {
         }
 
         // Check if phone already exists (for trainee uniqueness)
-        const { data: existingPhone } = await db
-            .from('users')
-            .eq('whatsapp_number', phone)
-            .single();
+        const cleanPhone = phone.replace(/\s/g, '').trim().replace(/^\+91/, '');
+        const { data: existingPhone } = await userRepo.findByPhone(cleanPhone);
         if (existingPhone) {
             return respondError(res, 'This phone number is already registered. Please login.', 409);
         }
@@ -42,7 +40,7 @@ router.post('/signup', async (req, res) => {
         const insertPayload = {
             email: emailLower,
             full_name: fullName.trim(),
-            whatsapp_number: phone.trim(),
+            whatsapp_number: cleanPhone,
             role: 'trainee',
             city: city.trim(),
             state: state.trim(),
@@ -215,7 +213,7 @@ router.post('/verify-phone-otp', async (req, res) => {
             return respondError(res, 'Phone and OTP are required.', 400);
         }
 
-        const cleanPhone = phone.replace(/\s/g, '').trim();
+        const cleanPhone = phone.replace(/\s/g, '').trim().replace(/^\+91/, '');
         const { data: user } = await userRepo.findByPhone(cleanPhone);
 
         if (!user) {

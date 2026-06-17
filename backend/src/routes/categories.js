@@ -8,6 +8,7 @@ const adminOnly = requireRole('admin');
 const categoryService = require('../services/categoryService');
 const { success, error: respondError } = require('../lib/response');
 const { validateBody, Joi } = require('../middleware/validate');
+const db = require('../config/db');
 
 // GET /api/categories
 // Fetch all categories
@@ -55,7 +56,8 @@ router.post(
 async function generateNextCategoryUid() {
   const { data: categories } = await db
     .from('categories')
-    .select('category_id');
+    .select('category_id')
+    .execute();
   const next = categories
     .map((c) => c.category_id)
     .filter(Boolean)

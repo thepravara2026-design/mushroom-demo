@@ -1,6 +1,7 @@
 import { state, saveUserProfile, deleteUserProfile, saveCart } from '../utils/state.js';
 import { fetchWithAuth, API_BASE, getApiErrorMessage } from '../api/client.js';
 import { showErrorToast, showSuccessToast } from '../utils/notify.js';
+import { isValidIndianPhone } from '../utils/validation.js';
 
 const STATE_CITIES = {
   "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kurnool", "Rajahmundry", "Kadapa"],
@@ -33,6 +34,34 @@ const STATE_CITIES = {
   "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani"],
   "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "Siliguri", "Asansol", "Durgapur", "Kharagpur"]
 };
+
+function _resizeImage(file, maxW, maxH) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width;
+      let h = img.height;
+      if (w > maxW || h > maxH) {
+        const ratio = Math.min(maxW / w, maxH / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = reject;
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 class ProfileModal {
   constructor() {
@@ -95,6 +124,7 @@ class ProfileModal {
     this.renderProfile();
     this.renderOrders();
     this.startPollingOrders();
+    this._addOrdersListener();
   }
 
   close() {
@@ -102,8 +132,27 @@ class ProfileModal {
     if (this._overlayClickHandler && this.modal) this.modal.removeEventListener('click', this._overlayClickHandler);
     if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
     this.stopPollingOrders();
+    this._removeOrdersListener();
     if (this.modal && this.modal.parentElement) this.modal.parentElement.removeChild(this.modal);
     this.modal = null;
+  }
+
+  _addOrdersListener() {
+    this._removeOrdersListener();
+    this._ordersRefreshHandler = () => {
+      if (!this.modal) return;
+      if (this.activeTab === 'orders' || this.activeTab === 'recent') {
+        this.renderOrders(true);
+      }
+    };
+    window.addEventListener('orders:refreshed', this._ordersRefreshHandler);
+  }
+
+  _removeOrdersListener() {
+    if (this._ordersRefreshHandler) {
+      window.removeEventListener('orders:refreshed', this._ordersRefreshHandler);
+      this._ordersRefreshHandler = null;
+    }
   }
 
   startPollingOrders() {
@@ -498,6 +547,7 @@ class ProfileModal {
         <div>
           <div class="profile-order-title">Order ${o.id || o.orderId}</div>
           <div class="profile-order-meta">Placed: ${placed}</div>
+          ${o.expected_delivery_date && ['shipped', 'in_transit'].includes(o.delivery_status) ? `<div class="profile-order-meta" style="color:var(--color-primary);">Expected delivery: ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</div>` : ''}
         </div>
         <span class="profile-order-status ${status}">${status}</span>
       </div>
@@ -558,6 +608,13 @@ class ProfileModal {
         done: ['shipped', 'in_transit'].includes(status),
       });
     }
+    if (o.expected_delivery_date && (status === 'shipped' || status === 'in_transit')) {
+      lines.push({
+        label: 'Expected delivery',
+        time: new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) + (o.delivery_days_text ? ` (${o.delivery_days_text})` : ''),
+        done: false,
+      });
+    }
     if (status === 'delivered') {
       lines.push({
         label: 'Delivered',
@@ -594,15 +651,13 @@ class ProfileModal {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const base64Img = e.target.result;
-      document.getElementById('profile-avatar-img').src = base64Img;
-      // Wait for user to click "Save changes" or save immediately? 
-      // Saving automatically is better UX for avatars
-      this.tempAvatarData = base64Img;
-    };
-    reader.readAsDataURL(file);
+    try {
+      const resizedBase64 = await _resizeImage(file, 300, 300);
+      document.getElementById('profile-avatar-img').src = resizedBase64;
+      this.tempAvatarData = resizedBase64;
+    } catch (err) {
+      showErrorToast('Failed to process image.');
+    }
   }
 
   initAddressDropdownsAndPincode() {
@@ -698,8 +753,8 @@ class ProfileModal {
       showErrorToast('Phone number is required.');
       return;
     }
-    if (phone.replace(/\D/g, '').length < 10 || phone.replace(/\D/g, '').length > 15) {
-      showErrorToast('Enter a valid phone number (10-15 digits).');
+    if (!isValidIndianPhone(phone)) {
+      showErrorToast('Enter a valid Indian phone number (e.g. +91 9876543210).');
       return;
     }
     if (!addressLine1 || !addressLine2 || !landmark || !city || !stateVal || !pincodeVal) {
@@ -798,27 +853,117 @@ class ProfileModal {
       return;
     }
 
-    const confirmed = confirm(
-      'Cancel this order? This will stop processing and cannot be undone.',
-    );
-    if (!confirmed) return;
+    const origRender = this.renderOrders.bind(this, true);
 
-    const reason = prompt('Please enter a cancellation reason for this order:');
-    if (!reason || !reason.trim()) {
-      showErrorToast('Cancellation reason is required.');
-      return;
-    }
+    const existing = document.getElementById('cancel-order-modal');
+    if (existing) existing.remove();
 
-    try {
-      await fetchWithAuth(`/orders/${orderId}/cancel`, {
-        method: 'PUT',
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
-      showSuccessToast('✅ Order cancelled successfully.');
-      await this.renderOrders(true);
-    } catch (err) {
-      showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
-    }
+    const modal = document.createElement('div');
+    modal.id = 'cancel-order-modal';
+    modal.className = 'modal-overlay open';
+    modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
+
+    modal.innerHTML = `
+      <div class="modal-card" style="max-width:460px;">
+        <button class="modal-close" id="cancel-modal-close" type="button">&times;</button>
+        <h3 style="margin:0 0 8px;font-size:1.2rem;color:#b91c1c;">
+          <i class="fa-solid fa-ban"></i> Cancel Order
+        </h3>
+        <p style="margin:0 0 18px;color:var(--text-mid);font-size:0.92rem;">
+          This will stop processing and cannot be undone. Please tell us why you are cancelling.
+        </p>
+        <div class="input-field">
+          <label for="cancel-reason-select">Cancellation reason</label>
+          <select id="cancel-reason-select">
+            <option value="">Select a reason</option>
+            <option value="Delivery cost is high">Delivery cost is high</option>
+            <option value="Not interested in product">Not interested in product</option>
+            <option value="Not available on the expected delivery date">Not available on the expected delivery date</option>
+            <option value="Taking too much time to deliver">Taking too much time to deliver</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="input-field hidden" id="cancel-reason-other-wrap">
+          <label for="cancel-reason-other">Please specify your reason</label>
+          <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+          <button class="btn btn-secondary" id="cancel-modal-keep-btn" type="button">Keep order</button>
+          <button class="btn btn-cancel" id="cancel-modal-confirm-btn" type="button">
+            <i class="fa-solid fa-ban"></i> Confirm cancellation
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const reasonSelect = modal.querySelector('#cancel-reason-select');
+    const otherWrap = modal.querySelector('#cancel-reason-other-wrap');
+    const otherInput = modal.querySelector('#cancel-reason-other');
+
+    reasonSelect.addEventListener('change', () => {
+      otherWrap.classList.toggle('hidden', reasonSelect.value !== 'Other');
+    });
+
+    const closeModal = () => modal.remove();
+
+    modal.querySelector('#cancel-modal-close').addEventListener('click', closeModal);
+    modal.querySelector('#cancel-modal-keep-btn').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    modal.querySelector('#cancel-modal-confirm-btn').addEventListener('click', async () => {
+      let reason = reasonSelect.value;
+      if (!reason) {
+        showErrorToast('Please select a cancellation reason.');
+        return;
+      }
+      if (reason === 'Other') {
+        reason = otherInput?.value.trim() || '';
+        if (!reason) {
+          showErrorToast('Please enter your cancellation reason.');
+          return;
+        }
+      }
+
+      modal.remove();
+
+      try {
+        const cancelResult = await fetchWithAuth(`/orders/${orderId}/cancel`, {
+          method: 'PUT',
+          body: JSON.stringify({ reason }),
+        });
+        showSuccessToast('✅ Order cancelled successfully.');
+
+        const hasRefund = cancelResult && cancelResult.refund;
+        if (hasRefund) {
+          showSuccessToast('💰 Refund initiated — expect 5–7 business days.');
+        }
+
+        await this.renderOrders(true);
+        this.activeTab = 'recent';
+        this.renderTabContent();
+
+        const tabsContainer = this.modal?.querySelector('.profile-tabs');
+        if (tabsContainer) {
+          tabsContainer.querySelectorAll('.profile-tab-btn').forEach(b => {
+            b.classList.remove('active');
+            b.style.fontWeight = '500';
+            b.style.color = '#64748b';
+            b.style.borderBottom = '2px solid transparent';
+          });
+          const recentBtn = tabsContainer.querySelector('[data-tab="recent"]');
+          if (recentBtn) {
+            recentBtn.classList.add('active');
+            recentBtn.style.fontWeight = '600';
+            recentBtn.style.color = 'var(--color-primary)';
+            recentBtn.style.borderBottom = '2px solid var(--color-primary)';
+          }
+        }
+      } catch (err) {
+        showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
+      }
+    });
   }
 
   async orderAgain(orderId) {
