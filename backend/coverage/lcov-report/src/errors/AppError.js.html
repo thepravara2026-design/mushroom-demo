@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">7.69% </span>
+                <span class="strong">6.25% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>1/13</span>
+                <span class='fraction'>1/16</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/9</span>
+                <span class='fraction'>0/15</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/5</span>
+                <span class='fraction'>0/8</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">7.69% </span>
+                <span class="strong">6.25% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>1/13</span>
+                <span class='fraction'>1/16</span>
             </div>
         
             
@@ -104,7 +104,19 @@
 <a name='L39'></a><a href='#L39'>39</a>
 <a name='L40'></a><a href='#L40'>40</a>
 <a name='L41'></a><a href='#L41'>41</a>
-<a name='L42'></a><a href='#L42'>42</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -144,7 +156,19 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">class AppError extends Error {
 <span class="fstat-no" title="function not covered" >  co</span>nstructor(
     message,
@@ -183,6 +207,18 @@
 <span class="fstat-no" title="function not covered" >  st</span>atic notFound(message = <span class="branch-0 cbranch-no" title="branch not covered" >"Resource not found",</span> details = <span class="branch-0 cbranch-no" title="branch not covered" >null)</span> {
 <span class="cstat-no" title="statement not covered" >    return new AppError(message, 404, "NOT_FOUND", details);</span>
   }
+&nbsp;
+<span class="fstat-no" title="function not covered" >  st</span>atic internal(message = <span class="branch-0 cbranch-no" title="branch not covered" >"Internal server error",</span> details = <span class="branch-0 cbranch-no" title="branch not covered" >null)</span> {
+<span class="cstat-no" title="statement not covered" >    return new AppError(message, 500, "INTERNAL_ERROR", details);</span>
+  }
+&nbsp;
+<span class="fstat-no" title="function not covered" >  st</span>atic conflict(message = <span class="branch-0 cbranch-no" title="branch not covered" >"Conflict",</span> details = <span class="branch-0 cbranch-no" title="branch not covered" >null)</span> {
+<span class="cstat-no" title="statement not covered" >    return new AppError(message, 409, "CONFLICT", details);</span>
+  }
+&nbsp;
+<span class="fstat-no" title="function not covered" >  st</span>atic forbidden(message = <span class="branch-0 cbranch-no" title="branch not covered" >"Forbidden",</span> details = <span class="branch-0 cbranch-no" title="branch not covered" >null)</span> {
+<span class="cstat-no" title="statement not covered" >    return new AppError(message, 403, "FORBIDDEN", details);</span>
+  }
 }
 &nbsp;
 module.exports = AppError;
@@ -193,7 +229,7 @@ module.exports = AppError;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-06-10T14:17:21.426Z
+                at 2026-06-18T18:37:03.623Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

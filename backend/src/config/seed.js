@@ -1,13 +1,16 @@
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-const { createClient } = require('@supabase/supabase-js');
-const bcrypt = require('bcryptjs');
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../../.env") });
+const { createClient } = require("@supabase/supabase-js");
+const bcrypt = require("bcryptjs");
+const logger = require("../utils/logger");
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('your-supabase-url')) {
-  console.error('❌ Error: Supabase credentials are missing or default in .env file.');
+if (!supabaseUrl || !supabaseKey || supabaseUrl.includes("your-supabase-url")) {
+  logger.error(
+    "❌ Error: Supabase credentials are missing or default in .env file.",
+  );
   process.exit(1);
 }
 
@@ -15,155 +18,165 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const categories = [
   {
-    category_id: 'spore-000001',
-    id: 'fresh',
-    name: 'Fresh Mushrooms',
-    description: 'Handpicked & hygienically packed for best taste',
+    category_id: "spore-000001",
+    id: "fresh",
+    name: "Fresh Mushrooms",
+    description: "Handpicked & hygienically packed for best taste",
   },
   {
-    category_id: 'spore-000002',
-    id: 'dry',
-    name: 'Dry Mushrooms',
-    description: '100% natural & sun-dried for rich nutrition',
+    category_id: "spore-000002",
+    id: "dry",
+    name: "Dry Mushrooms",
+    description: "100% natural & sun-dried for rich nutrition",
   },
   {
-    category_id: 'spore-000003',
-    id: 'spawn',
-    name: 'Spawn Seeds',
-    description: 'High quality spawn for better yield',
+    category_id: "spore-000003",
+    id: "spawn",
+    name: "Spawn Seeds",
+    description: "High quality spawn for better yield",
   },
   {
-    category_id: 'spore-000004',
-    id: 'kits',
-    name: 'Mushroom Kits',
-    description: 'Ready-to-grow mushroom fruiting kits',
+    category_id: "spore-000004",
+    id: "kits",
+    name: "Mushroom Kits",
+    description: "Ready-to-grow mushroom fruiting kits",
   },
 ];
 
 const products = [
   {
-    id: 'prod-1',
-    name: 'Pink Oyster Spore Syringe (10ml)',
+    id: "prod-1",
+    name: "Pink Oyster Spore Syringe (10ml)",
     description:
-      'High-viability Pleurotus djamor spores. Perfect for growers who want fast colonizing spawn and beautiful pink mushroom clusters.',
+      "High-viability Pleurotus djamor spores. Perfect for growers who want fast colonizing spawn and beautiful pink mushroom clusters.",
     price: 350.0,
     mrp_price: 499.0,
+    weight_pricing: [
+      { weight: 100, unit: "g", price: 100, mrp_price: 149 },
+      { weight: 200, unit: "g", price: 180, mrp_price: 269 },
+      { weight: 250, unit: "g", price: 220, mrp_price: 329 },
+      { weight: 400, unit: "g", price: 320, mrp_price: 479 },
+      { weight: 500, unit: "g", price: 350, mrp_price: 499 },
+      { weight: 1, unit: "kg", price: 650, mrp_price: 929 },
+      { weight: 2, unit: "kg", price: 1200, mrp_price: 1699 },
+      { weight: 5, unit: "kg", price: 2800, mrp_price: 3899 },
+    ],
     image_url:
-      'https://images.unsplash.com/photo-1628352081506-83c43123ed6d?auto=format&fit=crop&q=80&w=600',
-    category: 'spawn',
-    difficulty: 'beginner',
+      "https://images.unsplash.com/photo-1628352081506-83c43123ed6d?auto=format&fit=crop&q=80&w=600",
+    category: "spawn",
+    difficulty: "beginner",
     gst_rate: 5,
     stock: 120,
   },
   {
-    id: 'prod-2',
+    id: "prod-2",
     name: "Lion's Mane Spore Culture (10ml)",
     description:
-      'Hericium erinaceus liquid culture. High-viability mycelium growth with exceptional yield records.',
+      "Hericium erinaceus liquid culture. High-viability mycelium growth with exceptional yield records.",
     price: 400.0,
     mrp_price: 599.0,
     image_url:
-      'https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600',
-    category: 'spawn',
-    difficulty: 'beginner',
+      "https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600",
+    category: "spawn",
+    difficulty: "beginner",
     gst_rate: 5,
     stock: 85,
   },
   {
-    id: 'prod-3',
-    name: 'Shiitake Grain Spawn (1kg)',
+    id: "prod-3",
+    name: "Shiitake Grain Spawn (1kg)",
     description:
-      'Sterilized organic rye grains fully colonized with premium Lentinula edodes mycelium. Ideal for inoculating sawdust blocks.',
+      "Sterilized organic rye grains fully colonized with premium Lentinula edodes mycelium. Ideal for inoculating sawdust blocks.",
     price: 450.0,
     mrp_price: 649.0,
     image_url:
-      'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=600',
-    category: 'spawn',
-    difficulty: 'intermediate',
+      "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=600",
+    category: "spawn",
+    difficulty: "intermediate",
     gst_rate: 5,
     stock: 50,
   },
   {
-    id: 'prod-4',
-    name: 'Reishi Spore Print',
+    id: "prod-4",
+    name: "Reishi Spore Print",
     description:
-      'Dark purple spore print of Ganoderma lucidum collected on sterile foil. Perfect for agar transfers.',
+      "Dark purple spore print of Ganoderma lucidum collected on sterile foil. Perfect for agar transfers.",
     price: 300.0,
     mrp_price: 449.0,
     image_url:
-      'https://images.unsplash.com/photo-1601004890684-d8cbf643f5f2?auto=format&fit=crop&q=80&w=600',
-    category: 'spawn',
-    difficulty: 'advanced',
+      "https://images.unsplash.com/photo-1601004890684-d8cbf643f5f2?auto=format&fit=crop&q=80&w=600",
+    category: "spawn",
+    difficulty: "advanced",
     gst_rate: 5,
     stock: 60,
   },
   {
-    id: 'prod-5',
-    name: 'Fresh Pink Oyster Mushrooms (500g)',
+    id: "prod-5",
+    name: "Fresh Pink Oyster Mushrooms (500g)",
     description:
-      'Freshly harvested organic Pink Oyster mushrooms. Beautiful color with a savory, bacon-like aroma when cooked.',
+      "Freshly harvested organic Pink Oyster mushrooms. Beautiful color with a savory, bacon-like aroma when cooked.",
     price: 500.0,
     mrp_price: 699.0,
     image_url:
-      'https://images.unsplash.com/photo-1628352081506-83c43123ed6d?auto=format&fit=crop&q=80&w=600',
-    category: 'fresh',
-    difficulty: 'beginner',
+      "https://images.unsplash.com/photo-1628352081506-83c43123ed6d?auto=format&fit=crop&q=80&w=600",
+    category: "fresh",
+    difficulty: "beginner",
     gst_rate: 5,
     stock: 40,
   },
   {
-    id: 'prod-6',
-    name: 'Fresh King Oyster Mushrooms (500g)',
+    id: "prod-6",
+    name: "Fresh King Oyster Mushrooms (500g)",
     description:
-      'Thick, meaty stems with a savory, umami flavor. Harvested fresh daily. Kept chilled during delivery.',
+      "Thick, meaty stems with a savory, umami flavor. Harvested fresh daily. Kept chilled during delivery.",
     price: 400.0,
     mrp_price: 549.0,
     image_url:
-      'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600',
-    category: 'fresh',
-    difficulty: 'beginner',
+      "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+    category: "fresh",
+    difficulty: "beginner",
     gst_rate: 5,
     stock: 45,
   },
   {
-    id: 'prod-7',
-    name: 'Dried Reishi Mushrooms (100g)',
+    id: "prod-7",
+    name: "Dried Reishi Mushrooms (100g)",
     description:
-      'Premium sun-dried Ganoderma lucidum slices. Used commonly for making herbal teas and immunity decoctions.',
+      "Premium sun-dried Ganoderma lucidum slices. Used commonly for making herbal teas and immunity decoctions.",
     price: 700.0,
     mrp_price: 999.0,
     image_url:
-      'https://images.unsplash.com/photo-1601004890684-d8cbf643f5f2?auto=format&fit=crop&q=80&w=600',
-    category: 'dry',
-    difficulty: 'advanced',
+      "https://images.unsplash.com/photo-1601004890684-d8cbf643f5f2?auto=format&fit=crop&q=80&w=600",
+    category: "dry",
+    difficulty: "advanced",
     gst_rate: 5,
     stock: 100,
   },
   {
-    id: 'prod-8',
-    name: 'Dried Cordyceps Militaris (50g)',
+    id: "prod-8",
+    name: "Dried Cordyceps Militaris (50g)",
     description:
-      'Premium lab-grown Cordyceps, dehydrated to preserve active cordycepin content. Excellent for wellness soups.',
+      "Premium lab-grown Cordyceps, dehydrated to preserve active cordycepin content. Excellent for wellness soups.",
     price: 1800.0,
     mrp_price: 2499.0,
     image_url:
-      'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600',
-    category: 'dry',
-    difficulty: 'intermediate',
+      "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600",
+    category: "dry",
+    difficulty: "intermediate",
     gst_rate: 5,
     stock: 75,
   },
   {
-    id: 'prod-9',
-    name: 'Oyster Mushroom Grow Kit',
+    id: "prod-9",
+    name: "Oyster Mushroom Grow Kit",
     description:
-      'Easy-to-use organic mushroom fruiting block. Spray with water daily and watch your delicious mushrooms grow in just 10 days!',
+      "Easy-to-use organic mushroom fruiting block. Spray with water daily and watch your delicious mushrooms grow in just 10 days!",
     price: 450.0,
     mrp_price: 699.0,
     image_url:
-      'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=600',
-    category: 'kits',
-    difficulty: 'beginner',
+      "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=600",
+    category: "kits",
+    difficulty: "beginner",
     gst_rate: 5,
     stock: 65,
   },
@@ -171,98 +184,111 @@ const products = [
 
 const settings = [
   {
-    key: 'shipping_charge',
+    key: "shipping_charge",
     value: 50,
   },
 ];
 
 const trainings = [
   {
-    id: 'train-1',
-    title: 'Beginner Mushroom Cultivation',
-    category: 'Beginner',
-    description: 'A hands-on introduction to mushroom farming for new growers.',
-    image_url: '/images/training_farm.png',
-    content_url: '',
-    allowed_roles: ['trainee', 'farmer'],
+    id: "train-1",
+    title: "Beginner Mushroom Cultivation",
+    category: "Beginner",
+    description: "A hands-on introduction to mushroom farming for new growers.",
+    image_url: "/images/training_farm.png",
+    content_url: "",
+    allowed_roles: ["trainee", "farmer"],
   },
   {
-    id: 'train-2',
-    title: 'Commercial Farming for Entrepreneurs',
-    category: 'Entrepreneur',
-    description: 'Scaling up production, post-harvest handling and business models.',
-    image_url: '/images/training_business.png',
-    content_url: '',
-    allowed_roles: ['entrepreneur'],
+    id: "train-2",
+    title: "Commercial Farming for Entrepreneurs",
+    category: "Entrepreneur",
+    description:
+      "Scaling up production, post-harvest handling and business models.",
+    image_url: "/images/training_business.png",
+    content_url: "",
+    allowed_roles: ["entrepreneur"],
   },
 ];
 
-const adminPasswordHash = bcrypt.hashSync('admin123', 10);
+const adminSeedPassword = process.env.ADMIN_SEED_PASSWORD;
+if (!adminSeedPassword || adminSeedPassword === "admin123") {
+  logger.error(
+    'ADMIN_SEED_PASSWORD must be set to a secure value. The default "admin123" is not allowed.',
+  );
+  process.exit(1);
+}
+const adminPassword = adminSeedPassword;
+const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
 const users = [
   {
-    id: 'user-buyer',
-    email: 'buyer@sporekart.com',
-    full_name: 'John Buyer',
-    whatsapp_number: '9876543211',
-    role: 'buyer',
+    id: "user-buyer",
+    email: "buyer@sporekart.com",
+    full_name: "John Buyer",
+    whatsapp_number: "9876543211",
+    role: "buyer",
     created_at: new Date().toISOString(),
   },
   {
-    id: 'user-grower',
-    email: 'grower@sporekart.com',
-    full_name: 'Sam Grower',
-    whatsapp_number: '9876543212',
-    role: 'grower',
+    id: "user-grower",
+    email: "grower@sporekart.com",
+    full_name: "Sam Grower",
+    whatsapp_number: "9876543212",
+    role: "grower",
     created_at: new Date().toISOString(),
   },
   {
-    id: 'user-admin',
-    email: 'admin@sporekart.com',
+    id: "user-admin",
+    email: "admin@sporekart.com",
     password_hash: adminPasswordHash,
-    full_name: 'Sporekart Admin',
-    whatsapp_number: '9876543210',
-    role: 'admin',
+    full_name: "Sporekart Admin",
+    whatsapp_number: "9876543210",
+    role: "admin",
     created_at: new Date().toISOString(),
   },
 ];
 
 async function seed() {
   try {
-    console.log('🌱 Starting database seeding...');
+    logger.info("🌱 Starting database seeding...");
 
     // 1. Seed Categories
-    console.log('Categories seeding...');
-    const { error: catErr } = await supabase.from('categories').upsert(categories);
+    logger.info("Categories seeding...");
+    const { error: catErr } = await supabase
+      .from("categories")
+      .upsert(categories);
     if (catErr) throw new Error(`Categories error: ${catErr.message}`);
-    console.log('✅ Categories seeded successfully.');
+    logger.info("✅ Categories seeded successfully.");
 
     // 2. Seed Products
-    console.log('Products seeding...');
-    const { error: prodErr } = await supabase.from('products').upsert(products);
+    logger.info("Products seeding...");
+    const { error: prodErr } = await supabase.from("products").upsert(products);
     if (prodErr) throw new Error(`Products error: ${prodErr.message}`);
-    console.log('✅ Products seeded successfully.');
+    logger.info("✅ Products seeded successfully.");
 
     // 3. Seed Settings
-    console.log('Settings seeding...');
-    const { error: setErr } = await supabase.from('settings').upsert(settings);
+    logger.info("Settings seeding...");
+    const { error: setErr } = await supabase.from("settings").upsert(settings);
     if (setErr) throw new Error(`Settings error: ${setErr.message}`);
-    console.log('✅ Settings seeded successfully.');
+    logger.info("✅ Settings seeded successfully.");
 
     // 4. Seed Trainings
-    console.log('Trainings seeding...');
-    const { error: trainErr } = await supabase.from('trainings').upsert(trainings);
+    logger.info("Trainings seeding...");
+    const { error: trainErr } = await supabase
+      .from("trainings")
+      .upsert(trainings);
     if (trainErr) throw new Error(`Trainings error: ${trainErr.message}`);
-    console.log('✅ Trainings seeded successfully.');
+    logger.info("✅ Trainings seeded successfully.");
 
     // 5. Seed Users
-    console.log('Users seeding...');
-    const { error: userErr } = await supabase.from('users').upsert(users);
+    logger.info("Users seeding...");
+    const { error: userErr } = await supabase.from("users").upsert(users);
     if (userErr) throw new Error(`Users error: ${userErr.message}`);
-    console.log('✅ Users seeded successfully.');
+    logger.info("✅ Users seeded successfully.");
 
-    console.log('🎉 Seeding completed successfully!');
+    logger.info("🎉 Seeding completed successfully!");
   } catch (error) {
-    console.error('❌ Seeding failed:', error.message);
+    logger.error("❌ Seeding failed:", error.message);
     process.exit(1);
   }
 }

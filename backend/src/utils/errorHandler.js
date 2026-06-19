@@ -1,17 +1,17 @@
-const AppError = require('../errors/AppError');
+const AppError = require("../errors/AppError");
 
 function handleError(err, req, res, next) {
   if (res.headersSent) return next(err);
 
   const payload = {
-    error: err.message || 'Internal Server Error',
-    code: err.code || 'UNEXPECTED_ERROR',
+    error: err.message || "Internal Server Error",
+    code: err.code || "UNEXPECTED_ERROR",
     details: err.details || null,
     path: req.originalUrl,
     method: req.method,
   };
 
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV === "development") {
     payload.stack = err.stack;
   }
 

@@ -1,3 +1,13 @@
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function showPopupModal({ title, message, duration = 2000, refreshOnClose = false, redirectHash = '' } = {}) {
   const existing = document.getElementById('spk-popup-overlay');
   if (existing) existing.remove();
@@ -19,7 +29,7 @@ export function showPopupModal({ title, message, duration = 2000, refreshOnClose
   if (message) {
     const msgEl = document.createElement('p');
     msgEl.style.cssText = 'margin:0 0 16px;font-size:1rem;color:#475569;line-height:1.5;';
-    msgEl.innerHTML = message;
+    msgEl.textContent = message;
     card.appendChild(msgEl);
   }
 

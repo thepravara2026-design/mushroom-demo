@@ -1,4 +1,5 @@
 const puppeteer = require('puppeteer');
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 (async () => {
   try {
@@ -21,8 +22,8 @@ const puppeteer = require('puppeteer');
       }
     });
 
-    console.log('Loading http://localhost:3000 ...');
-    await page.goto('http://localhost:3000', {
+    console.log(`Loading ${FRONTEND_URL} ...`);
+    await page.goto(FRONTEND_URL, {
       waitUntil: 'networkidle2',
       timeout: 20000,
     });
@@ -37,18 +38,33 @@ const puppeteer = require('puppeteer');
 
     console.log('\n=== TESTING SHOPPING FLOW ===');
 
-    // Step 1: Add item to cart
-    await page.waitForSelector('.btn-card-add', { timeout: 8000 });
-    console.log('Adding item to cart...');
-    await page.evaluate(() => {
-      document.querySelector('.btn-card-add').click();
-    });
+    // Step 1: Wait for product grid to load and add item to cart
+    await page.waitForSelector('.product-grid', { timeout: 10000 });
+    // Allow products to render
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // Try clicking the first "Add to cart" button
+    const addBtn = await page.$('.btn-card-add');
+    if (addBtn) {
+      console.log('Adding item to cart...');
+      await addBtn.click();
+    } else {
+      errors.push('No .btn-card-add button found on page');
+    }
     await new Promise((r) => setTimeout(r, 800));
 
-    // Step 2: Open cart drawer via popup
-    const popupBtn = await page.$('#popup-view-cart');
-    if (popupBtn) {
-      await popupBtn.evaluate(b => b.click());
+    // Step 2: Open cart drawer via cart trigger button
+    const cartTrigger = await page.$('#btn-open-cart');
+    if (cartTrigger) {
+      console.log('Opening cart drawer...');
+      await cartTrigger.click();
+    } else {
+      // Fallback: try popup-view-cart
+      const popupBtn = await page.$('#popup-view-cart');
+      if (popupBtn) {
+        console.log('Opening cart via popup button...');
+        await popupBtn.click();
+      }
     }
     await new Promise((r) => setTimeout(r, 1000));
 
@@ -57,14 +73,17 @@ const puppeteer = require('puppeteer');
     );
     console.log('Cart drawer open:', drawerOpen);
 
-    // Step 3: Click checkout
+    // Step 3: Click checkout inside cart drawer
     console.log('Clicking checkout...');
-    await page.evaluate(() => {
-      document.getElementById('btn-checkout').click();
-    });
+    const checkoutBtn = await page.$('#btn-checkout');
+    if (checkoutBtn) {
+      await checkoutBtn.click();
+    } else {
+      errors.push('No #btn-checkout button found');
+    }
     await new Promise((r) => setTimeout(r, 1500));
 
-    // Step 4: Verify navigation to checkout page (guest flow)
+    // Step 4: Verify navigation to checkout page
     const hash = await page.evaluate(() => window.location.hash);
     console.log('Hash after checkout:', hash);
 
@@ -75,44 +94,47 @@ const puppeteer = require('puppeteer');
 
     // Step 5: Test Auth Modal opens when explicitly requested via Email OTP button
     console.log('\n=== TESTING AUTH MODAL (Email OTP method) ===');
-    // Click the login/profile button to open auth modal
-    const profileSection = await page.$('#user-profile-section');
-    if (profileSection) {
-      // Guest user has a profile - click it to see options, or directly trigger auth
-      await page.evaluate(() => {
-        // Directly open auth modal via the exposed API
-        const guestBtn = document.querySelector('[data-action="login"]') ||
-                         document.getElementById('btn-auth-email');
-        if (guestBtn) guestBtn.click();
-      });
+
+    // Try to open auth modal via the Log In button
+    const authBtn = await page.$('#btn-open-auth-top');
+    if (authBtn) {
+      console.log('Clicking Log In button...');
+      await authBtn.click();
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Click "User Login" in the dropdown
+      const userLogin = await page.$('#auth-choice-user');
+      if (userLogin) {
+        await userLogin.click();
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
 
-    // Direct approach: open auth modal programmatically if UI approach fails
+    // Check if auth modal is open
     let modalOpen = await page.evaluate(() =>
       document.getElementById('auth-modal')?.classList.contains('open')
     );
 
     if (!modalOpen) {
-      // Try clicking the login/register button
-      const loginLink = await page.$('#link-admin-password');
-      if (!loginLink) {
-        console.log('Clicking Email OTP method...');
-        // Navigate to trigger auth - click any available login trigger
-        const authTrigger = await page.$('#btn-auth-email');
-        if (authTrigger) {
-          await authTrigger.evaluate(b => b.click());
-          await new Promise((r) => setTimeout(r, 500));
-        }
+      // Try clicking login/profile section directly
+      const guestBtn = await page.$('[data-action="login"]') ||
+        await page.$('#btn-auth-email');
+      if (guestBtn) {
+        await guestBtn.click();
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
 
-    modalOpen = await page.evaluate(() =>
-      document.getElementById('auth-modal')?.classList.contains('open')
-    );
+    // Final fallback: try direct auth trigger via elements
+    if (!modalOpen) {
+      modalOpen = await page.evaluate(() =>
+        document.getElementById('auth-modal')?.classList.contains('open')
+      );
+    }
     console.log('Auth modal open:', modalOpen);
 
     if (modalOpen) {
-      // Select Email OTP
+      // Select Email OTP method
       await page.evaluate(() => {
         const btn = document.getElementById('btn-auth-email');
         if (btn) btn.click();
@@ -122,9 +144,14 @@ const puppeteer = require('puppeteer');
       // Enter email
       await page.waitForSelector('#auth-email', { visible: true, timeout: 5000 });
       await page.type('#auth-email', 'test@sporekart.com');
-      await page.evaluate(() => {
-        document.querySelector('#form-request-otp button[type="submit"]').click();
-      });
+
+      // Submit the request OTP form
+      const requestForm = await page.$('#form-request-otp');
+      if (requestForm) {
+        await page.evaluate(() => {
+          document.querySelector('#form-request-otp button[type="submit"]')?.click();
+        });
+      }
       await new Promise((r) => setTimeout(r, 1500));
 
       const step2Visible = await page.evaluate(() =>
@@ -135,9 +162,14 @@ const puppeteer = require('puppeteer');
       // Enter OTP
       await page.waitForSelector('#auth-otp', { visible: true, timeout: 5000 });
       await page.type('#auth-otp', '123456');
-      await page.evaluate(() => {
-        document.querySelector('#form-verify-otp button[type="submit"]').click();
-      });
+
+      // Submit verify OTP form
+      const verifyForm = await page.$('#form-verify-otp');
+      if (verifyForm) {
+        await page.evaluate(() => {
+          document.querySelector('#form-verify-otp button[type="submit"]')?.click();
+        });
+      }
       await new Promise((r) => setTimeout(r, 2000));
 
       const modalClosed = await page.evaluate(() =>
@@ -152,8 +184,21 @@ const puppeteer = require('puppeteer');
     });
     console.log('\nScreenshot saved to e2e-artifacts/otp-flow-screenshot.png');
 
+    // Print summary
+    console.log('\n=== TEST SUMMARY ===');
+    console.log(`Request/HTTP errors: ${errors.length}`);
+    console.log(`Console errors: ${consoleErrors.length}`);
+    if (errors.length > 0) {
+      console.log('\nErrors:');
+      errors.forEach((e, i) => console.log(`  ${i + 1}. ${e}`));
+    }
+
     await browser.close();
-    console.log('\n=== ALL TESTS PASSED ===');
+    if (errors.length === 0 && consoleErrors.length === 0) {
+      console.log('\n=== ALL TESTS PASSED ===');
+    } else {
+      console.log('\n=== TESTS COMPLETED WITH ERRORS ===');
+    }
   } catch (error) {
     console.error('\nTest failed:', error.message);
     process.exit(1);

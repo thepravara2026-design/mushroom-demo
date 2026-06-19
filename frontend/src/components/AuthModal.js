@@ -1,7 +1,7 @@
 import { authApi } from '../api/authApi.js';
-import { saveAuth, state } from '../utils/state.js';
+import { saveAuth, clearAuth, state } from '../utils/state.js';
 import { showErrorToast, showPopupModal } from '../utils/notify.js';
-import { isValidIndianPhone } from '../utils/validation.js';
+import { isValidIndianPhone, isValidEmail, isValidOtp, getFieldError } from '../utils/validation.js';
 
 export class AuthModal {
   constructor() {
@@ -130,8 +130,74 @@ export class AuthModal {
     if (imgInput) {
       imgInput.addEventListener('input', () => {
         const preview = document.getElementById('admin-img-preview');
-        if (preview && imgInput.value) {
-          preview.innerHTML = `<img src="${imgInput.value}" alt="Preview" onerror="this.parentElement.innerHTML='<i class=\\'fa-solid fa-image\\'></i><span>Invalid image URL</span>'">`;
+        if (preview) {
+          if (imgInput.value) {
+            preview.innerHTML = '';
+            const img = document.createElement('img');
+            img.src = imgInput.value;
+            img.alt = 'Preview';
+            img.style.maxWidth = '100%';
+            img.style.maxHeight = '200px';
+            img.onerror = function () {
+              preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Invalid image URL</span>';
+            };
+            preview.appendChild(img);
+          } else {
+            preview.innerHTML = '';
+          }
+        }
+      });
+    }
+
+    // Real-time field validation on blur
+    if (this.emailInput) {
+      this.emailInput.addEventListener('blur', () => {
+        const err = getFieldError('email', this.emailInput.value);
+        if (this.requestError) {
+          this.requestError.textContent = err;
+          this.requestError.classList.toggle('hidden', !err);
+        }
+      });
+      this.emailInput.addEventListener('input', () => {
+        if (this.requestError && !this.requestError.classList.contains('hidden')) {
+          const err = getFieldError('email', this.emailInput.value);
+          if (!err) this.requestError.classList.add('hidden');
+        }
+      });
+    }
+
+    if (this.otpInput) {
+      this.otpInput.addEventListener('blur', () => {
+        const err = getFieldError('otp', this.otpInput.value);
+        if (this.verifyError) {
+          this.verifyError.textContent = err;
+          this.verifyError.classList.toggle('hidden', !err);
+        }
+      });
+      this.otpInput.addEventListener('input', () => {
+        if (this.verifyError && !this.verifyError.classList.contains('hidden')) {
+          const err = getFieldError('otp', this.otpInput.value);
+          if (!err) this.verifyError.classList.add('hidden');
+        }
+      });
+    }
+
+    if (this.adminEmailInput) {
+      this.adminEmailInput.addEventListener('blur', () => {
+        const err = getFieldError('email', this.adminEmailInput.value);
+        if (this.adminLoginError) {
+          this.adminLoginError.textContent = err;
+          this.adminLoginError.classList.toggle('hidden', !err);
+        }
+      });
+    }
+
+    if (this.adminPasswordInput) {
+      this.adminPasswordInput.addEventListener('blur', () => {
+        const err = getFieldError('password', this.adminPasswordInput.value);
+        if (this.adminLoginError) {
+          this.adminLoginError.textContent = err;
+          this.adminLoginError.classList.toggle('hidden', !err);
         }
       });
     }
@@ -233,7 +299,7 @@ export class AuthModal {
     this.emailInput?.focus();
   }
 
-  showVerifyView(contact) {
+  showVerifyView(contact, mockOtp = null) {
     this._pendingContact = contact;
     this._hide(this.methodView);
     this._hide(this.phoneView);
@@ -243,10 +309,24 @@ export class AuthModal {
 
     const subtitle = document.getElementById('verify-subtitle');
     if (subtitle) {
-      subtitle.textContent = this.activeMethod === 'phone'
-        ? `Enter the 6-digit OTP sent to ${contact}`
-        : `Enter the 6-digit code sent to ${contact}`;
+      if (mockOtp) {
+        // In mock/dev mode, show the OTP directly in the UI
+        subtitle.textContent = `Mock OTP: ${mockOtp} — enter it below to log in`;
+      } else {
+        const displayContact = this.activeMethod === 'phone'
+          ? contact : contact;
+        subtitle.textContent = this.activeMethod === 'phone'
+          ? `Enter the 6-digit OTP sent to ${displayContact}`
+          : `Enter the 6-digit code sent to ${displayContact}`;
+      }
     }
+
+    // Pre-fill OTP in mock mode for convenience
+    const otpInput = this.otpInput;
+    if (otpInput && mockOtp) {
+      otpInput.value = mockOtp;
+    }
+
     this.otpInput?.focus();
   }
 
@@ -286,32 +366,49 @@ export class AuthModal {
     // Use a faster mock OAuth response time for better UX
     await new Promise((r) => setTimeout(r, 800));
 
-    // Mock successful Google user
+    // Mock Google OAuth login
+    const timestamp = Date.now();
     const mockGoogleUser = {
-      email: 'googleuser@gmail.com',
+      email: `googleuser${timestamp}@gmail.com`,
       fullName: 'Google User',
       role: this.currentRole,
     };
 
     try {
-      // Send to backend using email OTP flow (backend creates user if not exists)
-      await authApi.requestOtp(
+      clearAuth();
+      // Request OTP for the Google email (creates user if new)
+      const otpResult = await authApi.requestOtp(
         mockGoogleUser.email,
-        this.currentRole,
+        mockGoogleUser.role,
         mockGoogleUser.fullName,
       );
 
-      // Auto-verify with the universal code '123456'
-      const data = await authApi.verifyOtp(mockGoogleUser.email, '123456');
-      saveAuth(data.token, data.user);
-      this.removeGoogleOverlay(overlay);
-      this.close();
-      window.dispatchEvent(new Event('auth:changed'));
-      if (this.onSuccessCallback) this.onSuccessCallback();
+      // In mock mode, the OTP is returned in the response
+      if (otpResult.otp) {
+        const data = await authApi.verifyOtp(mockGoogleUser.email, otpResult.otp, {
+          loginMethod: 'google',
+        });
+        data.user = data.user || {};
+        data.user.loginMethod = 'google';
+        saveAuth(data.token, data.user);
+        this.removeGoogleOverlay(overlay);
+        this.close();
+        // saveAuth already dispatches auth:changed
+        if (this.onSuccessCallback) this.onSuccessCallback();
+        const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
+        showPopupModal({
+          title: '🎉 Welcome!',
+          message: `Hello ${userName}, glad to see you again!`,
+          duration: 2000,
+          refreshOnClose: true,
+        });
+      } else {
+        throw new Error('OTP not available. Use Email OTP instead.');
+      }
     } catch (err) {
       this.removeGoogleOverlay(overlay);
       this.showMethodView();
-      showErrorToast('Google login simulation failed. Try Email OTP instead.');
+      showErrorToast(err.message || 'Google login failed. Use Email OTP instead.');
     }
   }
 
@@ -344,20 +441,20 @@ export class AuthModal {
     }
 
     try {
-      // Use phone as email for backend (mock: phone@phone.sporekart)
-      const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
-      await authApi.requestOtp(
+      // Use phone as email for backend (Joi email() requires a valid TLD)
+      const mockEmail = `phone-${phone.replace(/\D/g, '')}@sporekart.com`;
+      // Set before the API call so it's available even if request fails
+      this._mockPhoneEmail = mockEmail;
+      this._lastPhone = fullPhone;
+
+      const result = await authApi.requestOtp(
         mockEmail,
         this.currentRole,
         fullName || `User ${phone.slice(-4)}`,
       );
       this.phoneError?.classList.add('hidden');
 
-      // Store mock email for verification step
-      this._mockPhoneEmail = mockEmail;
-      // Also store last phone (human-readable) to attach to user after verification
-      this._lastPhone = fullPhone;
-      this.showVerifyView(fullPhone);
+      this.showVerifyView(fullPhone, result && result.otp ? result.otp : null);
     } catch (err) {
       if (this.phoneError) {
         this.phoneError.textContent = err.message || 'Failed to send OTP.';
@@ -373,7 +470,28 @@ export class AuthModal {
 
   async handleRequestEmailOtp() {
     const email = this.emailInput?.value.trim();
-    const fullName = this.nameInput?.value.trim();
+    const fullName = this.nameInput?.value.trim() || '';
+
+    const emailErr = getFieldError('email', email);
+    if (emailErr) {
+      if (this.requestError) {
+        this.requestError.textContent = emailErr;
+        this.requestError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    // Validate name only if provided (optional during login, can be set later in profile)
+    if (fullName) {
+      const nameErr = getFieldError('name', fullName);
+      if (nameErr) {
+        if (this.requestError) {
+          this.requestError.textContent = nameErr;
+          this.requestError.classList.remove('hidden');
+        }
+        return;
+      }
+    }
 
     const btn = this.formRequest?.querySelector('button');
     if (btn) {
@@ -382,9 +500,9 @@ export class AuthModal {
     }
 
     try {
-      await authApi.requestOtp(email, this.currentRole, fullName);
+      const result = await authApi.requestOtp(email, this.currentRole, fullName);
       this.requestError?.classList.add('hidden');
-      this.showVerifyView(email);
+      this.showVerifyView(email, result && result.otp ? result.otp : null);
     } catch (err) {
       if (this.requestError) {
         this.requestError.textContent = err.message;
@@ -402,9 +520,19 @@ export class AuthModal {
     const email = this.adminEmailInput?.value.trim();
     const password = this.adminPasswordInput?.value.trim();
 
-    if (!email || !password) {
+    const emailErr = getFieldError('email', email);
+    if (emailErr) {
       if (this.adminLoginError) {
-        this.adminLoginError.textContent = 'Please enter both email and password.';
+        this.adminLoginError.textContent = emailErr;
+        this.adminLoginError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    const pwErr = getFieldError('password', password);
+    if (pwErr) {
+      if (this.adminLoginError) {
+        this.adminLoginError.textContent = pwErr;
         this.adminLoginError.classList.remove('hidden');
       }
       return;
@@ -417,11 +545,11 @@ export class AuthModal {
     }
 
     try {
+      clearAuth();
       const data = await authApi.adminLogin(email, password);
-      saveAuth(data.token, data.user);
       this.adminLoginError?.classList.add('hidden');
       this.close();
-      window.dispatchEvent(new Event('auth:changed'));
+      saveAuth(data.token, data.user);
       window.location.href = '/admin.html';
     } catch (err) {
       if (this.adminLoginError) {
@@ -441,8 +569,17 @@ export class AuthModal {
 
     // Determine contact to verify against
     const contact = this.activeMethod === 'phone'
-      ? this._mockPhoneEmail || this.emailInput?.value.trim()
-      : this.emailInput?.value.trim();
+      ? this._mockPhoneEmail || this._pendingContact
+      : this._pendingContact;
+
+    const otpErr = getFieldError('otp', otpCode);
+    if (otpErr) {
+      if (this.verifyError) {
+        this.verifyError.textContent = otpErr;
+        this.verifyError.classList.remove('hidden');
+      }
+      return;
+    }
 
     const btn = this.formVerify?.querySelector('button');
     if (btn) {
@@ -451,6 +588,7 @@ export class AuthModal {
     }
 
     try {
+      clearAuth();
       const data = await authApi.verifyOtp(contact, otpCode, {
         loginMethod: this.activeMethod,
         whatsappNumber: this._lastPhone,
@@ -464,12 +602,12 @@ export class AuthModal {
       }
       saveAuth(data.token, data.user);
       this.close();
-      window.dispatchEvent(new Event('auth:changed'));
+      // saveAuth already dispatches auth:changed — no need to dispatch again
       if (this.onSuccessCallback) this.onSuccessCallback();
       const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
       showPopupModal({
         title: '🎉 Welcome back!',
-        message: `Hello <strong>${userName}</strong>, glad to see you again!`,
+        message: `Hello ${userName}, glad to see you again!`,
         duration: 2000,
         refreshOnClose: true,
       });

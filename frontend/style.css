@@ -3963,6 +3963,40 @@ button {
   margin-bottom: 12px;
 }
 
+.product-weight-selector {
+  margin: 8px 0 4px;
+}
+
+.product-weight-selector select,
+.detail-weight-selector select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-light, #d1d5db);
+  border-radius: 6px;
+  background: var(--surface-color, #fff);
+  font-size: 0.85rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.product-weight-selector select:focus,
+.detail-weight-selector select:focus {
+  border-color: var(--accent-color, #6b46c1);
+}
+
+.detail-weight-selector {
+  margin: 8px 0 12px;
+}
+
+.detail-weight-selector label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted, #6b7280);
+}
+
 .product-card-footer {
   display: flex;
   align-items: center;

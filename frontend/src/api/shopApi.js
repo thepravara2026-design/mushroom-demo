@@ -7,9 +7,9 @@ export const shopApi = {
     body: JSON.stringify(productData),
   }),
   getMyOrders: () => fetchWithAuth('/orders/my-orders'),
-  checkout: (cart, totalAmount) => fetchWithAuth('/orders/checkout', {
+  checkout: (checkoutData) => fetchWithAuth('/orders/checkout', {
     method: 'POST',
-    body: JSON.stringify({ cart, totalAmount }),
+    body: JSON.stringify(checkoutData),
   }),
   verifyPayment: (paymentDetails) => fetchWithAuth('/orders/verify-payment', {
     method: 'POST',

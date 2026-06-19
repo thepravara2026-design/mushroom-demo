@@ -13,7 +13,7 @@
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required.' });
+      return res.status(401).json({ error: "Authentication required." });
     }
 
     if (roles.includes(req.user.role)) {
@@ -21,7 +21,7 @@ function requireRole(...roles) {
     }
 
     return res.status(403).json({
-      error: `Access denied. Required role: ${roles.join(' or ')}.`,
+      error: `Access denied. Required role: ${roles.join(" or ")}.`,
     });
   };
 }
@@ -29,12 +29,14 @@ function requireRole(...roles) {
 function requireAnyRole(roles = []) {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required.' });
+      return res.status(401).json({ error: "Authentication required." });
     }
     if (roles.includes(req.user.role)) {
       return next();
     }
-    return res.status(403).json({ error: 'Access denied. Insufficient privileges.' });
+    return res
+      .status(403)
+      .json({ error: "Access denied. Insufficient privileges." });
   };
 }
 

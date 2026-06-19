@@ -49,13 +49,14 @@ CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
-  price NUMERIC(10, 2) NOT NULL,
-  mrp_price NUMERIC(10, 2) NOT NULL,
+  price NUMERIC(10, 2),
+  mrp_price NUMERIC(10, 2),
   image_url TEXT,
   category TEXT REFERENCES categories(id) ON DELETE SET NULL,
   difficulty TEXT,
   gst_rate INTEGER DEFAULT 5 NOT NULL,
   stock INTEGER DEFAULT 100 NOT NULL,
+  weight_pricing JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
@@ -153,6 +154,14 @@ CREATE TABLE IF NOT EXISTS enrollments (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
+-- Add database-level constraints for data integrity
+ALTER TABLE products ADD CONSTRAINT IF NOT EXISTS products_stock_check CHECK (stock >= 0);
+ALTER TABLE products ADD CONSTRAINT IF NOT EXISTS products_gst_rate_check CHECK (gst_rate IN (0, 5, 12, 18, 28));
+ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_total_check CHECK (total >= 0);
+ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_subtotal_check CHECK (subtotal >= 0);
+ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_shipping_charge_check CHECK (shipping_charge >= 0);
+ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_discount_amount_check CHECK (discount_amount >= 0);
+
 -- 3. SEED INITIAL DATABASE DATA
 
 -- Seed Categories
@@ -164,7 +173,7 @@ INSERT INTO categories (id, category_id, name, description) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Products
-INSERT INTO products (id, name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock) VALUES
+INSERT INTO products (id, name, description, price, mrp_price, image_url, category, difficulty, gst_rate, stock, weight_pricing) VALUES
 (
   'prod-1',
   'Pink Oyster Spore Syringe (10ml)',
@@ -175,7 +184,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'spawn',
   'beginner',
   5,
-  120
+  120,
+  '[{"weight":100,"unit":"g","price":100,"mrp_price":149},{"weight":200,"unit":"g","price":180,"mrp_price":269},{"weight":250,"unit":"g","price":220,"mrp_price":329},{"weight":400,"unit":"g","price":320,"mrp_price":479},{"weight":500,"unit":"g","price":350,"mrp_price":499},{"weight":1,"unit":"kg","price":650,"mrp_price":929},{"weight":2,"unit":"kg","price":1200,"mrp_price":1699},{"weight":5,"unit":"kg","price":2800,"mrp_price":3899}]'::jsonb
 ),
 (
   'prod-2',
@@ -187,7 +197,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'spawn',
   'beginner',
   5,
-  85
+  85,
+  NULL
 ),
 (
   'prod-3',
@@ -199,7 +210,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'spawn',
   'intermediate',
   5,
-  50
+  50,
+  NULL
 ),
 (
   'prod-4',
@@ -211,7 +223,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'spawn',
   'advanced',
   5,
-  60
+  60,
+  NULL
 ),
 (
   'prod-5',
@@ -223,7 +236,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'fresh',
   'beginner',
   5,
-  40
+  40,
+  NULL
 ),
 (
   'prod-6',
@@ -235,7 +249,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'fresh',
   'beginner',
   5,
-  45
+  45,
+  NULL
 ),
 (
   'prod-7',
@@ -247,7 +262,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'dry',
   'advanced',
   5,
-  100
+  100,
+  NULL
 ),
 (
   'prod-8',
@@ -259,7 +275,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'dry',
   'intermediate',
   5,
-  75
+  75,
+  NULL
 ),
 (
   'prod-9',
@@ -271,7 +288,8 @@ INSERT INTO products (id, name, description, price, mrp_price, image_url, catego
   'kits',
   'beginner',
   5,
-  65
+  65,
+  NULL
 )
 ON CONFLICT (id) DO NOTHING;
 

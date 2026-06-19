@@ -1,7 +1,7 @@
 import { traineeApi } from '../api/traineeApi.js';
-import { saveAuth, state } from '../utils/state.js';
+import { saveAuth, clearAuth, state } from '../utils/state.js';
 import { showErrorToast, showSuccessToast, showPopupModal } from '../utils/notify.js';
-import { isValidIndianPhone } from '../utils/validation.js';
+import { isValidIndianPhone, isValidEmail, isValidOtp, isValidName, getFieldError } from '../utils/validation.js';
 
 // === KARNATAKA CITIES DATABASE ===
 const KARNATAKA_CITIES = [
@@ -109,6 +109,40 @@ class TraineeAuthModal {
         return false;
     }
 
+    _addRealtimeValidation() {
+        const emailInput = document.getElementById('trainee-email-input');
+        const emailError = document.getElementById('trainee-email-error');
+        if (emailInput && emailError) {
+            emailInput.addEventListener('blur', () => {
+                const err = getFieldError('email', emailInput.value);
+                emailError.textContent = err;
+                emailError.classList.toggle('hidden', !err);
+            });
+            emailInput.addEventListener('input', () => {
+                if (!emailError.classList.contains('hidden')) {
+                    const err = getFieldError('email', emailInput.value);
+                    if (!err) emailError.classList.add('hidden');
+                }
+            });
+        }
+
+        const otpInput = document.getElementById('trainee-otp');
+        const otpError = document.getElementById('trainee-verify-error');
+        if (otpInput && otpError) {
+            otpInput.addEventListener('blur', () => {
+                const err = getFieldError('otp', otpInput.value);
+                otpError.textContent = err;
+                otpError.classList.toggle('hidden', !err);
+            });
+            otpInput.addEventListener('input', () => {
+                if (!otpError.classList.contains('hidden')) {
+                    const err = getFieldError('otp', otpInput.value);
+                    if (!err) otpError.classList.add('hidden');
+                }
+            });
+        }
+    }
+
     bindEvents() {
         document.getElementById('btn-close-trainee-auth')
             ?.addEventListener('click', () => this.close());
@@ -170,6 +204,8 @@ class TraineeAuthModal {
                 e.preventDefault();
                 this.showLogin();
             });
+
+        this._addRealtimeValidation();
     }
 
     open(onSuccess = null) {
@@ -317,8 +353,9 @@ class TraineeAuthModal {
         const email = document.getElementById('trainee-email-input')?.value.trim();
         const errorEl = document.getElementById('trainee-email-error');
 
-        if (!email) {
-            if (errorEl) { errorEl.textContent = 'Please enter your email.'; errorEl.classList.remove('hidden'); }
+        const emailErr = getFieldError('email', email);
+        if (emailErr) {
+            if (errorEl) { errorEl.textContent = emailErr; errorEl.classList.remove('hidden'); }
             return;
         }
 
@@ -357,13 +394,39 @@ class TraineeAuthModal {
         const city = document.getElementById('trainee-signup-city')?.value;
         const errorEl = document.getElementById('trainee-signup-error');
 
-        if (!fullName || !phone || !email || !roleType || !stateVal || !city) {
-            if (errorEl) { errorEl.textContent = 'All fields are required.'; errorEl.classList.remove('hidden'); }
+        const nameErr = getFieldError('name', fullName);
+        if (nameErr) {
+            if (errorEl) { errorEl.textContent = nameErr; errorEl.classList.remove('hidden'); }
             return;
         }
 
-        if (!isValidIndianPhone(phone)) {
-            if (errorEl) { errorEl.textContent = 'Enter a valid Indian phone number (e.g. +91 9876543210).'; errorEl.classList.remove('hidden'); }
+        const emailErr = getFieldError('email', email);
+        if (emailErr) {
+            if (errorEl) { errorEl.textContent = emailErr; errorEl.classList.remove('hidden'); }
+            return;
+        }
+
+        const phoneErr = getFieldError('phone', phone);
+        if (phoneErr) {
+            if (errorEl) { errorEl.textContent = phoneErr; errorEl.classList.remove('hidden'); }
+            return;
+        }
+
+        const roleErr = getFieldError('role', roleType);
+        if (roleErr) {
+            if (errorEl) { errorEl.textContent = roleErr; errorEl.classList.remove('hidden'); }
+            return;
+        }
+
+        const stateErr = getFieldError('state', stateVal);
+        if (stateErr) {
+            if (errorEl) { errorEl.textContent = stateErr; errorEl.classList.remove('hidden'); }
+            return;
+        }
+
+        const cityErr = getFieldError('city', city);
+        if (cityErr) {
+            if (errorEl) { errorEl.textContent = cityErr; errorEl.classList.remove('hidden'); }
             return;
         }
 
@@ -399,8 +462,9 @@ class TraineeAuthModal {
         const otp = document.getElementById('trainee-otp')?.value.trim();
         const errorEl = document.getElementById('trainee-verify-error');
 
-        if (!otp || otp.length < 4) {
-            if (errorEl) { errorEl.textContent = 'Please enter the 6-digit OTP code.'; errorEl.classList.remove('hidden'); }
+        const otpErr = getFieldError('otp', otp);
+        if (otpErr) {
+            if (errorEl) { errorEl.textContent = otpErr; errorEl.classList.remove('hidden'); }
             return;
         }
 
@@ -408,6 +472,7 @@ class TraineeAuthModal {
         if (btn) { btn.disabled = true; btn.textContent = 'Verifying...'; }
 
         try {
+            clearAuth();
             let data;
 
             if (this._activeMethod === 'phone') {
@@ -420,13 +485,12 @@ class TraineeAuthModal {
 
             saveAuth(data.token, data.user);
             this.close();
-            window.dispatchEvent(new Event('auth:changed'));
             showSuccessToast('Welcome back, Trainee!');
             if (this.onSuccessCallback) this.onSuccessCallback();
             const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
             showPopupModal({
               title: '🎉 Welcome!',
-              message: `Hello <strong>${userName}</strong>, welcome to your training dashboard!`,
+              message: `Hello ${userName}, welcome to your training dashboard!`,
               duration: 2000,
               refreshOnClose: true,
             });

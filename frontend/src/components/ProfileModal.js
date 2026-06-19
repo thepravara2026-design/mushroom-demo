@@ -1,7 +1,7 @@
 import { state, saveUserProfile, deleteUserProfile, saveCart } from '../utils/state.js';
 import { fetchWithAuth, API_BASE, getApiErrorMessage } from '../api/client.js';
 import { showErrorToast, showSuccessToast } from '../utils/notify.js';
-import { isValidIndianPhone } from '../utils/validation.js';
+import { isValidIndianPhone, isValidEmail, isValidPincode, getFieldError } from '../utils/validation.js';
 
 const STATE_CITIES = {
   "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kurnool", "Rajahmundry", "Kadapa"],
@@ -377,91 +377,7 @@ class ProfileModal {
     }
   }
 
-  initAddressDropdownsAndPincode() {
-    const user = state.user || {};
-    const stateSelect = this.modal.querySelector('#profile-state');
-    const citySelect = this.modal.querySelector('#profile-city');
-    const pincodeInput = this.modal.querySelector('#profile-pincode');
-
-    if (stateSelect && citySelect) {
-      // Populate state dropdown
-      stateSelect.innerHTML = '<option value="">Select State</option>' +
-        Object.keys(STATE_CITIES).map(s => `<option value="${s}">${s}</option>`).join('');
-
-      // Helper to update city dropdown based on selected state
-      const updateCitiesForState = (selectedState, defaultCity = '') => {
-        if (!selectedState || !STATE_CITIES[selectedState]) {
-          citySelect.innerHTML = '<option value="">Select State first</option>';
-          return;
-        }
-        const cities = STATE_CITIES[selectedState];
-        citySelect.innerHTML = '<option value="">Select City</option>' +
-          cities.map(c => `<option value="${c}">${c}</option>`).join('');
-
-        if (defaultCity) {
-          if (!cities.includes(defaultCity)) {
-            const opt = document.createElement('option');
-            opt.value = defaultCity;
-            opt.textContent = defaultCity;
-            citySelect.appendChild(opt);
-          }
-          citySelect.value = defaultCity;
-        }
-      };
-
-      // Set initial values
-      const initialState = user.state || '';
-      const initialCity = user.city || '';
-      if (initialState) {
-        stateSelect.value = initialState;
-        updateCitiesForState(initialState, initialCity);
-      } else {
-        citySelect.innerHTML = '<option value="">Select State first</option>';
-      }
-
-      // Listen to state change
-      stateSelect.addEventListener('change', (e) => {
-        updateCitiesForState(e.target.value);
-      });
-
-      // Pincode autofill
-      if (pincodeInput) {
-        const handlePincodeAutofill = async () => {
-          const pin = pincodeInput.value.trim();
-          if (pin.length === 6 && /^\d{6}$/.test(pin)) {
-            try {
-              const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
-              const data = await res.json();
-              if (data && data[0] && data[0].Status === 'Success') {
-                const postOffice = data[0].PostOffice[0];
-                const fetchedState = postOffice.State || '';
-                const fetchedCity = postOffice.District || postOffice.Region || '';
-
-                if (fetchedState) {
-                  if (!STATE_CITIES[fetchedState]) {
-                    const opt = document.createElement('option');
-                    opt.value = fetchedState;
-                    opt.textContent = fetchedState;
-                    stateSelect.appendChild(opt);
-                  }
-                  stateSelect.value = fetchedState;
-                  updateCitiesForState(fetchedState, fetchedCity);
-                }
-              }
-            } catch (err) {
-              console.error('Failed to fetch pincode details in profile', err);
-            }
-          }
-        };
-
-        pincodeInput.addEventListener('input', handlePincodeAutofill);
-        // Trigger if initial pincode exists
-        if (pincodeInput.value) {
-          handlePincodeAutofill();
-        }
-      }
-    }
-  }
+  // (intentionally removed duplicate; implemented below)
 
   renderCart() {
     const el = this.modal.querySelector('#profile-cart');
@@ -521,9 +437,8 @@ class ProfileModal {
       o.created_at || o.createdAt || o.orderedAt || Date.now(),
     ).toLocaleString();
     const status = o.delivery_status || o.status || 'pending';
-    const total = (o.total || o.order_total || o.amount || 0).toFixed
-      ? (o.total || 0).toFixed(2)
-      : Number(o.total || 0).toFixed(2);
+    const totalValue = o.total != null ? o.total : (o.order_total != null ? o.order_total : (o.amount || 0));
+    const total = Number(totalValue).toFixed(2);
     const trackingHtml = this.renderTrackingTimeline(o);
     const shareLink = o.invoice_token
       ? `${window.location.origin}/api/orders/share/${o.invoice_token}`
@@ -571,14 +486,8 @@ class ProfileModal {
     const status = o.delivery_status || o.status || 'pending';
     const updatedAt = o.updated_at || o.updatedAt || null;
     const createdAt = o.created_at || o.createdAt || null;
-    const deliveredAt = o.delivered_at || o.deliveredAt || o.deliveredAt || null;
+    const deliveredAt = o.delivered_at || o.deliveredAt || null;
     const cancelledAt = o.cancelled_at || o.cancelledAt || null;
-    const itemsCount = Array.isArray(o.items)
-      ? o.items.length
-      : o.items
-        ? o.items.length
-        : 0;
-
     const lines = [];
     if (createdAt) {
       lines.push({
@@ -694,30 +603,30 @@ class ProfileModal {
       updateCities(e.target.value);
     });
 
-    // Handle Pincode Auto-select (mock logic for demo)
-    pincodeInput.addEventListener('blur', (e) => {
+    // Pincode autofill using real postal API
+    pincodeInput.addEventListener('input', async (e) => {
       const pin = e.target.value.trim();
-      if (pin.length === 6) {
-        // Mock lookup: if it starts with 1, Delhi. If 4, Maharashtra. If 5, Karnataka. Else, just random logic or do nothing.
-        let detectedState = '';
-        let detectedCity = '';
-        if (pin.startsWith('1')) {
-          detectedState = 'Delhi';
-          detectedCity = 'New Delhi';
-        } else if (pin.startsWith('4')) {
-          detectedState = 'Maharashtra';
-          detectedCity = 'Mumbai';
-        } else if (pin.startsWith('5')) {
-          detectedState = 'Karnataka';
-          detectedCity = 'Bengaluru';
-        } else if (pin.startsWith('6')) {
-          detectedState = 'Tamil Nadu';
-          detectedCity = 'Chennai';
-        }
-
-        if (detectedState) {
-          stateSelect.value = detectedState;
-          updateCities(detectedState, detectedCity);
+      if (pin.length === 6 && /^\d{6}$/.test(pin)) {
+        try {
+          const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+          const data = await res.json();
+          if (data && data[0] && data[0].Status === 'Success') {
+            const postOffice = data[0].PostOffice[0];
+            const fetchedState = postOffice.State || '';
+            const fetchedCity = postOffice.District || postOffice.Region || '';
+            if (fetchedState) {
+              if (!STATE_CITIES[fetchedState]) {
+                const opt = document.createElement('option');
+                opt.value = fetchedState;
+                opt.textContent = fetchedState;
+                stateSelect.appendChild(opt);
+              }
+              stateSelect.value = fetchedState;
+              updateCities(fetchedState, fetchedCity);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch pincode details', err);
         }
       }
     });
@@ -749,6 +658,10 @@ class ProfileModal {
       showErrorToast('Email is required.');
       return;
     }
+    if (!isValidEmail(email)) {
+      showErrorToast('Enter a valid email address.');
+      return;
+    }
     if (!phone) {
       showErrorToast('Phone number is required.');
       return;
@@ -761,7 +674,7 @@ class ProfileModal {
       showErrorToast('All address fields (Line 1, Line 2, Landmark, Pincode, City, State) are mandatory.');
       return;
     }
-    if (!/^\d{6}$/.test(pincodeVal)) {
+    if (!isValidPincode(pincodeVal)) {
       showErrorToast('Enter a valid 6-digit pincode.');
       return;
     }

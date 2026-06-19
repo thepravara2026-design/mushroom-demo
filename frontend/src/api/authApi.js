@@ -1,5 +1,5 @@
 import { fetchWithAuth, API_BASE } from './http.js';
-import { state, saveAuth, clearAuth } from '../utils/state.js';
+import { state } from '../utils/state.js';
 
 /**
  * Authentication API helpers.
@@ -14,14 +14,10 @@ export const authApi = {
    * Stores token and user via saveAuth() on success.
    */
   async login({ email, password }) {
-    const data = await fetchWithAuth('/auth/login', {
+    return fetchWithAuth('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    if (data.token) {
-      saveAuth(data.token, data.user);
-    }
-    return data;
   },
 
   /**
@@ -82,14 +78,10 @@ export const authApi = {
   }),
 
   adminLogin: async (email, password) => {
-    const data = await fetchWithAuth('/auth/admin-login', {
+    return fetchWithAuth('/auth/admin-login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    if (data.token) {
-      saveAuth(data.token, data.user);
-    }
-    return data;
   },
 
   getMe: () => fetchWithAuth('/auth/me'),

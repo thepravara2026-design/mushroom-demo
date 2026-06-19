@@ -1,5 +1,5 @@
-const categoryRepo = require('../repositories/categoryRepository');
-const productRepo = require('../repositories/productRepository');
+const categoryRepo = require("../repositories/categoryRepository");
+const productRepo = require("../repositories/productRepository");
 
 async function listCategories() {
   const { data, error } = await categoryRepo.findAll();
@@ -12,7 +12,7 @@ async function listCategories() {
 }
 
 function escapeSlug(slug) {
-  return String(slug).toLowerCase().replace(/\s+/g, '-');
+  return String(slug).toLowerCase().replace(/\s+/g, "-");
 }
 
 async function generateNextCategoryUid() {
@@ -22,23 +22,22 @@ async function generateNextCategoryUid() {
     err.status = 500;
     throw err;
   }
-  const next = (categories || [])
-    .map((c) => c.category_id)
-    .filter(Boolean)
-    .map((uid) => {
-      const match = String(uid).match(/^spore-(\d+)$/);
-      return match ? parseInt(match[1], 10) : 0;
-    })
-    .reduce((max, n) => Math.max(max, n), 0) + 1;
-  return `spore-${String(next).padStart(6, '0')}`;
+  const next =
+    (categories || [])
+      .map((c) => c.category_id)
+      .filter(Boolean)
+      .map((uid) => {
+        const match = String(uid).match(/^spore-(\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .reduce((max, n) => Math.max(max, n), 0) + 1;
+  return `spore-${String(next).padStart(6, "0")}`;
 }
 
 async function createCategory(payload) {
-  const {
-    category_id, id, name, description, image_url,
-  } = payload;
+  const { category_id, id, name, description, image_url } = payload;
   if (!id || !name) {
-    const err = new Error('Please provide category slug and name.');
+    const err = new Error("Please provide category slug and name.");
     err.status = 400;
     throw err;
   }
@@ -74,8 +73,8 @@ async function createCategory(payload) {
     category_id: cid,
     id: normalizedSlug,
     name,
-    description: description || '',
-    image_url: image_url || '',
+    description: description || "",
+    image_url: image_url || "",
   };
 
   const { data: newCategory, error } = await categoryRepo.create(insert);
@@ -90,7 +89,8 @@ async function createCategory(payload) {
 async function updateCategory(slug, updates) {
   const allowed = {};
   if (updates.name !== undefined) allowed.name = updates.name;
-  if (updates.description !== undefined) allowed.description = updates.description;
+  if (updates.description !== undefined)
+    allowed.description = updates.description;
   if (updates.image_url !== undefined) allowed.image_url = updates.image_url;
 
   const { data: updated, error } = await categoryRepo.update(slug, allowed);
@@ -115,7 +115,7 @@ async function deleteCategory(slug) {
   const { data: products } = await productRepo.findAll();
   if (products && products.length > 0) {
     for (const p of products.filter((p) => p.category === slug)) {
-      await productRepo.update(p.id, { category: 'uncategorized' });
+      await productRepo.update(p.id, { category: "uncategorized" });
     }
   }
 

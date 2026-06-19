@@ -15,6 +15,7 @@ import { blogApi } from './api/blogApi.js';
 import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
 import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal } from './utils/notify.js';
 import { isValidIndianPhone } from './utils/validation.js';
+import { createEventSourceWithAuth } from './utils/auth.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
@@ -107,7 +108,7 @@ function applyShopInventorySort(products) {
 }
 
 // ── Inactivity auto-logout ──────────────────────────────────────
-const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 let _inactivityTimer = null;
 let _inactivityBound = [];
 
@@ -219,8 +220,8 @@ try {
 // Connect to server-sent events to receive order updates cross-browser
 try {
   if (state && state.token) {
-    const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
-    const orderEs = new EventSource(esUrl);
+    const esUrl = `${API_BASE}/orders/events`;
+    const orderEs = createEventSourceWithAuth(esUrl, state.token);
     orderEs.addEventListener('order:updated', (ev) => {
       try {
         const payload = JSON.parse(ev.data || '{}');
@@ -252,8 +253,8 @@ function initOrderSse() {
   try {
     if (!state || !state.token) return;
     if (orderEs) return;
-    const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
-    orderEs = new EventSource(esUrl);
+    const esUrl = `${API_BASE}/orders/events`;
+    orderEs = createEventSourceWithAuth(esUrl, state.token);
     orderEs.addEventListener('order:updated', (ev) => {
       try {
         const payload = JSON.parse(ev.data || '{}');
@@ -1069,7 +1070,25 @@ function initEventListeners() {
 // ==========================================================================
 async function loadUser() {
   if (!state.token) {
-    updateAuthHeaderUI();
+    // No sessionStorage token — try to restore from HTTP-only cookie
+    // Use raw fetch to avoid fetchWithAuth's 401 → reload loop
+    try {
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const user = body.data || body;
+        state.user = user;
+        updateAuthHeaderUI();
+        handleRouting();
+      } else {
+        updateAuthHeaderUI();
+      }
+    } catch {
+      updateAuthHeaderUI();
+    }
     return;
   }
 
@@ -1258,11 +1277,14 @@ function renderProducts(productsList) {
   const html = pageProducts
     .map((prod, idx) => {
       const catLabel = prod.category === 'spawn' ? 'Spawn & Seeds' : 'Mushroom';
-      const hasMrp = prod.mrp_price && prod.mrp_price > prod.price;
+      const fallbackPrice = prod.price || 0;
+      const hasMrp = prod.mrp_price && prod.mrp_price > fallbackPrice;
       const discountPct = hasMrp
-        ? Math.round((1 - prod.price / prod.mrp_price) * 100)
+        ? Math.round((1 - fallbackPrice / prod.mrp_price) * 100)
         : 0;
       const stockMeta = _getStockMeta(prod.stock);
+      const hasWeights = Array.isArray(prod.weight_pricing) && prod.weight_pricing.length > 0;
+      const defaultWeight = hasWeights ? prod.weight_pricing[0] : null;
 
       return `
         <div class="product-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
@@ -1276,11 +1298,24 @@ function renderProducts(productsList) {
             <span class="product-category-lbl">${catLabel}</span>
             <h3>${prod.name}</h3>
             <p class="product-desc">${prod.description}</p>
+            ${hasWeights ? `
+              <div class="product-weight-selector">
+                <select class="weight-select" data-prod-id="${prod.id}">
+                  ${prod.weight_pricing.map(w => {
+                    const label = w.unit === 'kg' ? `${w.weight} kg` : `${w.weight} g`;
+                    const isDefault = w === defaultWeight;
+                    return `<option value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}" ${isDefault ? 'selected' : ''}>${label}</option>`;
+                  }).join('')}
+                </select>
+              </div>
+            ` : ''}
             <div class="product-card-footer">
               <div>
                 <div class="product-price-wrap">
-                  <span class="product-price">${_formatCurrency(prod.price)}</span>
-                  ${hasMrp ? `<span class="product-mrp">${_formatCurrency(prod.mrp_price)}</span>` : ''}
+                  <span class="product-price" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight ? defaultWeight.price : fallbackPrice)}</span>
+                  ${defaultWeight && defaultWeight.mrp_price && defaultWeight.mrp_price > defaultWeight.price
+                    ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight.mrp_price)}</span>`
+                    : hasMrp ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(prod.mrp_price)}</span>` : ''}
                 </div>
                 <span class="product-free-shipping-badge">Free shipping</span>
               </div>
@@ -1317,7 +1352,46 @@ function renderProducts(productsList) {
   grid.querySelectorAll('.btn-card-add').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      addToCart(btn.getAttribute('data-id'));
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      const id = btn.getAttribute('data-id');
+      const product = state.products.find(p => p.id === id);
+      const sel = grid.querySelector(`.weight-select[data-prod-id="${id}"]`);
+      let weightInfo = null;
+      if (sel) {
+        const parts = sel.value.split('_');
+        if (parts.length >= 4) {
+          weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
+        }
+      }
+      addToCart(id, weightInfo);
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-cart-plus"></i>';
+      }, 600);
+    });
+  });
+
+  // Weight selector change: update displayed price
+  grid.querySelectorAll('.weight-select').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      const parts = sel.value.split('_');
+      if (parts.length < 4) return;
+      const price = parseFloat(parts[2]);
+      const mrp = parts[3] ? parseFloat(parts[3]) : null;
+      const prodId = sel.getAttribute('data-prod-id');
+      const priceEl = grid.querySelector(`.product-price[data-prod-id="${prodId}"]`);
+      const mrpEl = grid.querySelector(`.product-mrp[data-prod-id="${prodId}"]`);
+      if (priceEl) priceEl.textContent = _formatCurrency(price);
+      if (mrpEl) {
+        if (mrp && mrp > price) {
+          mrpEl.textContent = _formatCurrency(mrp);
+          mrpEl.style.display = '';
+        } else {
+          mrpEl.style.display = 'none';
+        }
+      }
     });
   });
 
@@ -1412,7 +1486,11 @@ function updateSearchSuggestions(query) {
 
   dd.innerHTML = matches
     .map((p) => {
-      const hasMrp = p.mrp_price && p.mrp_price > p.price;
+      const hasWeights = Array.isArray(p.weight_pricing) && p.weight_pricing.length > 0;
+      const fallbackP = p.price || 0;
+      const displayPrice = hasWeights ? p.weight_pricing[0].price : fallbackP;
+      const displayMrp = hasWeights && p.weight_pricing[0].mrp_price && p.weight_pricing[0].mrp_price > p.weight_pricing[0].price
+        ? p.weight_pricing[0].mrp_price : (p.mrp_price && p.mrp_price > fallbackP ? p.mrp_price : null);
       const catLabel = p.category === 'spawn' ? 'Spawn' : 'Mushroom';
       return `
       <div class="suggestion-item" data-id="${p.id}">
@@ -1420,8 +1498,8 @@ function updateSearchSuggestions(query) {
         <div class="suggestion-item-info">
           <div class="suggestion-item-name">${p.name}</div>
           <div style="display:flex;align-items:center;gap:4px;">
-            <span class="suggestion-item-price">₹${p.price.toFixed(2)}</span>
-            ${hasMrp ? `<span class="suggestion-item-mrp">₹${p.mrp_price.toFixed(2)}</span>` : ''}
+            <span class="suggestion-item-price">₹${displayPrice.toFixed(2)}</span>
+            ${displayMrp ? `<span class="suggestion-item-mrp">₹${displayMrp.toFixed(2)}</span>` : ''}
           </div>
         </div>
         <span class="suggestion-item-cat">${catLabel}</span>
@@ -1506,6 +1584,11 @@ async function openProductDetails(id) {
       `;
     }
 
+    const hasWeights = Array.isArray(product.weight_pricing) && product.weight_pricing.length > 0;
+    const defaultW = hasWeights ? product.weight_pricing[0] : null;
+    const displayPrice = defaultW ? defaultW.price : (product.price || 0);
+
+    const displayMrp = defaultW && defaultW.mrp_price && defaultW.mrp_price > defaultW.price ? defaultW.mrp_price : (product.mrp_price && product.price && product.mrp_price > product.price ? product.mrp_price : null);
     body.innerHTML = `
       <div class="detail-img-col">
         <img src="${product.image_url}" alt="${product.name}">
@@ -1513,15 +1596,21 @@ async function openProductDetails(id) {
       <div class="detail-info-col">
         <span class="product-category-lbl">${product.category}</span>
         <h3>${product.name}</h3>
+        ${hasWeights ? `
+          <div class="detail-weight-selector">
+            <label>Select Weight:</label>
+            <select id="detail-weight-select">
+              ${product.weight_pricing.map(w => {
+                const label = w.unit === 'kg' ? `${w.weight} kg` : `${w.weight} g`;
+                return `<option value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}">${label}</option>`;
+              }).join('')}
+            </select>
+          </div>
+        ` : ''}
         <div class="detail-price-wrap">
-          <span class="detail-price">₹${product.price.toFixed(2)}</span>
-          ${product.mrp_price && product.mrp_price > product.price
-        ? `
-            <span class="detail-mrp">₹${product.mrp_price.toFixed(2)}</span>
-            <span class="detail-discount-badge">${Math.round((1 - product.price / product.mrp_price) * 100)}% OFF</span>
-          `
-        : ''
-      }
+          <span class="detail-price" id="detail-price-display">₹${displayPrice.toFixed(2)}</span>
+          ${displayMrp ? `<span class="detail-mrp" id="detail-mrp-display">₹${displayMrp.toFixed(2)}</span>` : ''}
+          ${displayMrp ? `<span class="detail-discount-badge" id="detail-discount-display">${Math.round((1 - displayPrice / displayMrp) * 100)}% OFF</span>` : ''}
         </div>
         <p style="font-size: 0.95rem; color: var(--color-text-muted); line-height: 1.6;">${product.description}</p>
         
@@ -1533,8 +1622,46 @@ async function openProductDetails(id) {
       </div>
     `;
 
+    // Weight change handler for detail modal
+    const weightSel = document.getElementById('detail-weight-select');
+    if (weightSel) {
+      weightSel.addEventListener('change', () => {
+        const parts = weightSel.value.split('_');
+        if (parts.length < 4) return;
+        const p = parseFloat(parts[2]);
+        const m = parts[3] ? parseFloat(parts[3]) : null;
+        const priceDisplay = document.getElementById('detail-price-display');
+        const mrpDisplay = document.getElementById('detail-mrp-display');
+        const discountDisplay = document.getElementById('detail-discount-display');
+        if (priceDisplay) priceDisplay.textContent = `₹${p.toFixed(2)}`;
+        if (mrpDisplay) {
+          if (m && m > p) {
+            mrpDisplay.textContent = `₹${m.toFixed(2)}`;
+            mrpDisplay.style.display = '';
+          } else {
+            mrpDisplay.style.display = 'none';
+          }
+        }
+        if (discountDisplay) {
+          if (m && m > p) {
+            discountDisplay.textContent = `${Math.round((1 - p / m) * 100)}% OFF`;
+            discountDisplay.style.display = '';
+          } else {
+            discountDisplay.style.display = 'none';
+          }
+        }
+      });
+    }
+
     document.getElementById('btn-modal-add').addEventListener('click', () => {
-      addToCart(product.id);
+      let weightInfo = null;
+      if (weightSel) {
+        const parts = weightSel.value.split('_');
+        if (parts.length >= 4) {
+          weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
+        }
+      }
+      addToCart(product.id, weightInfo);
       modal.classList.remove('open');
     });
   } catch (err) {
@@ -1566,7 +1693,7 @@ function toggleCartDrawer(open) {
   }
 }
 
-function addToCart(productId) {
+function addToCart(productId, weightInfo) {
   // Ensure a lightweight guest profile exists for anonymous users so they have a profile page
   if (!state.user) {
     const guest = {
@@ -1581,22 +1708,32 @@ function addToCart(productId) {
     updateAuthHeaderUI();
   }
 
-  const existing = state.cart.find((item) => item.id === productId);
+  const product = state.products.find((p) => p.id === productId);
+  if (!product) return;
+
+  // Determine effective price based on weight selection
+  const effectivePrice = weightInfo ? weightInfo.price : (product.price || 0);
+  const weightLabel = weightInfo ? (weightInfo.unit === 'kg' ? `${weightInfo.weight} kg` : `${weightInfo.weight} g`) : '';
+
+  // Build a unique cart key: if weight variant, include weight in the id
+  const cartId = weightInfo ? `${productId}_${weightInfo.weight}${weightInfo.unit}` : productId;
+
+  const existing = state.cart.find((item) => item._cartId === cartId || (item.id === productId && !weightInfo && !item._cartId));
   let addedItem;
 
   if (existing) {
     existing.quantity += 1;
     addedItem = existing;
   } else {
-    const product = state.products.find((p) => p.id === productId);
-    if (!product) return;
     const newItem = {
       id: product.id,
-      name: product.name,
-      price: product.price,
+      _cartId: cartId,
+      name: weightLabel ? `${product.name} (${weightLabel})` : product.name,
+      price: effectivePrice,
       image_url: product.image_url,
       gst_rate: product.gst_rate,
       quantity: 1,
+      weightInfo: weightInfo || null,
     };
     state.cart.push(newItem);
     addedItem = newItem;
@@ -1642,14 +1779,14 @@ function showAddedToCartPopup(item) {
     ?.addEventListener('click', () => popup.remove());
 }
 
-function changeQuantity(productId, delta) {
-  const item = state.cart.find((item) => item.id === productId);
+function changeQuantity(cartId, delta) {
+  const item = state.cart.find((item) => (item._cartId || item.id) === cartId);
   if (!item) return;
 
   item.quantity += delta;
 
   if (item.quantity <= 0) {
-    state.cart = state.cart.filter((item) => item.id !== productId);
+    state.cart = state.cart.filter((item) => (item._cartId || item.id) !== cartId);
   }
 
   saveCart();
@@ -1661,8 +1798,8 @@ function changeQuantity(productId, delta) {
   }
 }
 
-function removeFromCart(productId) {
-  state.cart = state.cart.filter((item) => item.id !== productId);
+function removeFromCart(cartId) {
+  state.cart = state.cart.filter((item) => (item._cartId || item.id) !== cartId);
   saveCart();
   updateCartUI();
 
@@ -1747,24 +1884,26 @@ function updateCartUI() {
 
   container.innerHTML = state.cart
     .map(
-      (cartItem) => `
+      (cartItem) => {
+        const cartId = cartItem._cartId || cartItem.id;
+        return `
       <div class="cart-item">
         <img src="${cartItem.image_url}" alt="${cartItem.name}">
         <div class="cart-item-details">
           <h4>${cartItem.name}</h4>
           <span class="cart-item-price">₹${cartItem.price.toFixed(2)} <span style="font-size:0.75rem; color:var(--color-text-muted);">(${cartItem.gst_rate}% GST)</span></span>
           <div class="cart-item-qty-row">
-            <button class="qty-btn" onclick="window.changeQty('${cartItem.id}', -1)">-</button>
+            <button class="qty-btn" onclick="window.changeQty('${cartId}', -1)">-</button>
             <span class="qty-val">${cartItem.quantity}</span>
-            <button class="qty-btn" onclick="window.changeQty('${cartItem.id}', 1)">+</button>
+            <button class="qty-btn" onclick="window.changeQty('${cartId}', 1)">+</button>
           </div>
           <div class="cart-item-shipping-note">Free shipping</div>
         </div>
-        <button class="btn-remove-item" onclick="window.removeCartItem('${cartItem.id}')">
+        <button class="btn-remove-item" onclick="window.removeCartItem('${cartId}')">
           <i class="fa-solid fa-trash-can"></i>
         </button>
       </div>
-    `,
+    `;},
     )
     .join('');
 
@@ -2698,15 +2837,14 @@ function renderCheckoutPage() {
     const product = state.products.find((p) => p.id === item.id) || {};
     return `
       <div class="checkout-summary-line">
-        <span>${item.quantity}× ${product.name || 'Product'}</span>
-        <strong>₹${((product.price || 0) * item.quantity).toFixed(2)}</strong>
+        <span>${item.quantity}× ${item.name}</span>
+        <strong>₹${(item.price * item.quantity).toFixed(2)}</strong>
       </div>
     `;
   });
 
   const subtotal = state.cart.reduce((total, item) => {
-    const product = state.products.find((p) => p.id === item.id) || {};
-    return total + (product.price || 0) * item.quantity;
+    return total + item.price * item.quantity;
   }, 0);
   const gst = +(subtotal * 0.05).toFixed(2);
   const discount = state.activePromo ? 50 : 0;
@@ -2839,8 +2977,9 @@ async function handlePaymentContinue() {
         items: state.cart.map((item) => ({
           id: item.id,
           quantity: item.quantity,
+          ...(item.weightInfo ? { weight: item.weightInfo.weight, unit: item.weightInfo.unit } : {}),
         })),
-        promoCode: state.activePromo,
+        promoCode: state.activePromo || "",
         delivery_phone: deliveryPhone,
         address_line1: addressLine1,
         address_line2: addressLine2,
@@ -2857,7 +2996,8 @@ async function handlePaymentContinue() {
     const orderRecord = data.order;
 
     if (
-      rzpDetails.keyId.includes('mockKey')
+      !rzpDetails.keyId
+      || rzpDetails.keyId.includes('mockKey')
       || rzpDetails.keyId.includes('rzp_test_mock')
     ) {
       showMockPaymentModal(rzpDetails, orderRecord);
@@ -3617,7 +3757,7 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       const isAdminOrGrower = state.user && (state.user.role === 'admin' || state.user.role === 'grower');
       showPopupModal({
         title: '🎉 Thank you for your order!',
-        message: `<strong>${userName}</strong>, your order is confirmed. We are updating your shipping status and will notify you soon.`,
+        message: `${userName}, your order is confirmed. We are updating your shipping status and will notify you soon.`,
         duration: 1000,
         redirectHash: isAdminOrGrower ? `#track-${data.order.id}` : '#shop',
       });
@@ -4515,8 +4655,6 @@ function copyInvoiceLink(token) {
 window.viewInvoice = viewInvoice;
 window.whatsappQuickMessage = whatsappQuickMessage;
 window.copyInvoiceLink = copyInvoiceLink;
-window.cancelOrder = cancelOrder;
-
 // ==========================================================================
 // HOMEPAGE MUSHROOM CAROUSEL
 // ==========================================================================
@@ -4684,7 +4822,7 @@ window.openReviewModal = function (orderId) {
 // ============================================================
 // SUCCESS STORIES DATA & RENDERING
 // ============================================================
-const SUCCESS_STORIES = [
+var SUCCESS_STORIES = [
   {
     id: 'story-1',
     name: 'Ramesh Patil',

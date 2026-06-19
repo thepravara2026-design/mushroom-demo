@@ -35,7 +35,6 @@ export async function fetchWithAuth(
       if (res.status === 401) {
         // clear auth and surface a specific error to caller
         clearAuth();
-        window.location.reload();
         const err = new Error('Unauthorized');
         err.status = 401;
         throw err;

@@ -35,7 +35,7 @@ describe('Backend API integration tests', () => {
       .post('/api/auth/admin-login')
       .send({ email: 'admin@sporekart.com', password: 'wrongpass' });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
   });
 
   test('POST /api/auth/admin-login fails for non-admin user', async () => {

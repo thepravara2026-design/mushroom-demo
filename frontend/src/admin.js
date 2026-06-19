@@ -5,6 +5,7 @@ import { trainingApi } from './api/trainingApi.js';
 import { blogApi } from './api/blogApi.js';
 import { showErrorToast, showSuccessToast } from './utils/notify.js';
 import { isValidIndianPhone } from './utils/validation.js';
+import { createEventSourceWithAuth } from './utils/auth.js';
 
 globalThis.state = state;
 
@@ -39,6 +40,8 @@ const saveCatBtn = document.getElementById('btn-admin-save-cat');
 const productForm = document.getElementById('form-admin-add-product');
 const productIdDisplay = document.getElementById('admin-prod-id-display');
 const productImageUrl = document.getElementById('admin-prod-image-url');
+const weightPricingContainer = document.getElementById('admin-weight-pricing-container');
+const btnAddWeightRow = document.getElementById('btn-add-weight-row');
 // Training DOM elements
 const trainForm = document.getElementById('form-admin-add-training');
 const trainEditId = document.getElementById('admin-train-edit-id');
@@ -131,8 +134,8 @@ function initAdminSse() {
   try {
     if (!state?.token) return;
     if (adminEs) return; // already initialized
-    const esUrl = `${API_BASE}/orders/events?token=${encodeURIComponent(state.token)}`;
-    adminEs = new EventSource(esUrl);
+    const esUrl = `${API_BASE}/orders/events`;
+    adminEs = createEventSourceWithAuth(esUrl, state.token);
     adminEs.addEventListener('order:updated', (ev) => {
       try {
         const payload = JSON.parse(ev.data || '{}');
@@ -216,7 +219,16 @@ function generateCategoryUid() {
 }
 
 function generateProductId(categoryUid) {
-  if (!categoryUid) return '';
+  // Always generate a unique ID — fallback to a global sequence if no category uid
+  if (!categoryUid) {
+    const allNumbers = _adminProducts
+      .map((p) => {
+        const match = /^(?:.*?-pid-)?(\d+)$/.exec(String(p.id));
+        return match ? Number.parseInt(match[1], 10) : 0;
+      });
+    const nextNumber = allNumbers.length ? Math.max(...allNumbers) + 1 : 1;
+    return `prod-${String(nextNumber).padStart(5, '0')}`;
+  }
   const existingIds = _adminProducts
     .filter(
       (p) => p.category === document.getElementById('admin-prod-category')?.value,
@@ -264,7 +276,7 @@ function updateProductIdDisplay() {
   if (!productIdDisplay || !productCategory) return;
   const selectedOption = productCategory.selectedOptions?.[0];
   const categoryUid = selectedOption?.dataset?.categoryUid || '';
-  productIdDisplay.value = categoryUid ? generateProductId(categoryUid) : '';
+  productIdDisplay.value = generateProductId(categoryUid);
 }
 
 function updateCategoryImagePreview() {
@@ -459,17 +471,82 @@ async function readFileAsDataUrl(file) {
 }
 
 // -----------------------------
+// Weight pricing row management
+// -----------------------------
+function createWeightRow(value) {
+  const row = document.createElement('div');
+  row.className = 'admin-weight-pricing-row';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
+  row.innerHTML = `
+    <select class="admin-weight-select" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+      <option value="">Select weight</option>
+      <option value="100g">100 g</option>
+      <option value="200g">200 g</option>
+      <option value="250g">250 g</option>
+      <option value="400g">400 g</option>
+      <option value="500g">500 g</option>
+      <option value="1kg">1 kg</option>
+      <option value="2kg">2 kg</option>
+      <option value="5kg">5 kg</option>
+    </select>
+    <input type="number" step="0.01" class="admin-weight-price" placeholder="Price (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
+    <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
+    <button type="button" class="btn-weight-remove" style="background:none;border:none;color:#e74c3c;cursor:pointer;padding:4px;"><i class="fa-solid fa-trash-can"></i></button>
+  `;
+  if (value) {
+    const sel = row.querySelector('.admin-weight-select');
+    const key = value.unit === 'kg' ? `${value.weight}kg` : `${value.weight}g`;
+    if ([...sel.options].some(o => o.value === key)) sel.value = key;
+    row.querySelector('.admin-weight-price').value = value.price;
+    row.querySelector('.admin-weight-mrp').value = value.mrp_price || '';
+  }
+  row.querySelector('.btn-weight-remove').addEventListener('click', () => row.remove());
+  return row;
+}
+
+function getWeightPricingData() {
+  const rows = weightPricingContainer.querySelectorAll('.admin-weight-pricing-row');
+  const data = [];
+  rows.forEach(row => {
+    const sel = row.querySelector('.admin-weight-select');
+    const price = row.querySelector('.admin-weight-price').value;
+    const mrp = row.querySelector('.admin-weight-mrp').value;
+    if (sel.value && price) {
+      const match = sel.value.match(/^(\d+)(g|kg)$/);
+      if (match) {
+        data.push({
+          weight: parseInt(match[1], 10),
+          unit: match[2],
+          price: parseFloat(price),
+          ...(mrp ? { mrp_price: parseFloat(mrp) } : {}),
+        });
+      }
+    }
+  });
+  return data;
+}
+
+function setWeightPricingData(data) {
+  weightPricingContainer.innerHTML = '';
+  if (Array.isArray(data)) {
+    data.forEach(item => weightPricingContainer.appendChild(createWeightRow(item)));
+  }
+  if (!weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
+    weightPricingContainer.appendChild(createWeightRow(null));
+  }
+}
+
+// -----------------------------
 // Helper: product/category helpers
 // -----------------------------
-function buildProductBody({ name, category, description, numericPrice, numericMrp, gstRate, image_url, productId, editId }) {
+function buildProductBody({ name, category, description, gstRate, image_url, productId, editId, weightPricing }) {
   const body = {
     name,
     category,
     description,
-    price: numericPrice,
-    mrp_price: numericMrp,
     gst_rate: Number.parseInt(String(gstRate || 0), 10),
     image_url,
+    weight_pricing: weightPricing,
   };
   if (!editId) body.id = productId;
   return body;
@@ -567,8 +644,14 @@ function renderAdminInventory() {
             <div class="admin-card-body">
               <div class="admin-card-details">
                 <div class="admin-price-cell">
-                  <span class="price-act">₹${p.price.toFixed(2)}</span>
-                  ${p.mrp_price ? `<span class="price-mrp">₹${p.mrp_price.toFixed(2)}</span>` : ''}
+                  ${(() => {
+                    const hasWp = Array.isArray(p.weight_pricing) && p.weight_pricing.length > 0;
+                    if (hasWp) {
+                      const first = p.weight_pricing[0];
+                      return `<span class="price-act">₹${first.price.toFixed(2)}</span>${first.mrp_price ? `<span class="price-mrp">₹${first.mrp_price.toFixed(2)}</span>` : ''}<span style="font-size:0.7rem;color:#6b7280;display:block;">${p.weight_pricing.length} weight variant(s)</span>`;
+                    }
+                    return `<span class="price-act">₹${(p.price || 0).toFixed(2)}</span>${p.mrp_price ? `<span class="price-mrp">₹${p.mrp_price.toFixed(2)}</span>` : ''}`;
+                  })()}
                 </div>
                 <div class="admin-badge-row">
                   <span class="admin-gst-badge">GST ${p.gst_rate}%</span>
@@ -634,8 +717,6 @@ function adminEditProduct(productId) {
   document.getElementById('admin-prod-desc').value = product.description;
   document.getElementById('admin-prod-category').value = product.category;
   document.getElementById('admin-prod-gst').value = String(product.gst_rate);
-  document.getElementById('admin-prod-price').value = product.price;
-  document.getElementById('admin-prod-mrp').value = product.mrp_price || '';
   if (productImageUrl) productImageUrl.value = product.image_url || '';
   if (productImageFile) productImageFile.value = '';
 
@@ -644,6 +725,9 @@ function adminEditProduct(productId) {
     preview.innerHTML = `<img src="${product.image_url}" alt="Preview">`;
     productImagePreviewValid = true;
   }
+
+  // Load weight pricing if available
+  setWeightPricingData(product.weight_pricing || null);
 
   const label = document.getElementById('admin-submit-label');
   if (label) label.textContent = 'Update Product';
@@ -658,8 +742,6 @@ async function handleAdminAddProduct(event) {
   const name = document.getElementById('admin-prod-name').value.trim();
   const category = document.getElementById('admin-prod-category').value;
   const description = document.getElementById('admin-prod-desc').value.trim();
-  const price = document.getElementById('admin-prod-price').value;
-  const mrp_price = document.getElementById('admin-prod-mrp').value;
   const gst_rate = document.getElementById('admin-prod-gst').value;
   const selectedCategoryUid = document.getElementById('admin-prod-category')?.selectedOptions?.[0]?.dataset?.categoryUid || '';
   let productId = productIdDisplay?.value.trim() || '';
@@ -668,6 +750,25 @@ async function handleAdminAddProduct(event) {
   let image_url = productImageUrlValue;
 
   try {
+    if (!name) {
+      feedback.textContent = 'Product name is required.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+    if (!category) {
+      feedback.textContent = 'Please select a category.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+    if (!description) {
+      feedback.textContent = 'Product description is required.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+
     const expectedPrefix = selectedCategoryUid ? `${selectedCategoryUid}-pid-` : '';
     if (!productId || (expectedPrefix && !productId.startsWith(expectedPrefix))) {
       productId = generateProductId(selectedCategoryUid);
@@ -676,14 +777,6 @@ async function handleAdminAddProduct(event) {
 
     if (imageFile) image_url = await readFileAsDataUrl(imageFile);
 
-    const numericPrice = Number.parseFloat(price);
-    const numericMrp = mrp_price ? Number.parseFloat(mrp_price) : undefined;
-    if (numericMrp !== undefined && numericMrp < numericPrice) {
-      feedback.textContent = 'MRP must be greater than or equal to the actual price.';
-      feedback.classList.remove('hidden');
-      return;
-    }
-
     if (!productImagePreviewValid) {
       feedback.textContent = 'Please provide a valid product image preview. Upload a local image file or paste a direct image URL (e.g. ending with .jpg, .png, .webp) that loads successfully, not a Google share page or HTML link.';
       feedback.classList.remove('hidden');
@@ -691,9 +784,55 @@ async function handleAdminAddProduct(event) {
       return;
     }
 
+    const weightPricing = getWeightPricingData();
+    if (!Array.isArray(weightPricing) || weightPricing.length === 0) {
+      feedback.textContent = 'Please add at least one weight-based pricing variant.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+
+    // Check for duplicate weight variants within this product
+    const weightKeys = weightPricing.map(w => `${w.weight}${w.unit}`);
+    if (new Set(weightKeys).size !== weightKeys.length) {
+      feedback.textContent = 'Duplicate weight variants are not allowed. Each weight (e.g. 500g, 1kg) can only be added once per product.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+
+    // Ensure prices increase with weight (larger weight → higher price)
+    const sorted = [...weightPricing].sort((a, b) => {
+      const aGrams = a.unit === 'kg' ? a.weight * 1000 : a.weight;
+      const bGrams = b.unit === 'kg' ? b.weight * 1000 : b.weight;
+      return aGrams - bGrams;
+    });
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].price <= sorted[i - 1].price) {
+        const prevLabel = sorted[i - 1].unit === 'kg' ? `${sorted[i - 1].weight} kg` : `${sorted[i - 1].weight} g`;
+        const currLabel = sorted[i].unit === 'kg' ? `${sorted[i].weight} kg` : `${sorted[i].weight} g`;
+        feedback.textContent = `Price for ${currLabel} (₹${sorted[i].price}) must be higher than price for ${prevLabel} (₹${sorted[i - 1].price}). Larger weights must cost more.`;
+        feedback.classList.remove('hidden');
+        feedback.style.color = 'var(--color-danger)';
+        return;
+      }
+    }
+
+    // Check for duplicate product name across all categories
+    const nameDup = _adminProducts.find(p =>
+      p.name.toLowerCase() === name.toLowerCase() &&
+      p.id !== editId
+    );
+    if (nameDup) {
+      feedback.textContent = `A product with the name "${name}" already exists. Product names must be unique.`;
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+
     const method = editId ? 'PUT' : 'POST';
     const url = editId ? `${API_BASE}/products/${editId}` : `${API_BASE}/products`;
-    const body = buildProductBody({ name, category, description, numericPrice, numericMrp, gstRate: gst_rate, image_url, productId, editId });
+    const body = buildProductBody({ name, category, description, gstRate: gst_rate, image_url, productId, editId, weightPricing });
 
     const { res, data } = await submitJson(url, method, body);
     if (res.ok) {
@@ -2221,6 +2360,8 @@ function resetAdminForm() {
   const feedback = document.getElementById('admin-add-feedback');
   if (feedback) feedback.classList.add('hidden');
   updateProductIdDisplay();
+  // Reset weight pricing to single empty row
+  setWeightPricingData(null);
 }
 
 function updateImagePreview() {
@@ -2374,6 +2515,11 @@ function setupAdminEventHandlers() {
   // Product form
   if (productForm) productForm.addEventListener('submit', handleAdminAddProduct);
   if (resetFormBtn) resetFormBtn.addEventListener('click', resetAdminForm);
+  if (btnAddWeightRow) {
+    btnAddWeightRow.addEventListener('click', () => {
+      weightPricingContainer.appendChild(createWeightRow(null));
+    });
+  }
 
   // Category handlers
   if (saveCatBtn) saveCatBtn.addEventListener('click', handleAdminSaveCategory);
@@ -2548,13 +2694,29 @@ function setupAdminEventHandlers() {
   globalThis.fetchAdminBlogs = fetchAdminBlogs;
   globalThis.copyInvoiceLink = copyInvoiceLink;
   globalThis.renderAdminOrders = renderAdminOrders;
+
+  // Initialize weight pricing with one empty row
+  if (weightPricingContainer && !weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
+    setWeightPricingData(null);
+  }
 }
 
-function initAdminPage() {
+async function initAdminPage() {
   setupAdminEventHandlers();
   // Initialize UI state — only show dashboard if the logged-in user is an admin
   if (state.token && state.user && state.user.role === 'admin') {
-    showDashboard();
+    try {
+      const user = await authApi.getMe();
+      if (user && user.role === 'admin') {
+        state.user = user;
+        showDashboard();
+        return;
+      }
+    } catch (_err) {
+      // Token is invalid/expired — clear and show login
+    }
+    clearAuth();
+    showLoginPanel();
   } else {
     // If a non-admin user is logged in, clear their auth so the admin login works cleanly
     if (state.token && state.user && state.user.role !== 'admin') {

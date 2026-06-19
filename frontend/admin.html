@@ -819,14 +819,6 @@
               <textarea id="admin-prod-desc" required placeholder="Product details, cultivation notes..."
                 class="admin-textarea-compact"></textarea>
             </div>
-            <div class="input-field">
-              <label>Actual Price (₹) *</label>
-              <input type="number" step="0.01" id="admin-prod-price" required placeholder="350.00" />
-            </div>
-            <div class="input-field">
-              <label>MRP / Strikeout (₹)</label>
-              <input type="number" step="0.01" id="admin-prod-mrp" placeholder="499.00" />
-            </div>
             <!-- Stock quantity removed from product form (managed server-side) -->
             <div class="input-field">
               <label>GST Slab (%)</label>
@@ -837,6 +829,30 @@
                 <option value="18">18% (Standard+)</option>
                 <option value="28">28% (Luxury)</option>
               </select>
+            </div>
+            <div class="input-field span-2">
+              <label>Weight-Based Pricing * <span style="font-weight:400;font-size:0.8rem;color:#e74c3c;">(add at least one variant)</span></label>
+              <div id="admin-weight-pricing-container">
+                <div class="admin-weight-pricing-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                  <select class="admin-weight-select" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+                    <option value="">Select weight</option>
+                    <option value="100g">100 g</option>
+                    <option value="200g">200 g</option>
+                    <option value="250g">250 g</option>
+                    <option value="400g">400 g</option>
+                    <option value="500g">500 g</option>
+                    <option value="1kg">1 kg</option>
+                    <option value="2kg">2 kg</option>
+                    <option value="5kg">5 kg</option>
+                  </select>
+                  <input type="number" step="0.01" class="admin-weight-price" placeholder="Price (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
+                  <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
+                  <button type="button" class="btn-weight-remove" style="background:none;border:none;color:#e74c3c;cursor:pointer;padding:4px;"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+              </div>
+              <button type="button" id="btn-add-weight-row" class="btn btn-secondary" style="margin-top:4px;font-size:0.82rem;padding:4px 12px;">
+                <i class="fa-solid fa-plus"></i> Add Weight
+              </button>
             </div>
             <div class="input-field">
               <label>Product Image</label>

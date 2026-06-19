@@ -1,12 +1,12 @@
-const db = require('../config/db');
+const db = require("../config/db");
 
 async function findByEmail(email) {
   const { data, error } = await db
-    .from('users')
-    .select('*')
-    .eq('email', email)
+    .from("users")
+    .select("*")
+    .eq("email", email)
     .single();
-  if (error && error.message === 'No rows found') {
+  if (error && error.message === "No rows found") {
     return { data: null, error: null };
   }
   return { data, error };
@@ -14,11 +14,11 @@ async function findByEmail(email) {
 
 async function findByPhone(phone) {
   const { data, error } = await db
-    .from('users')
-    .select('*')
-    .eq('whatsapp_number', phone.replace(/^\+91/, '').replace(/\s/g, '').trim())
+    .from("users")
+    .select("*")
+    .eq("whatsapp_number", phone.replace(/^\+91/, "").replace(/\s/g, "").trim())
     .single();
-  if (error && error.message === 'No rows found') {
+  if (error && error.message === "No rows found") {
     return { data: null, error: null };
   }
   return { data, error };
@@ -26,26 +26,26 @@ async function findByPhone(phone) {
 
 async function findById(id) {
   const { data, error } = await db
-    .from('users')
-    .select('*')
-    .eq('id', id)
+    .from("users")
+    .select("*")
+    .eq("id", id)
     .single();
-  if (error && error.message === 'No rows found') {
+  if (error && error.message === "No rows found") {
     return { data: null, error: null };
   }
   return { data, error };
 }
 
 async function create(payload) {
-  const { data, error } = await db.from('users').insert(payload).single();
+  const { data, error } = await db.from("users").insert(payload).single();
   return { data, error };
 }
 
 async function update(id, updates) {
   const { data, error } = await db
-    .from('users')
+    .from("users")
     .update(updates)
-    .eq('id', id)
+    .eq("id", id)
     .single();
   return { data, error };
 }
@@ -53,10 +53,10 @@ async function update(id, updates) {
 async function remove(id) {
   const { data: existing, error: getErr } = await findById(id);
   if (getErr || !existing) {
-    return { data: null, error: { message: 'No rows found' } };
+    return { data: null, error: { message: "No rows found" } };
   }
 
-  await db.from('users').delete().eq('id', id);
+  await db.from("users").delete().eq("id", id);
   return { data: existing, error: null };
 }
 
