@@ -1,7 +1,11 @@
+// Restore persisted session on page load
+const savedToken = (() => { try { return sessionStorage.getItem('jwt_token'); } catch { return null; } })();
+const savedUser = (() => { try { const u = sessionStorage.getItem('user_data'); return u ? JSON.parse(u) : null; } catch { return null; } })();
+
 export const state = {
-  token: sessionStorage.getItem('jwt_token') || null,
-  user: JSON.parse(sessionStorage.getItem('user_data')) || null,
-  cart: JSON.parse(localStorage.getItem('cart_data')) || [],
+  token: savedToken,
+  user: savedUser,
+  cart: [],
   products: [],
   orders: [],
   activePromo: null,

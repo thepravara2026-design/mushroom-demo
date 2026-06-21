@@ -12,6 +12,8 @@ import { profileModal } from './components/ProfileModal.js';
 import { authApi } from './api/authApi.js';
 import { trainingApi } from './api/trainingApi.js';
 import { blogApi } from './api/blogApi.js';
+import { searchApi } from './api/searchApi.js';
+import { locationApi } from './api/locationApi.js';
 import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
 import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal } from './utils/notify.js';
 import { isValidIndianPhone } from './utils/validation.js';
@@ -20,37 +22,35 @@ import { createEventSourceWithAuth } from './utils/auth.js';
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
 
-const STATE_CITIES = {
-  "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kurnool", "Rajahmundry", "Kadapa"],
-  "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tawang"],
-  "Assam": ["Guwahati", "Dibrugarh", "Silchar", "Jorhat", "Nagaon", "Tinsukia"],
-  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Ara"],
-  "Chhattisgarh": ["Raipur", "Bhilai", "Bilaspur", "Korba", "Rajnandgaon"],
-  "Delhi": ["New Delhi", "Delhi Cantt", "Dwarka", "Rohini", "Saket", "Vasant Kunj"],
-  "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa"],
-  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar"],
-  "Haryana": ["Faridabad", "Gurugram", "Panipat", "Ambala", "Yamunanagar", "Rohtak", "Hisar"],
-  "Himachal Pradesh": ["Shimla", "Dharamshala", "Solan", "Mandi"],
-  "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Deoghar"],
-  "Karnataka": ["Bengaluru", "Davangere", "Mysuru", "Hubballi", "Mangaluru", "Belagavi", "Tumakuru", "Ballari", "Shimoga"],
-  "Kerala": ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur", "Kollam", "Alappuzha", "Palakkad"],
-  "Madhya Pradesh": ["Indore", "Bhopal", "Jabalpur", "Gwalior", "Ujjain", "Sagar", "Dewas"],
-  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Kalyan-Dombivli", "Vasai-Virar", "Aurangabad", "Navi Mumbai", "Solapur"],
-  "Manipur": ["Imphal", "Thoubal"],
-  "Meghalaya": ["Shillong", "Tura"],
-  "Mizoram": ["Aizawl", "Lunglei"],
-  "Nagaland": ["Dimapur", "Kohima"],
-  "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Berhampur", "Sambalpur"],
-  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda"],
-  "Rajasthan": ["Jaipur", "Jodhpur", "Udaipur", "Kota", "Bikaner", "Ajmer", "Bhilwara"],
-  "Sikkim": ["Gangtok", "Namchi"],
-  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tiruppur", "Erode", "Vellore"],
-  "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar", "Khammam", "Ramagundam"],
-  "Tripura": ["Agartala", "Dharmanagar"],
-  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Meerut", "Varanasi", "Prayagraj", "Noida", "Greater Noida", "Bareilly", "Aligarh"],
-  "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani"],
-  "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "Siliguri", "Asansol", "Durgapur", "Kharagpur"]
-};
+let _statesCache = [];
+let _citiesCache = {};
+let _checkoutFormOriginalHTML = null;
+
+async function _loadStates() {
+  try {
+    _statesCache = await locationApi.getStates();
+    const checkoutStateSelect = document.getElementById('checkout-state');
+    if (checkoutStateSelect && checkoutStateSelect.options.length <= 1) {
+      checkoutStateSelect.innerHTML = '<option value="">Select State</option>' +
+        _statesCache.map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+  } catch {
+    _statesCache = [];
+  }
+}
+
+async function _loadCities(state) {
+  if (!state) return [];
+  if (_citiesCache[state]) return _citiesCache[state];
+  try {
+    const cities = await locationApi.getCities(state);
+    _citiesCache[state] = cities;
+    return cities;
+  } catch {
+    return [];
+  }
+}
+
 // Storefront pagination/sort state
 let _shopInventoryPage = 1;
 let shopPageSize = 10;
@@ -92,19 +92,6 @@ function _saveRecentlyReadBlog(slug) {
 
 function getShopInventorySortValue() {
   return document.getElementById('shop-inventory-sort')?.value || 'name_asc';
-}
-
-function applyShopInventorySort(products) {
-  const sortValue = getShopInventorySortValue();
-  const [sortKey, sortDirection] = sortValue.split('_');
-  const multiplier = sortDirection === 'desc' ? -1 : 1;
-  return [...products].sort((a, b) => {
-    if (sortKey === 'price') return multiplier * ((a.price || 0) - (b.price || 0));
-    if (sortKey === 'stock') return multiplier * ((a.stock || 0) - (b.stock || 0));
-    const nameA = String(a.name || '').toLowerCase();
-    const nameB = String(b.name || '').toLowerCase();
-    return multiplier * nameA.localeCompare(nameB);
-  });
 }
 
 // ── Inactivity auto-logout ──────────────────────────────────────
@@ -150,13 +137,20 @@ function _stopInactivityTracking() {
 }
 
 // Initialize App
+function _saveCheckoutFormTemplate() {
+  const fp = document.querySelector('.checkout-form-panel');
+  if (fp && !_checkoutFormOriginalHTML) _checkoutFormOriginalHTML = fp.innerHTML;
+}
+
 function initApp() {
   window.scrollTo(0, 0);
   initEventListeners();
+  _saveCheckoutFormTemplate();
   loadUser();
   fetchProducts();
   fetchCategories(); // Load categories for nav + admin
   fetchShippingSettings();
+  _loadStates();
   updateCartUI();
   initThreeJS();
   initScrollReveal();
@@ -338,7 +332,7 @@ function renderCategoryGrid(categories) {
   }
 }
 
-function handleRouting() {
+function handleRouting(opts = {}) {
   const hash = window.location.hash || '#shop';
   const navShop = document.getElementById('btn-nav-shop');
   const navTrack = document.getElementById('btn-nav-track');
@@ -392,14 +386,7 @@ function handleRouting() {
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   } else if (hash === '#checkout') {
-    if (!state.user) {
-      authModal.open('buyer', () => {
-        window.location.hash = '#checkout';
-      });
-      return;
-    }
-
-    if (state.user.role === 'grower') {
+    if (state.user && (state.user.role === 'grower' || state.user.role === 'admin')) {
       if (heroSection) heroSection.classList.remove('hidden');
       window.location.hash = '#shop';
       return;
@@ -410,9 +397,13 @@ function handleRouting() {
     renderCheckoutPage();
   } else if (hash.startsWith('#track')) {
     if (!state.user) {
-      authModal.open('buyer', () => {
-        window.location.hash = '#track';
-      });
+      if (!opts.fromAuthChanged) {
+        authModal.open('buyer', () => {
+          window.location.hash = '#track';
+        });
+      } else {
+        window.location.hash = '#shop';
+      }
       return;
     }
 
@@ -587,10 +578,10 @@ function initEventListeners() {
     e.preventDefault();
     if (!state.user) {
       authModal.open('buyer', () => {
-        window.location.hash = '#track';
+        profileModal.open('orders');
       });
     } else {
-      window.location.hash = '#track';
+      profileModal.open('orders');
     }
   });
 
@@ -726,7 +717,7 @@ function initEventListeners() {
   // Listen for global auth changes from new modules
   window.addEventListener('auth:changed', () => {
     updateAuthHeaderUI();
-    handleRouting();
+    handleRouting({ fromAuthChanged: true });
   });
 
   // Cart Slide Out Drawer
@@ -772,13 +763,17 @@ function initEventListeners() {
   const checkoutStateSelect = document.getElementById('checkout-state');
   const checkoutCitySelect = document.getElementById('checkout-city');
 
-  const updateCheckoutCities = (selectedState, defaultCity = '') => {
+  const updateCheckoutCities = async (selectedState, defaultCity = '') => {
     if (!checkoutCitySelect) return;
-    if (!selectedState || !STATE_CITIES[selectedState]) {
+    if (!selectedState) {
       checkoutCitySelect.innerHTML = '<option value="">Select State first</option>';
       return;
     }
-    const cities = STATE_CITIES[selectedState];
+    const cities = await _loadCities(selectedState);
+    if (!cities.length && !_citiesCache[selectedState]) {
+      checkoutCitySelect.innerHTML = '<option value="">Select State first</option>';
+      return;
+    }
     checkoutCitySelect.innerHTML = '<option value="">Select City</option>' +
       cities.map(c => `<option value="${c}">${c}</option>`).join('');
 
@@ -795,7 +790,7 @@ function initEventListeners() {
 
   if (checkoutStateSelect) {
     checkoutStateSelect.innerHTML = '<option value="">Select State</option>' +
-      Object.keys(STATE_CITIES).map(s => `<option value="${s}">${s}</option>`).join('');
+      _statesCache.map(s => `<option value="${s}">${s}</option>`).join('');
 
     checkoutStateSelect.addEventListener('change', (e) => {
       updateCheckoutCities(e.target.value);
@@ -816,7 +811,7 @@ function initEventListeners() {
             const fetchedCity = postOffice.District || postOffice.Region || '';
 
             if (fetchedState && checkoutStateSelect) {
-              if (!STATE_CITIES[fetchedState]) {
+              if (!_statesCache.includes(fetchedState) && !checkoutStateSelect.querySelector(`option[value="${CSS.escape(fetchedState)}"]`)) {
                 const opt = document.createElement('option');
                 opt.value = fetchedState;
                 opt.textContent = fetchedState;
@@ -857,13 +852,26 @@ function initEventListeners() {
   // Search input filtering
   const searchInput = document.getElementById('shop-search');
   if (searchInput) {
+    let searchDebounceTimer;
     searchInput.addEventListener('input', () => {
       _shopInventoryPage = 1;
-      filterProducts();
-      updateSearchSuggestions(searchInput.value);
+      fetchProducts();
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        updateSearchSuggestions(searchInput.value);
+      }, 250);
     });
     searchInput.addEventListener('focus', () => {
       if (searchInput.value.trim()) updateSearchSuggestions(searchInput.value);
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const dd = document.getElementById('search-suggestions-dropdown');
+        if (dd && !dd.classList.contains('hidden')) {
+          const firstItem = dd.querySelector('.suggestion-item');
+          if (firstItem) firstItem.click();
+        }
+      }
     });
   }
 
@@ -890,7 +898,7 @@ function initEventListeners() {
       btn.classList.add('active');
       state.activeCategory = btn.getAttribute('data-category') || 'all';
       _shopInventoryPage = 1;
-      filterProducts();
+      fetchProducts();
     });
   });
 
@@ -898,7 +906,7 @@ function initEventListeners() {
   if (shopSortSelect) {
     shopSortSelect.addEventListener('change', () => {
       _shopInventoryPage = 1;
-      filterProducts();
+      fetchProducts();
     });
   }
   const shopPageSizeSelect = document.getElementById('shop-inventory-page-size');
@@ -906,7 +914,7 @@ function initEventListeners() {
     shopPageSizeSelect.addEventListener('change', () => {
       shopPageSize = parseInt(shopPageSizeSelect.value, 10) || 10;
       _shopInventoryPage = 1;
-      filterProducts();
+      fetchProducts();
     });
   }
 
@@ -1070,30 +1078,16 @@ function initEventListeners() {
 // ==========================================================================
 async function loadUser() {
   if (!state.token) {
-    // No sessionStorage token — try to restore from HTTP-only cookie
-    // Use raw fetch to avoid fetchWithAuth's 401 → reload loop
-    try {
-      const res = await fetch(`${API_BASE}/auth/me`, {
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (res.ok) {
-        const body = await res.json();
-        const user = body.data || body;
-        state.user = user;
-        updateAuthHeaderUI();
-        handleRouting();
-      } else {
-        updateAuthHeaderUI();
-      }
-    } catch {
-      updateAuthHeaderUI();
-    }
+    state.user = null;
+    updateAuthHeaderUI();
+    handleRouting();
     return;
   }
 
+  const tokenAtStart = state.token;
   try {
     const user = await authApi.getMe();
+    if (state.token !== tokenAtStart) return;
     state.user = user;
     updateAuthHeaderUI();
     try {
@@ -1101,8 +1095,12 @@ async function loadUser() {
     } catch (e) { }
     handleRouting(); // trigger routing refresh for access checks
   } catch (err) {
-    showErrorToast(getApiErrorMessage(err));
-    logout();
+    if (state.token !== tokenAtStart) return;
+    clearAuth();
+    updateAuthHeaderUI();
+    if (window.location.hash === '#checkout' || window.location.hash.startsWith('#track')) {
+      window.location.hash = '#shop';
+    }
   }
 }
 
@@ -1204,9 +1202,18 @@ function updateAuthHeaderUI() {
     if (state.user.role === 'admin') {
       navAdmin.style.display = 'inline-flex';
       if (navAdminEntry) navAdminEntry.style.display = 'none';
+      // Hide cart for admins
+      const cartTrigger = document.getElementById('btn-open-cart');
+      if (cartTrigger) cartTrigger.style.display = 'none';
+      const mobileCart = document.getElementById('btn-mobile-cart');
+      if (mobileCart) mobileCart.style.display = 'none';
     } else {
       navAdmin.style.display = 'none';
       if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
+      const cartTrigger = document.getElementById('btn-open-cart');
+      if (cartTrigger) cartTrigger.style.display = '';
+      const mobileCart = document.getElementById('btn-mobile-cart');
+      if (mobileCart) mobileCart.style.display = '';
     }
   } else {
     profileSection.innerHTML = '';
@@ -1227,11 +1234,35 @@ function updateAuthHeaderUI() {
 // ==========================================================================
 // CATALOG CONTROLLERS & DATA FITTING
 // ==========================================================================
+let _shopPagination = null;
+
 async function fetchProducts() {
   try {
-    const products = await fetchWithAuth('/products');
-    state.products = products;
-    renderProducts(state.products);
+    const params = new URLSearchParams();
+    const sort = getShopInventorySortValue();
+    if (sort && sort !== 'name_asc') params.set('sort', sort);
+    const cat = state.activeCategory;
+    if (cat && cat !== 'all') params.set('category', cat);
+    const search = document.getElementById('shop-search')?.value?.trim();
+    if (search) params.set('search', search);
+    params.set('page', _shopInventoryPage);
+    params.set('limit', shopPageSize);
+
+    const path = `/products?${params.toString()}`;
+    const result = await fetchWithAuth(path);
+
+    if (Array.isArray(result)) {
+      state.products = result;
+      _shopPagination = null;
+    } else if (result && typeof result === 'object' && result.products) {
+      state.products = result.products;
+      _shopPagination = result.pagination;
+      _shopInventoryPage = result.pagination?.page || _shopInventoryPage;
+    } else {
+      state.products = [];
+      _shopPagination = null;
+    }
+    renderProducts();
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
     document.getElementById('product-grid').innerHTML = `
@@ -1253,9 +1284,11 @@ function _getStockMeta(stock) {
   return { label: 'Few Available', variant: 'few' };
 }
 
-function renderProducts(productsList) {
+function renderProducts() {
   const grid = document.getElementById('product-grid');
   if (!grid) return;
+
+  const productsList = state.products;
 
   if (!productsList || productsList.length === 0) {
     grid.innerHTML = `
@@ -1267,12 +1300,10 @@ function renderProducts(productsList) {
     return;
   }
 
-  // Apply sorting and pagination
-  const sorted = applyShopInventorySort(productsList);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / shopPageSize));
-  if (_shopInventoryPage > totalPages) _shopInventoryPage = totalPages;
-  const start = (_shopInventoryPage - 1) * shopPageSize;
-  const pageProducts = sorted.slice(start, start + shopPageSize);
+  // Server already sorted and paginated — no local sorting/pagination needed
+  const pageProducts = productsList;
+
+  const isAdmin = state.user?.role === 'admin';
 
   const html = pageProducts
     .map((prod, idx) => {
@@ -1282,46 +1313,86 @@ function renderProducts(productsList) {
       const discountPct = hasMrp
         ? Math.round((1 - fallbackPrice / prod.mrp_price) * 100)
         : 0;
-      const stockMeta = _getStockMeta(prod.stock);
+      const stockMeta = prod.stock_status || _getStockMeta(prod.stock);
       const hasWeights = Array.isArray(prod.weight_pricing) && prod.weight_pricing.length > 0;
       const defaultWeight = hasWeights ? prod.weight_pricing[0] : null;
+
+      const galleryImages = (prod.image_urls && prod.image_urls.length > 0) ? prod.image_urls : [prod.image_url];
+      const mainImage = galleryImages[0] || prod.image_url;
+      const carouselId = `carousel-${prod.id}`;
 
       return `
         <div class="product-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
           <div class="product-img-wrapper">
-            <img src="${prod.image_url}" alt="${prod.name}" loading="lazy">
-            <span class="product-gst-badge">${prod.gst_rate}% GST</span>
-            <span class="tag tag-stock tag-stock-${stockMeta.variant}">${stockMeta.label}</span>
-            ${hasMrp ? `<span class="product-discount-badge" style="position:absolute;top:10px;right:10px;">${discountPct}% OFF</span>` : ''}
+            <div class="product-carousel" id="${carouselId}" data-images='${JSON.stringify(galleryImages.map(img => img || prod.image_url).filter(Boolean)).replace(/'/g, "&#39;")}'>
+              <div class="carousel-track">
+                ${galleryImages.filter(Boolean).map((img, i) => `
+                  <img src="${img}" alt="${prod.name} - ${i + 1}" loading="lazy" class="carousel-slide ${i === 0 ? 'active' : ''}">
+                `).join('')}
+              </div>
+              ${galleryImages.length > 1 ? `
+                <button type="button" class="carousel-btn carousel-prev" data-carousel="${carouselId}"><i class="fa-solid fa-chevron-left"></i></button>
+                <button type="button" class="carousel-btn carousel-next" data-carousel="${carouselId}"><i class="fa-solid fa-chevron-right"></i></button>
+                <div class="carousel-dots">
+                  ${galleryImages.filter(Boolean).map((_, i) => `
+                    <span class="carousel-dot ${i === 0 ? 'active' : ''}" data-index="${i}" data-carousel="${carouselId}"></span>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+            <div class="product-badges-overlay">
+              <span class="tag tag-stock tag-stock-${stockMeta.variant}">${stockMeta.label}</span>
+              <span class="product-gst-badge">${prod.gst_rate}% GST</span>
+            </div>
+            ${hasMrp ? `
+              <span class="product-discount-badge" data-prod-id="${prod.id}">${discountPct}% OFF</span>
+            ` : `
+              <span class="product-discount-badge" data-prod-id="${prod.id}" style="display: none;"></span>
+            `}
           </div>
           <div class="product-info">
-            <span class="product-category-lbl">${catLabel}</span>
+            <div class="product-meta-row">
+              <span class="product-category-lbl">${catLabel}</span>
+              <span class="product-free-shipping-badge"><i class="fa-solid fa-truck-fast"></i> Free Shipping</span>
+            </div>
             <h3>${prod.name}</h3>
             <p class="product-desc">${prod.description}</p>
+            
             ${hasWeights ? `
               <div class="product-weight-selector">
-                <select class="weight-select" data-prod-id="${prod.id}">
+                <span class="selector-lbl">Select Variant:</span>
+                <div class="weight-chips-container">
                   ${prod.weight_pricing.map(w => {
-                    const label = w.unit === 'kg' ? `${w.weight} kg` : `${w.weight} g`;
-                    const isDefault = w === defaultWeight;
-                    return `<option value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}" ${isDefault ? 'selected' : ''}>${label}</option>`;
-                  }).join('')}
-                </select>
+        const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
+        const isDefault = w === defaultWeight;
+        return `
+                      <button type="button" class="weight-chip ${isDefault ? 'active' : ''}" 
+                        data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}" 
+                        data-prod-id="${prod.id}">
+                        ${label}
+                      </button>
+                    `;
+      }).join('')}
+                </div>
               </div>
             ` : ''}
+            
             <div class="product-card-footer">
-              <div>
+              <div class="product-price-section">
                 <div class="product-price-wrap">
                   <span class="product-price" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight ? defaultWeight.price : fallbackPrice)}</span>
                   ${defaultWeight && defaultWeight.mrp_price && defaultWeight.mrp_price > defaultWeight.price
-                    ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight.mrp_price)}</span>`
-                    : hasMrp ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(prod.mrp_price)}</span>` : ''}
+          ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight.mrp_price)}</span>`
+          : hasMrp ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(prod.mrp_price)}</span>` : `<span class="product-mrp" data-prod-id="${prod.id}" style="display: none;"></span>`}
                 </div>
-                <span class="product-free-shipping-badge">Free shipping</span>
               </div>
-              <button class="btn-card-add" data-id="${prod.id}">
-                <i class="fa-solid fa-cart-plus"></i>
-              </button>
+              ${isAdmin ? `
+                <span class="admin-view-badge"><i class="fa-solid fa-eye"></i> View Only</span>
+              ` : `
+                <button class="btn-card-add" data-id="${prod.id}" title="Add to Cart">
+                  <i class="fa-solid fa-cart-plus"></i> Add
+                </button>
+              `}
             </div>
           </div>
         </div>
@@ -1343,9 +1414,53 @@ function renderProducts(productsList) {
   // interactions
   grid.querySelectorAll('.product-card').forEach((card) => {
     card.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-card-add')) return;
+      if (e.target.closest('.btn-card-add') || e.target.closest('.weight-chip')) return;
       const id = card.getAttribute('data-id');
-      openProductDetails(id);
+      if (isAdmin) {
+        openProductDetails(id);
+      } else {
+        showQuickAddModal(id);
+      }
+    });
+  });
+
+  // Product carousel interactions
+  grid.querySelectorAll('.carousel-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const carouselId = btn.getAttribute('data-carousel');
+      const carousel = document.getElementById(carouselId);
+      if (!carousel) return;
+      const slides = carousel.querySelectorAll('.carousel-slide');
+      const dots = carousel.querySelectorAll('.carousel-dot');
+      if (slides.length === 0) return;
+      const currentIndex = carousel.querySelector('.carousel-slide.active') ? Array.from(slides).indexOf(carousel.querySelector('.carousel-slide.active')) : 0;
+      let newIndex = currentIndex;
+      if (btn.classList.contains('carousel-prev')) {
+        newIndex = (currentIndex - 1 + slides.length) % slides.length;
+      } else {
+        newIndex = (currentIndex + 1) % slides.length;
+      }
+      carousel.querySelectorAll('.carousel-slide').forEach(s => s.classList.remove('active'));
+      carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
+      if (slides[newIndex]) slides[newIndex].classList.add('active');
+      if (dots[newIndex]) dots[newIndex].classList.add('active');
+    });
+  });
+
+  grid.querySelectorAll('.carousel-dot').forEach((dot) => {
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const carouselId = dot.getAttribute('data-carousel');
+      const index = parseInt(dot.getAttribute('data-index'), 10);
+      const carousel = document.getElementById(carouselId);
+      if (!carousel) return;
+      const slides = carousel.querySelectorAll('.carousel-slide');
+      const dots = carousel.querySelectorAll('.carousel-dot');
+      carousel.querySelectorAll('.carousel-slide').forEach(s => s.classList.remove('active'));
+      carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
+      if (slides[index]) slides[index].classList.add('active');
+      dot.classList.add('active');
     });
   });
 
@@ -1354,13 +1469,14 @@ function renderProducts(productsList) {
       e.stopPropagation();
       if (btn.disabled) return;
       btn.disabled = true;
+      const origContent = btn.innerHTML;
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
       const id = btn.getAttribute('data-id');
       const product = state.products.find(p => p.id === id);
-      const sel = grid.querySelector(`.weight-select[data-prod-id="${id}"]`);
+      const activeChip = grid.querySelector(`.weight-chip.active[data-prod-id="${id}"]`);
       let weightInfo = null;
-      if (sel) {
-        const parts = sel.value.split('_');
+      if (activeChip) {
+        const parts = activeChip.getAttribute('data-value').split('_');
         if (parts.length >= 4) {
           weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
         }
@@ -1368,21 +1484,32 @@ function renderProducts(productsList) {
       addToCart(id, weightInfo);
       setTimeout(() => {
         btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-cart-plus"></i>';
+        btn.innerHTML = origContent;
       }, 600);
     });
   });
 
-  // Weight selector change: update displayed price
-  grid.querySelectorAll('.weight-select').forEach((sel) => {
-    sel.addEventListener('change', () => {
-      const parts = sel.value.split('_');
+  // Weight chip change: update displayed price, active state and discount badge
+  grid.querySelectorAll('.weight-chip').forEach((chip) => {
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prodId = chip.getAttribute('data-prod-id');
+
+      // Remove active class from all other chips of this product
+      grid.querySelectorAll(`.weight-chip[data-prod-id="${prodId}"]`).forEach(c => c.classList.remove('active'));
+
+      // Set active
+      chip.classList.add('active');
+
+      const parts = chip.getAttribute('data-value').split('_');
       if (parts.length < 4) return;
       const price = parseFloat(parts[2]);
       const mrp = parts[3] ? parseFloat(parts[3]) : null;
-      const prodId = sel.getAttribute('data-prod-id');
+
       const priceEl = grid.querySelector(`.product-price[data-prod-id="${prodId}"]`);
       const mrpEl = grid.querySelector(`.product-mrp[data-prod-id="${prodId}"]`);
+      const discountEl = grid.querySelector(`.product-discount-badge[data-prod-id="${prodId}"]`);
+
       if (priceEl) priceEl.textContent = _formatCurrency(price);
       if (mrpEl) {
         if (mrp && mrp > price) {
@@ -1392,51 +1519,49 @@ function renderProducts(productsList) {
           mrpEl.style.display = 'none';
         }
       }
+
+      if (discountEl) {
+        if (mrp && mrp > price) {
+          const discountPct = Math.round((1 - price / mrp) * 100);
+          discountEl.textContent = `${discountPct}% OFF`;
+          discountEl.style.display = '';
+        } else {
+          discountEl.style.display = 'none';
+        }
+      }
     });
   });
 
   // Pagination controls
   const paginationWrap = document.getElementById('product-pagination');
   if (paginationWrap) {
+    const totalPages = _shopPagination ? _shopPagination.totalPages : Math.max(1, Math.ceil(productsList.length / shopPageSize));
+    const totalItems = _shopPagination ? _shopPagination.total : productsList.length;
+    if (_shopInventoryPage > totalPages) _shopInventoryPage = totalPages;
+
     paginationWrap.innerHTML = `
   <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding: 0 4px;">
-    <button type="button" id="shop-page-prev" ${_shopInventoryPage === 1 ? 'disabled' : ''} 
-      style="background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:1.4rem; padding:4px 8px; opacity:${_shopInventoryPage === 1 ? '0.3' : '1'};">
-      <i class="fa-solid fa-chevron-left">prev</i>
-    </button>
-    <button type="button" id="shop-page-next" ${_shopInventoryPage === totalPages ? 'disabled' : ''}
-      style="background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:1.4rem; padding:4px 8px; opacity:${_shopInventoryPage === totalPages ? '0.3' : '1'};">
-      <i class="fa-solid fa-chevron-right">next</i>
-    </button>
+    <span style="font-size:0.85rem; color:var(--color-text-muted);">
+      ${totalItems > 0 ? `Page ${_shopInventoryPage} of ${totalPages} (${totalItems} products)` : ''}
+    </span>
+    <div>
+      <button type="button" id="shop-page-prev" ${_shopInventoryPage <= 1 ? 'disabled' : ''} 
+        style="background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:1.4rem; padding:4px 8px; opacity:${_shopInventoryPage <= 1 ? '0.3' : '1'};">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <button type="button" id="shop-page-next" ${_shopInventoryPage >= totalPages ? 'disabled' : ''}
+        style="background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:1.4rem; padding:4px 8px; opacity:${_shopInventoryPage >= totalPages ? '0.3' : '1'};">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+    </div>
   </div>
 `;
 
     const prev = document.getElementById('shop-page-prev');
     const next = document.getElementById('shop-page-next');
-    if (prev) prev.addEventListener('click', () => { if (_shopInventoryPage > 1) { _shopInventoryPage -= 1; renderProducts(productsList); } });
-    if (next) next.addEventListener('click', () => { if (_shopInventoryPage < totalPages) { _shopInventoryPage += 1; renderProducts(productsList); } });
+    if (prev) prev.addEventListener('click', () => { if (_shopInventoryPage > 1) { _shopInventoryPage -= 1; fetchProducts(); } });
+    if (next) next.addEventListener('click', () => { if (_shopInventoryPage < totalPages) { _shopInventoryPage += 1; fetchProducts(); } });
   }
-}
-
-function filterProducts() {
-  _shopInventoryPage = 1;
-  const query = document.getElementById('shop-search').value.toLowerCase();
-  const selectedCat = state.activeCategory || 'all';
-
-  let filtered = state.products;
-
-  if (selectedCat && selectedCat !== 'all') {
-    filtered = filtered.filter((p) => p.category === selectedCat);
-  }
-
-  if (query.trim() !== '') {
-    filtered = filtered.filter(
-      (p) => p.name.toLowerCase().includes(query)
-        || p.description.toLowerCase().includes(query),
-    );
-  }
-
-  renderProducts(filtered);
 }
 
 // Category navigation helper (used by navbar, footer, and category cards)
@@ -1453,7 +1578,8 @@ function navigateToCategory(category) {
     b.classList.toggle('active', b.getAttribute('data-category') === category);
   });
 
-  filterProducts();
+  _shopInventoryPage = 1;
+  fetchProducts();
 
   // Scroll to products section
   const productsSection = document.getElementById('products-section');
@@ -1463,37 +1589,43 @@ function navigateToCategory(category) {
 }
 
 // Search autocomplete dropdown
-function updateSearchSuggestions(query) {
+async function updateSearchSuggestions(query) {
   const dd = document.getElementById('search-suggestions-dropdown');
   if (!dd) return;
-  if (!query.trim() || !state.products.length) {
+  if (!query.trim()) {
     dd.classList.add('hidden');
     return;
   }
 
-  const matches = state.products
-    .filter(
-      (p) => p.name.toLowerCase().includes(query.toLowerCase())
-        || p.description.toLowerCase().includes(query.toLowerCase()),
-    )
-    .slice(0, 6);
+  let result;
+  try {
+    result = await searchApi.search(query);
+  } catch {
+    dd.classList.add('hidden');
+    return;
+  }
 
-  if (!matches.length) {
-    dd.innerHTML = `<div class="suggestions-empty"><i class="fa-solid fa-magnifying-glass"></i> No products found for "${query}"</div>`;
+  const { products = [], categories = [], trainings = [] } = result || {};
+  const hasProducts = Array.isArray(products) && products.length > 0;
+  const hasCategories = Array.isArray(categories) && categories.length > 0;
+  const hasTrainings = Array.isArray(trainings) && trainings.length > 0;
+
+  if (!hasProducts && !hasCategories && !hasTrainings) {
+    dd.innerHTML = `<div class="suggestions-empty"><i class="fa-solid fa-magnifying-glass"></i> No results found for "${query}"</div>`;
     dd.classList.remove('hidden');
     return;
   }
 
-  dd.innerHTML = matches
+  const productItems = products
+    .slice(0, 4)
     .map((p) => {
       const hasWeights = Array.isArray(p.weight_pricing) && p.weight_pricing.length > 0;
       const fallbackP = p.price || 0;
       const displayPrice = hasWeights ? p.weight_pricing[0].price : fallbackP;
       const displayMrp = hasWeights && p.weight_pricing[0].mrp_price && p.weight_pricing[0].mrp_price > p.weight_pricing[0].price
         ? p.weight_pricing[0].mrp_price : (p.mrp_price && p.mrp_price > fallbackP ? p.mrp_price : null);
-      const catLabel = p.category === 'spawn' ? 'Spawn' : 'Mushroom';
       return `
-      <div class="suggestion-item" data-id="${p.id}">
+      <div class="suggestion-item" data-type="product" data-id="${p.id}">
         <img src="${p.image_url}" alt="${p.name}">
         <div class="suggestion-item-info">
           <div class="suggestion-item-name">${p.name}</div>
@@ -1502,23 +1634,208 @@ function updateSearchSuggestions(query) {
             ${displayMrp ? `<span class="suggestion-item-mrp">₹${displayMrp.toFixed(2)}</span>` : ''}
           </div>
         </div>
-        <span class="suggestion-item-cat">${catLabel}</span>
+        <span class="suggestion-item-cat">Product</span>
       </div>
     `;
     })
     .join('');
+
+  const categoryItems = categories
+    .slice(0, 4)
+    .map((c) => `
+      <div class="suggestion-item" data-type="category" data-id="${c.id}">
+        <div class="suggestion-item-icon"><i class="fa-solid fa-layer-group"></i></div>
+        <div class="suggestion-item-info">
+          <div class="suggestion-item-name">${c.name}</div>
+          <div class="suggestion-item-sub">${c.description || ''}</div>
+        </div>
+        <span class="suggestion-item-cat">Category</span>
+      </div>
+    `)
+    .join('');
+
+  const trainingItems = trainings
+    .slice(0, 4)
+    .map((t) => {
+      const priceDisplay = t.price_actual
+        ? `<span class="suggestion-item-price">₹${Number(t.price_actual).toFixed(2)}</span>`
+        : '';
+      return `
+      <div class="suggestion-item" data-type="training" data-id="${t.id}">
+        <div class="suggestion-item-icon"><i class="fa-solid fa-graduation-cap"></i></div>
+        <div class="suggestion-item-info">
+          <div class="suggestion-item-name">${t.title}</div>
+          ${priceDisplay}
+        </div>
+        <span class="suggestion-item-cat">${t.category || 'Course'}</span>
+      </div>
+    `;
+    })
+    .join('');
+
+  let html = '';
+  if (productItems) {
+    html += `<div class="suggestions-group-label"><i class="fa-solid fa-bag-shopping"></i> Products</div>${productItems}`;
+  }
+  if (categoryItems) {
+    html += `<div class="suggestions-group-label"><i class="fa-solid fa-layer-group"></i> Categories</div>${categoryItems}`;
+  }
+  if (trainingItems) {
+    html += `<div class="suggestions-group-label"><i class="fa-solid fa-graduation-cap"></i> Training & Courses</div>${trainingItems}`;
+  }
+
+  dd.innerHTML = html;
   dd.classList.remove('hidden');
 
   // Wire click events
   dd.querySelectorAll('.suggestion-item').forEach((item) => {
     item.addEventListener('click', () => {
+      const type = item.getAttribute('data-type');
       const id = item.getAttribute('data-id');
       dd.classList.add('hidden');
       document.getElementById('shop-search').value = '';
-      filterProducts();
-      openProductDetails(id);
+
+      if (type === 'product') {
+        _shopInventoryPage = 1;
+        fetchProducts();
+        openProductDetails(id);
+      } else if (type === 'category') {
+        navigateToCategory(id);
+      } else if (type === 'training') {
+        window.location.hash = '#training-section';
+      }
     });
   });
+}
+
+// Quick add to cart modal
+function showQuickAddModal(productId) {
+  const product = state.products.find((p) => p.id === productId);
+  if (!product) return;
+
+  const modal = document.getElementById('quick-add-modal');
+  const body = document.getElementById('quick-add-body');
+
+  const hasWeights = Array.isArray(product.weight_pricing) && product.weight_pricing.length > 0;
+  const defaultWeight = hasWeights ? product.weight_pricing[0] : null;
+  const fallbackP = product.price || 0;
+  const displayPrice = defaultWeight ? defaultWeight.price : fallbackP;
+  const displayMrp = defaultWeight && defaultWeight.mrp_price && defaultWeight.mrp_price > defaultWeight.price
+    ? defaultWeight.mrp_price : (product.mrp_price && product.mrp_price > fallbackP ? product.mrp_price : null);
+
+  let qty = 1;
+
+  body.innerHTML = `
+    <div class="quick-add-loader" style="display:none"><i class="fa-solid fa-spinner fa-spin loader-icon"></i></div>
+    <div class="quick-add-product">
+      <img src="${product.image_url}" alt="${product.name}">
+      <div class="quick-add-product-info">
+        <div class="quick-add-product-name">${product.name}</div>
+        <div>
+          <span class="quick-add-product-price" id="quick-add-price">₹${displayPrice.toFixed(2)}</span>
+          ${displayMrp ? `<span class="quick-add-product-mrp">₹${displayMrp.toFixed(2)}</span>` : ''}
+        </div>
+      </div>
+    </div>
+    ${hasWeights ? `
+      <div class="quick-add-weight">
+        <span class="quick-add-weight-label">Select Variant</span>
+        <div class="weight-chips-container">
+          ${product.weight_pricing.map(w => {
+    const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
+    const isDefault = w === defaultWeight;
+    return `<button type="button" class="weight-chip ${isDefault ? 'active' : ''}" data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}">${label}</button>`;
+  }).join('')}
+        </div>
+      </div>
+    ` : ''}
+    <div class="quick-add-qty">
+      <span class="quick-add-qty-label">Quantity</span>
+      <div class="quick-add-qty-controls">
+        <button class="quick-add-qty-btn" id="quick-add-qty-minus"><i class="fa-solid fa-minus"></i></button>
+        <span class="quick-add-qty-value" id="quick-add-qty-value">1</span>
+        <button class="quick-add-qty-btn" id="quick-add-qty-plus"><i class="fa-solid fa-plus"></i></button>
+      </div>
+    </div>
+    <div class="quick-add-actions">
+      <button class="btn btn-secondary" id="quick-add-cancel">Cancel</button>
+      <button class="btn btn-primary" id="quick-add-submit"><i class="fa-solid fa-cart-plus"></i> Add to Cart — <span id="quick-add-total">₹${displayPrice.toFixed(2)}</span></button>
+    </div>
+  `;
+
+  modal.classList.add('open');
+
+  // Weight chip handlers
+  body.querySelectorAll('.weight-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      body.querySelectorAll('.weight-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      const parts = chip.getAttribute('data-value').split('_');
+      if (parts.length >= 4) {
+        const price = parseFloat(parts[2]);
+        const mrp = parts[3] ? parseFloat(parts[3]) : null;
+        document.getElementById('quick-add-price').textContent = `₹${price.toFixed(2)}`;
+        document.getElementById('quick-add-total').textContent = `₹${(price * qty).toFixed(2)}`;
+      }
+    });
+  });
+
+  // Qty handlers
+  document.getElementById('quick-add-qty-minus').addEventListener('click', () => {
+    if (qty > 1) {
+      qty -= 1;
+      updateQuickAddTotal();
+    }
+  });
+
+  document.getElementById('quick-add-qty-plus').addEventListener('click', () => {
+    qty += 1;
+    updateQuickAddTotal();
+  });
+
+  function updateQuickAddTotal() {
+    const valEl = document.getElementById('quick-add-qty-value');
+    const totalEl = document.getElementById('quick-add-total');
+    if (valEl) valEl.textContent = qty;
+    const activeChip = body.querySelector('.weight-chip.active');
+    let unitPrice = displayPrice;
+    if (activeChip) {
+      const parts = activeChip.getAttribute('data-value').split('_');
+      if (parts.length >= 4) unitPrice = parseFloat(parts[2]);
+    }
+    if (totalEl) totalEl.textContent = `₹${(unitPrice * qty).toFixed(2)}`;
+  }
+
+  // Cancel
+  document.getElementById('quick-add-cancel').addEventListener('click', closeQuickAdd);
+
+  // Close button
+  document.getElementById('btn-close-quick-add').addEventListener('click', closeQuickAdd);
+
+  // Close on overlay click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeQuickAdd();
+  });
+
+  // Submit
+  document.getElementById('quick-add-submit').addEventListener('click', () => {
+    const activeChip = body.querySelector('.weight-chip.active');
+    let weightInfo = null;
+    if (activeChip) {
+      const parts = activeChip.getAttribute('data-value').split('_');
+      if (parts.length >= 4) {
+        weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
+      }
+    }
+    for (let i = 0; i < qty; i++) {
+      addToCart(product.id, weightInfo);
+    }
+    closeQuickAdd();
+  });
+
+  function closeQuickAdd() {
+    modal.classList.remove('open');
+  }
 }
 
 async function openProductDetails(id) {
@@ -1589,22 +1906,45 @@ async function openProductDetails(id) {
     const displayPrice = defaultW ? defaultW.price : (product.price || 0);
 
     const displayMrp = defaultW && defaultW.mrp_price && defaultW.mrp_price > defaultW.price ? defaultW.mrp_price : (product.mrp_price && product.price && product.mrp_price > product.price ? product.mrp_price : null);
+    const detailImages = (product.image_urls && product.image_urls.length > 0) ? product.image_urls : [product.image_url];
+    const detailCarouselId = `detail-carousel-${product.id}`;
     body.innerHTML = `
       <div class="detail-img-col">
-        <img src="${product.image_url}" alt="${product.name}">
+        <div class="product-carousel" id="${detailCarouselId}" data-images='${JSON.stringify(detailImages.filter(Boolean)).replace(/'/g, "&#39;")}'>
+          <div class="carousel-track">
+            ${detailImages.filter(Boolean).map((img, i) => `
+              <img src="${img}" alt="${product.name} - ${i + 1}" class="carousel-slide ${i === 0 ? 'active' : ''}">
+            `).join('')}
+          </div>
+          ${detailImages.length > 1 ? `
+            <button type="button" class="carousel-btn carousel-prev" data-carousel="${detailCarouselId}"><i class="fa-solid fa-chevron-left"></i></button>
+            <button type="button" class="carousel-btn carousel-next" data-carousel="${detailCarouselId}"><i class="fa-solid fa-chevron-right"></i></button>
+            <div class="carousel-dots">
+              ${detailImages.filter(Boolean).map((_, i) => `
+                <span class="carousel-dot ${i === 0 ? 'active' : ''}" data-index="${i}" data-carousel="${detailCarouselId}"></span>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
       </div>
       <div class="detail-info-col">
         <span class="product-category-lbl">${product.category}</span>
         <h3>${product.name}</h3>
         ${hasWeights ? `
           <div class="detail-weight-selector">
-            <label>Select Weight:</label>
-            <select id="detail-weight-select">
-              ${product.weight_pricing.map(w => {
-                const label = w.unit === 'kg' ? `${w.weight} kg` : `${w.weight} g`;
-                return `<option value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}">${label}</option>`;
-              }).join('')}
-            </select>
+            <label>Select ${hasWeights && (product.weight_pricing[0].unit === 'ml' || product.weight_pricing[0].unit === 'l') ? 'Volume' : 'Weight'}:</label>
+            <div class="detail-weight-chips" id="detail-weight-select-container">
+              ${product.weight_pricing.map((w, wIdx) => {
+      const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
+      const isDefault = wIdx === 0;
+      return `
+                  <button type="button" class="detail-weight-chip ${isDefault ? 'active' : ''}" 
+                    data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}">
+                    ${label}
+                  </button>
+                `;
+    }).join('')}
+            </div>
           </div>
         ` : ''}
         <div class="detail-price-wrap">
@@ -1616,17 +1956,26 @@ async function openProductDetails(id) {
         
         ${metaHTML}
 
-        <button class="btn btn-primary" id="btn-modal-add" style="margin-top: 1rem;">
-          <i class="fa-solid fa-basket-shopping"></i> Add to Basket
-        </button>
+        ${state.user?.role === 'admin' ? `
+          <div style="margin-top: 1rem; padding: 0.75rem; background: var(--color-bg-muted, #f5f5f5); border-radius: 8px; text-align: center; color: var(--color-text-muted);">
+            <i class="fa-solid fa-eye"></i> Admin — View Only
+          </div>
+        ` : `
+          <button class="btn btn-primary" id="btn-modal-add" style="margin-top: 1rem;">
+            <i class="fa-solid fa-basket-shopping"></i> Add to Basket
+          </button>
+        `}
       </div>
     `;
 
     // Weight change handler for detail modal
-    const weightSel = document.getElementById('detail-weight-select');
-    if (weightSel) {
-      weightSel.addEventListener('change', () => {
-        const parts = weightSel.value.split('_');
+    const detailChips = body.querySelectorAll('.detail-weight-chip');
+    detailChips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        detailChips.forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+
+        const parts = chip.getAttribute('data-value').split('_');
         if (parts.length < 4) return;
         const p = parseFloat(parts[2]);
         const m = parts[3] ? parseFloat(parts[3]) : null;
@@ -1651,12 +2000,13 @@ async function openProductDetails(id) {
           }
         }
       });
-    }
+    });
 
     document.getElementById('btn-modal-add').addEventListener('click', () => {
       let weightInfo = null;
-      if (weightSel) {
-        const parts = weightSel.value.split('_');
+      const activeDetailChip = body.querySelector('.detail-weight-chip.active');
+      if (activeDetailChip) {
+        const parts = activeDetailChip.getAttribute('data-value').split('_');
         if (parts.length >= 4) {
           weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
         }
@@ -1694,6 +2044,11 @@ function toggleCartDrawer(open) {
 }
 
 function addToCart(productId, weightInfo) {
+  if (state.user?.role === 'admin') {
+    showInfoToast('Admins cannot purchase products. Use a buyer account to shop.');
+    return;
+  }
+
   // Ensure a lightweight guest profile exists for anonymous users so they have a profile page
   if (!state.user) {
     const guest = {
@@ -1713,7 +2068,7 @@ function addToCart(productId, weightInfo) {
 
   // Determine effective price based on weight selection
   const effectivePrice = weightInfo ? weightInfo.price : (product.price || 0);
-  const weightLabel = weightInfo ? (weightInfo.unit === 'kg' ? `${weightInfo.weight} kg` : `${weightInfo.weight} g`) : '';
+  const weightLabel = weightInfo ? (weightInfo.unit === 'kg' ? `${weightInfo.weight} kg` : weightInfo.unit === 'l' ? `${weightInfo.weight} l` : weightInfo.unit === 'ml' ? `${weightInfo.weight} ml` : `${weightInfo.weight} g`) : '';
 
   // Build a unique cart key: if weight variant, include weight in the id
   const cartId = weightInfo ? `${productId}_${weightInfo.weight}${weightInfo.unit}` : productId;
@@ -1809,34 +2164,37 @@ function removeFromCart(cartId) {
   }
 }
 
-function applyPromoCode() {
-  const input = document
-    .getElementById('promo-input')
-    .value.toUpperCase()
-    .trim();
+async function applyPromoCode() {
+  const input = document.getElementById('promo-input').value.trim();
   const feedback = document.getElementById('promo-message');
-
   feedback.classList.add('hidden');
 
-  if (input === 'SPORE10') {
-    state.activePromo = 'SPORE10';
-    state.promoDiscountPct = 0.1;
-    feedback.textContent = 'Code SPORE10 Active (10% Off)!';
-    feedback.style.color = 'var(--color-success)';
-    feedback.classList.remove('hidden');
-  } else if (input === 'SHROOM20') {
-    state.activePromo = 'SHROOM20';
-    state.promoDiscountPct = 0.2;
-    feedback.textContent = 'Code SHROOM20 Active (20% Off)!';
-    feedback.style.color = 'var(--color-success)';
-    feedback.classList.remove('hidden');
-  } else if (input === '') {
+  if (!input) {
     state.activePromo = null;
     state.promoDiscountPct = 0;
-  } else {
+    updateCartUI();
+    return;
+  }
+
+  try {
+    const result = await fetchWithAuth(`/promo/validate?code=${encodeURIComponent(input)}`);
+
+    if (result && result.valid) {
+      state.activePromo = result.code;
+      state.promoDiscountPct = result.discountPercent;
+      feedback.textContent = `Code ${result.code} Active (${result.description})!`;
+      feedback.style.color = 'var(--color-success)';
+    } else {
+      state.activePromo = null;
+      state.promoDiscountPct = 0;
+      feedback.textContent = result?.error || 'Invalid Promo Code.';
+      feedback.style.color = 'var(--color-danger)';
+    }
+    feedback.classList.remove('hidden');
+  } catch (err) {
     state.activePromo = null;
     state.promoDiscountPct = 0;
-    feedback.textContent = 'Invalid Promo Code.';
+    feedback.textContent = getApiErrorMessage(err);
     feedback.style.color = 'var(--color-danger)';
     feedback.classList.remove('hidden');
   }
@@ -1903,7 +2261,8 @@ function updateCartUI() {
           <i class="fa-solid fa-trash-can"></i>
         </button>
       </div>
-    `;},
+    `;
+      },
     )
     .join('');
 
@@ -2260,9 +2619,9 @@ function buildCourseCard(t, enrolledIds, isOngoing, isCompleted) {
   const catLower = cat.toLowerCase();
   const catClass = catLower === 'beginner' ? 'beginner'
     : catLower === 'farmer' ? 'farmer'
-    : catLower === 'entrepreneur' ? 'entrepreneur'
-    : catLower === 'certification' ? 'certification'
-    : 'beginner';
+      : catLower === 'entrepreneur' ? 'entrepreneur'
+        : catLower === 'certification' ? 'certification'
+          : 'beginner';
   const isEnrolled = enrolledIds.has(t.id);
 
   const imgHtml = t.image_url
@@ -2731,19 +3090,7 @@ async function handleCheckoutInitiation() {
   const warning = document.getElementById('cart-auth-warning');
   if (warning) warning.classList.add('hidden');
 
-  if (!state.user) {
-    if (warning) {
-      warning.textContent = '⚠️ Please verify your identity to complete checkout.';
-      warning.classList.remove('hidden');
-    }
-    authModal.open('buyer', () => {
-      toggleCartDrawer(false);
-      window.location.hash = '#checkout';
-    });
-    return;
-  }
-
-  if (state.user.role === 'grower') {
+  if (state.user && state.user.role === 'grower') {
     if (warning) {
       warning.textContent = '⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.';
       warning.classList.remove('hidden');
@@ -2759,70 +3106,6 @@ function renderCheckoutPage() {
   const summaryContainer = document.getElementById('checkout-order-summary');
   if (!summaryContainer) return;
 
-  // Pre-fill user profile address details if available
-  if (state.user) {
-    const phoneInput = document.getElementById('checkout-delivery-phone');
-    const pincodeInput = document.getElementById('checkout-delivery-pincode');
-    const line1Input = document.getElementById('checkout-address-line1');
-    const line2Input = document.getElementById('checkout-address-line2');
-    const landmarkInput = document.getElementById('checkout-landmark');
-    const stateSelect = document.getElementById('checkout-state');
-    const citySelect = document.getElementById('checkout-city');
-
-    const uPhone = state.user.whatsappNumber || state.user.whatsapp_number || '';
-    if (phoneInput && !phoneInput.value && uPhone) {
-      phoneInput.value = uPhone;
-    }
-
-    const uPincode = state.user.defaultPincode || state.user.default_pincode || '';
-    if (pincodeInput && !pincodeInput.value && uPincode) {
-      pincodeInput.value = uPincode;
-    }
-
-    const uLine1 = state.user.addressLine1 || state.user.address_line1 || '';
-    if (line1Input && !line1Input.value && uLine1) {
-      line1Input.value = uLine1;
-    }
-
-    const uLine2 = state.user.addressLine2 || state.user.address_line2 || '';
-    if (line2Input && !line2Input.value && uLine2) {
-      line2Input.value = uLine2;
-    }
-
-    const uLandmark = state.user.landmark || '';
-    if (landmarkInput && !landmarkInput.value && uLandmark) {
-      landmarkInput.value = uLandmark;
-    }
-
-    const uState = state.user.state || '';
-    const uCity = state.user.city || '';
-    if (stateSelect && !stateSelect.value && uState) {
-      if (!STATE_CITIES[uState]) {
-        const opt = document.createElement('option');
-        opt.value = uState;
-        opt.textContent = uState;
-        stateSelect.appendChild(opt);
-      }
-      stateSelect.value = uState;
-
-      // Populate cities dropdown
-      if (citySelect) {
-        const cities = STATE_CITIES[uState] || [];
-        citySelect.innerHTML = '<option value="">Select City</option>' +
-          cities.map(c => `<option value="${c}">${c}</option>`).join('');
-        if (uCity) {
-          if (!cities.includes(uCity)) {
-            const opt = document.createElement('option');
-            opt.value = uCity;
-            opt.textContent = uCity;
-            citySelect.appendChild(opt);
-          }
-          citySelect.value = uCity;
-        }
-      }
-    }
-  }
-
   if (!state.cart.length) {
     summaryContainer.innerHTML = `
       <div class="grid-skeleton">
@@ -2833,6 +3116,16 @@ function renderCheckoutPage() {
     return;
   }
 
+  renderCheckoutOrderSummary(summaryContainer);
+
+  if (!state.token || !state.user) {
+    renderCheckoutLoginSection();
+  } else {
+    renderCheckoutDeliveryForm();
+  }
+}
+
+function renderCheckoutOrderSummary(container) {
   const lines = state.cart.map((item) => {
     const product = state.products.find((p) => p.id === item.id) || {};
     return `
@@ -2843,15 +3136,13 @@ function renderCheckoutPage() {
     `;
   });
 
-  const subtotal = state.cart.reduce((total, item) => {
-    return total + item.price * item.quantity;
-  }, 0);
+  const subtotal = state.cart.reduce((total, item) => total + item.price * item.quantity, 0);
   const gst = +(subtotal * 0.05).toFixed(2);
   const discount = state.activePromo ? 50 : 0;
   const shipping = 0;
   const total = subtotal + gst + shipping - discount;
 
-  summaryContainer.innerHTML = `
+  container.innerHTML = `
     <div class="checkout-summary-item-list">
       ${lines.join('')}
     </div>
@@ -2864,9 +3155,399 @@ function renderCheckoutPage() {
       <div class="checkout-summary-total"><span>Total</span><strong>₹${total.toFixed(2)}</strong></div>
     </div>
   `;
+}
 
+function renderCheckoutLoginSection() {
+  const formPanel = document.querySelector('.checkout-form-panel');
+  if (!formPanel) return;
+
+  formPanel.innerHTML = `
+    <div class="checkout-auth-section">
+      <div class="checkout-auth-header">
+        <i class="fa-solid fa-user-lock" style="font-size:2rem;color:var(--green-mid);"></i>
+        <h3 style="margin:8px 0 4px;">Login to Checkout</h3>
+        <p style="color:var(--text-muted);font-size:0.9rem;">Verify your identity to proceed with your order</p>
+      </div>
+
+      <div class="checkout-auth-tabs" style="display:flex;gap:8px;margin:16px 0;">
+        <button class="btn checkout-auth-tab active" data-method="phone" style="flex:1;padding:10px;border:2px solid var(--green-mid);background:var(--green-mid);color:#fff;border-radius:8px;cursor:pointer;">
+          <i class="fa-solid fa-mobile-screen"></i> Phone OTP
+        </button>
+        <button class="btn checkout-auth-tab" data-method="email" style="flex:1;padding:10px;border:2px solid var(--border);background:transparent;color:var(--text-dark);border-radius:8px;cursor:pointer;">
+          <i class="fa-solid fa-envelope"></i> Email OTP
+        </button>
+      </div>
+
+      <div id="checkout-auth-step1">
+        <div id="checkout-auth-phone-group">
+          <label style="display:block;margin-bottom:6px;font-weight:600;">Phone Number</label>
+          <div style="display:flex;gap:8px;">
+            <input type="tel" id="checkout-auth-contact" placeholder="Enter phone number" maxlength="10" style="flex:1;padding:12px;border:1.5px solid var(--border);border-radius:8px;outline:none;" />
+            <button class="btn btn-primary" id="checkout-auth-send-otp" style="white-space:nowrap;">Send OTP</button>
+          </div>
+        </div>
+        <div id="checkout-auth-email-group" class="hidden" style="margin-top:12px;">
+          <label style="display:block;margin-bottom:6px;font-weight:600;">Email Address</label>
+          <div style="display:flex;gap:8px;">
+            <input type="email" id="checkout-auth-email" placeholder="Enter email address" style="flex:1;padding:12px;border:1.5px solid var(--border);border-radius:8px;outline:none;" />
+            <button class="btn btn-primary" id="checkout-auth-send-email-otp" style="white-space:nowrap;">Send OTP</button>
+          </div>
+        </div>
+        <p style="margin-top:8px;font-size:0.85rem;color:var(--text-muted);">
+          <a href="#" id="checkout-auth-toggle-method" style="color:var(--green-mid);">or use Email OTP instead</a>
+        </p>
+      </div>
+
+      <div id="checkout-auth-step2" class="hidden" style="margin-top:16px;">
+        <p id="checkout-auth-otp-subtitle" style="margin-bottom:8px;font-size:0.9rem;color:var(--text-muted);">Enter the 6-digit code sent</p>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="checkout-auth-otp" placeholder="Enter OTP" maxlength="6" style="flex:1;padding:12px;border:1.5px solid var(--border);border-radius:8px;outline:none;text-align:center;letter-spacing:0.3rem;font-size:1.1rem;" />
+          <button class="btn btn-primary" id="checkout-auth-verify-btn">Verify</button>
+        </div>
+        <p style="margin-top:8px;font-size:0.85rem;">
+          <a href="#" id="checkout-auth-back-step1" style="color:var(--text-muted);">Change phone/email</a>
+        </p>
+      </div>
+
+      <div class="auth-error-msg hidden" id="checkout-auth-error" style="margin-top:12px;padding:8px 12px;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:0.85rem;"></div>
+
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+        <button class="btn btn-secondary btn-block" id="checkout-back-cart-btn">
+          <i class="fa-solid fa-arrow-left"></i> Back to cart
+        </button>
+      </div>
+    </div>
+  `;
+
+  bindCheckoutAuthEvents();
+}
+
+function bindCheckoutAuthEvents() {
+  let activeMethod = 'phone';
+  let pendingContact = null;
+  let mockOtp = null;
+
+  const tabPhone = document.querySelector('.checkout-auth-tab[data-method="phone"]');
+  const tabEmail = document.querySelector('.checkout-auth-tab[data-method="email"]');
+  const phoneGroup = document.getElementById('checkout-auth-phone-group');
+  const emailGroup = document.getElementById('checkout-auth-email-group');
+  const step1 = document.getElementById('checkout-auth-step1');
+  const step2 = document.getElementById('checkout-auth-step2');
+  const contactInput = document.getElementById('checkout-auth-contact');
+  const emailInput = document.getElementById('checkout-auth-email');
+  const otpInput = document.getElementById('checkout-auth-otp');
+  const sendBtn = document.getElementById('checkout-auth-send-otp');
+  const sendEmailBtn = document.getElementById('checkout-auth-send-email-otp');
+  const verifyBtn = document.getElementById('checkout-auth-verify-btn');
+  const toggleLink = document.getElementById('checkout-auth-toggle-method');
+  const backLink = document.getElementById('checkout-auth-back-step1');
+  const errorEl = document.getElementById('checkout-auth-error');
+  const otpSubtitle = document.getElementById('checkout-auth-otp-subtitle');
+  const backCartBtn = document.getElementById('checkout-back-cart-btn');
+
+  if (backCartBtn) {
+    backCartBtn.addEventListener('click', () => toggleCartDrawer(true));
+  }
+
+  function showError(msg) {
+    if (errorEl) {
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+    }
+  }
+
+  function hideError() {
+    if (errorEl) errorEl.classList.add('hidden');
+  }
+
+  function switchMethod(method) {
+    activeMethod = method;
+    if (tabPhone && tabEmail) {
+      tabPhone.className = `btn checkout-auth-tab ${method === 'phone' ? 'active' : ''}`;
+      tabEmail.className = `btn checkout-auth-tab ${method === 'email' ? 'active' : ''}`;
+      tabPhone.style.background = method === 'phone' ? 'var(--green-mid)' : 'transparent';
+      tabPhone.style.color = method === 'phone' ? '#fff' : 'var(--text-dark)';
+      tabPhone.style.borderColor = method === 'phone' ? 'var(--green-mid)' : 'var(--border)';
+      tabEmail.style.background = method === 'email' ? 'var(--green-mid)' : 'transparent';
+      tabEmail.style.color = method === 'email' ? '#fff' : 'var(--text-dark)';
+      tabEmail.style.borderColor = method === 'email' ? 'var(--green-mid)' : 'var(--border)';
+    }
+    if (phoneGroup) phoneGroup.classList.toggle('hidden', method !== 'phone');
+    if (emailGroup) emailGroup.classList.toggle('hidden', method !== 'email');
+    if (toggleLink) {
+      toggleLink.textContent = method === 'phone' ? 'or use Email OTP instead' : 'or use Phone OTP instead';
+    }
+    if (step1) step1.classList.remove('hidden');
+    if (step2) step2.classList.add('hidden');
+    hideError();
+  }
+
+  if (tabPhone) tabPhone.addEventListener('click', () => switchMethod('phone'));
+  if (tabEmail) tabEmail.addEventListener('click', () => switchMethod('email'));
+
+  if (toggleLink) {
+    toggleLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchMethod(activeMethod === 'phone' ? 'email' : 'phone');
+    });
+  }
+
+  if (backLink) {
+    backLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (step1) step1.classList.remove('hidden');
+      if (step2) step2.classList.add('hidden');
+      hideError();
+    });
+  }
+
+  async function handleSendOtp() {
+    hideError();
+    const contact = activeMethod === 'phone' ? contactInput?.value.trim() : emailInput?.value.trim();
+    if (!contact) {
+      showError(activeMethod === 'phone' ? 'Please enter a phone number.' : 'Please enter an email address.');
+      return;
+    }
+
+    if (activeMethod === 'phone' && !/^\d{10}$/.test(contact)) {
+      showError('Enter a valid 10-digit Indian phone number.');
+      return;
+    }
+
+    if (activeMethod === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+      showError('Enter a valid email address.');
+      return;
+    }
+
+    const btn = activeMethod === 'phone' ? sendBtn : sendEmailBtn;
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+
+    try {
+      const emailForOtp = activeMethod === 'phone'
+        ? `phone-${contact.replace(/\D/g, '')}@sporekart.com`
+        : contact;
+
+      pendingContact = emailForOtp;
+      const result = await authApi.requestOtp(emailForOtp, 'buyer', '');
+      mockOtp = (result && result.otp) ? result.otp : null;
+
+      if (step1) step1.classList.add('hidden');
+      if (step2) step2.classList.remove('hidden');
+      if (otpSubtitle) {
+        const displayContact = activeMethod === 'phone' ? `+91 ${contact}` : contact;
+        if (mockOtp) {
+          otpSubtitle.textContent = `Mock OTP: ${mockOtp} - enter it below to continue`;
+        } else {
+          otpSubtitle.textContent = `Enter the 6-digit code sent to ${displayContact}`;
+        }
+      }
+      if (otpInput && mockOtp) otpInput.value = mockOtp;
+      hideError();
+    } catch (err) {
+      showError(err.message || 'Failed to send OTP.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = activeMethod === 'phone' ? 'Send OTP' : 'Send OTP'; }
+    }
+  }
+
+  if (sendBtn) sendBtn.addEventListener('click', handleSendOtp);
+  if (sendEmailBtn) sendEmailBtn.addEventListener('click', handleSendOtp);
+
+  if (contactInput) {
+    contactInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleSendOtp();
+    });
+  }
+  if (emailInput) {
+    emailInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleSendOtp();
+    });
+  }
+
+  async function handleVerifyOtp() {
+    const otpCode = otpInput?.value.trim();
+    if (!otpCode || !/^\d{6}$/.test(otpCode)) {
+      showError('Enter a valid 6-digit OTP.');
+      return;
+    }
+
+    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying...'; }
+
+    try {
+      const data = await authApi.verifyOtp(pendingContact, otpCode, {
+        loginMethod: activeMethod,
+        whatsappNumber: activeMethod === 'phone' ? `+91${contactInput?.value.trim()}` : '',
+      });
+      data.user = data.user || {};
+      data.user.loginMethod = activeMethod;
+      if (activeMethod === 'phone') {
+        data.user.whatsappNumber = `+91${contactInput?.value.trim()}`;
+      }
+      saveAuth(data.token, data.user);
+      hideError();
+    } catch (err) {
+      showError(err.message || 'OTP verification failed.');
+      if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.textContent = 'Verify'; }
+    }
+  }
+
+  if (verifyBtn) verifyBtn.addEventListener('click', handleVerifyOtp);
+  if (otpInput) {
+    otpInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleVerifyOtp();
+    });
+  }
+}
+
+function renderCheckoutDeliveryForm() {
+  const formPanel = document.querySelector('.checkout-form-panel');
+  if (!formPanel) return;
+
+  if (_checkoutFormOriginalHTML) {
+    formPanel.innerHTML = _checkoutFormOriginalHTML;
+  }
+
+  // Re-populate state dropdown (lost when HTML was replaced by login section)
+  const stateSelectEl = document.getElementById('checkout-state');
+  if (stateSelectEl) {
+    if (_statesCache.length > 0 && stateSelectEl.options.length <= 1) {
+      stateSelectEl.innerHTML = '<option value="">Select State</option>' +
+        _statesCache.map(s => `<option value="${s}">${s}</option>`).join('');
+    } else if (_statesCache.length === 0) {
+      _loadStates();
+    }
+  }
+
+  const isReturningUser = state.user && (
+    state.user.addressLine1 || state.user.address_line1 ||
+    state.user.addressLine2 || state.user.address_line2
+  );
+
+  const user = state.user || {};
+
+  const phoneInput = document.getElementById('checkout-delivery-phone');
+  const nameInput = document.getElementById('checkout-delivery-name');
+  const emailInput = document.getElementById('checkout-delivery-email');
+  const pincodeInput = document.getElementById('checkout-delivery-pincode');
+  const line1Input = document.getElementById('checkout-address-line1');
+  const line2Input = document.getElementById('checkout-address-line2');
+  const landmarkInput = document.getElementById('checkout-landmark');
+  const stateSelect = document.getElementById('checkout-state');
+  const citySelect = document.getElementById('checkout-city');
+
+  if (nameInput) {
+    nameInput.value = user.fullName || user.full_name || '';
+  }
+
+  const uPhone = user.whatsappNumber || user.whatsapp_number || '';
+  if (phoneInput) {
+    if (uPhone) phoneInput.value = uPhone;
+    if (isReturningUser) {
+      phoneInput.readOnly = true;
+      phoneInput.style.background = '#f3f4f6';
+      phoneInput.style.cursor = 'not-allowed';
+    }
+  }
+
+  const uEmail = user.email || '';
+  if (emailInput && !emailInput.value && uEmail) emailInput.value = uEmail;
+
+  const uPincode = user.defaultPincode || user.default_pincode || '';
+  if (pincodeInput && !pincodeInput.value && uPincode) pincodeInput.value = uPincode;
+
+  const uLine1 = user.addressLine1 || user.address_line1 || '';
+  if (line1Input && !line1Input.value && uLine1) line1Input.value = uLine1;
+
+  const uLine2 = user.addressLine2 || user.address_line2 || '';
+  if (line2Input && !line2Input.value && uLine2) line2Input.value = uLine2;
+
+  const uLandmark = user.landmark || '';
+  if (landmarkInput && !landmarkInput.value && uLandmark) landmarkInput.value = uLandmark;
+
+  const uState = user.state || '';
+  const uCity = user.city || '';
+
+  if (stateSelect && !stateSelect.value && uState) {
+    if (!_statesCache.includes(uState)) {
+      const opt = document.createElement('option');
+      opt.value = uState;
+      opt.textContent = uState;
+      stateSelect.appendChild(opt);
+    }
+    stateSelect.value = uState;
+    if (citySelect && uState) {
+      _loadCities(uState).then(cities => {
+        citySelect.innerHTML = '<option value="">Select City</option>' +
+          cities.map(c => `<option value="${c}">${c}</option>`).join('');
+        if (uCity) {
+          if (!cities.includes(uCity)) {
+            const opt = document.createElement('option');
+            opt.value = uCity;
+            opt.textContent = uCity;
+            citySelect.appendChild(opt);
+          }
+          citySelect.value = uCity;
+        }
+      });
+    }
+  }
+
+  _attachCheckoutValidation();
+
+  // Re-bind state→city dropdown and pincode auto-fill (lost when HTML was replaced)
+  const _stateSelect = document.getElementById('checkout-state');
+  const _citySelect = document.getElementById('checkout-city');
+  if (_stateSelect) {
+    _stateSelect.addEventListener('change', async (e) => {
+      const selState = e.target.value;
+      if (!_citySelect) return;
+      if (!selState) {
+        _citySelect.innerHTML = '<option value="">Select State first</option>';
+        return;
+      }
+      const cities = await _loadCities(selState);
+      if (!cities.length && !_citiesCache[selState]) {
+        _citySelect.innerHTML = '<option value="">Select State first</option>';
+        return;
+      }
+      _citySelect.innerHTML = '<option value="">Select City</option>' +
+        cities.map(c => `<option value="${c}">${c}</option>`).join('');
+    });
+  }
+  const _pincodeInput = document.getElementById('checkout-delivery-pincode');
+  if (_pincodeInput) {
+    _pincodeInput.addEventListener('input', async (e) => {
+      const pin = e.target.value.trim();
+      if (pin.length === 6 && /^\d{6}$/.test(pin)) {
+        try {
+          const resp = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+          if (!resp.ok) return;
+          const data = await resp.json();
+          if (data[0]?.Status === 'Success') {
+            const d = data[0].PostOffice[0];
+            const foundState = d.State;
+            if (_stateSelect && !_stateSelect.value) {
+              _stateSelect.value = foundState;
+              _stateSelect.dispatchEvent(new Event('change'));
+            }
+          }
+        } catch { /* ignore */ }
+      }
+    });
+  }
+
+  document.getElementById('btn-payment-continue')?.addEventListener('click', handlePaymentContinue);
+  const backCartBtn = document.getElementById('btn-change-cart');
+  if (backCartBtn) {
+    backCartBtn.addEventListener('click', () => toggleCartDrawer(true));
+  }
+}
+
+function _attachCheckoutValidation() {
   const checkoutFields = [
+    { id: 'checkout-delivery-name', validator: (v) => v.trim().length >= 2 ? '' : 'Please enter your full name.' },
     { id: 'checkout-delivery-phone', validator: (v) => isValidIndianPhone(v.trim()) || !v.trim() ? '' : 'Enter a valid Indian phone number.' },
+    { id: 'checkout-delivery-email', validator: (v) => !v.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? '' : 'Enter a valid email address.' },
     { id: 'checkout-delivery-pincode', validator: (v) => !v.trim() || /^\d{6}$/.test(v.trim()) ? '' : 'Enter a valid 6-digit pincode.' },
     { id: 'checkout-address-line1', validator: (v) => v.trim() ? '' : 'Address Line 1 is required.' },
     { id: 'checkout-address-line2', validator: (v) => v.trim() ? '' : 'Address Line 2 is required.' },
@@ -2900,7 +3581,9 @@ function renderCheckoutPage() {
 }
 
 async function handlePaymentContinue() {
+  const deliveryName = document.getElementById('checkout-delivery-name')?.value.trim() || state.user?.fullName || '';
   const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
+  const deliveryEmail = document.getElementById('checkout-delivery-email')?.value.trim() || state.user?.email || '';
   const addressLine1 = document.getElementById('checkout-address-line1')?.value.trim() || '';
   const addressLine2 = document.getElementById('checkout-address-line2')?.value.trim() || '';
   const landmark = document.getElementById('checkout-landmark')?.value.trim() || '';
@@ -2923,6 +3606,11 @@ async function handlePaymentContinue() {
   clearFieldErrors();
 
   let hasError = false;
+
+  if (!deliveryName || deliveryName.length < 2) {
+    markFieldError('checkout-delivery-name', 'Please enter your full name.');
+    hasError = true;
+  }
 
   if (!isValidIndianPhone(deliveryPhone)) {
     markFieldError('checkout-delivery-phone', 'Enter a valid Indian phone number (e.g. +91 9876543210).');
@@ -2980,6 +3668,8 @@ async function handlePaymentContinue() {
           ...(item.weightInfo ? { weight: item.weightInfo.weight, unit: item.weightInfo.unit } : {}),
         })),
         promoCode: state.activePromo || "",
+        customer_name: deliveryName,
+        customer_email: deliveryEmail,
         delivery_phone: deliveryPhone,
         address_line1: addressLine1,
         address_line2: addressLine2,
@@ -3002,32 +3692,7 @@ async function handlePaymentContinue() {
     ) {
       showMockPaymentModal(rzpDetails, orderRecord);
     } else {
-      const options = {
-        key: rzpDetails.keyId,
-        amount: rzpDetails.amount,
-        currency: rzpDetails.currency,
-        name: 'Sporekart Store',
-        description: 'Fruiting Spore Seeds Checkout',
-        order_id: rzpDetails.orderId,
-        async handler(response) {
-          await completeOrderPayment(
-            response.razorpay_order_id,
-            response.razorpay_payment_id,
-            response.razorpay_signature,
-          );
-        },
-        prefill: {
-          name: state.user.fullName,
-          email: state.user.email,
-          contact: state.user.whatsappNumber || '',
-        },
-        theme: {
-          color: '#38b17b',
-        },
-      };
-
-      const rzp = new Razorpay(options);
-      rzp.open();
+      showPaymentChoiceModal(rzpDetails, orderRecord);
     }
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
@@ -3036,6 +3701,325 @@ async function handlePaymentContinue() {
       feedback.classList.remove('hidden');
     }
   }
+}
+
+// ── Payment Method Choice Modal (for real Razorpay) ────────────────────────
+function showPaymentChoiceModal(rzpDetails, orderRecord) {
+  document.getElementById('payment-choice-modal')?.remove();
+  const amount = (rzpDetails.amount / 100).toFixed(2);
+
+  function buildRzpOptions(extraPrefill) {
+    return {
+      key: rzpDetails.keyId,
+      amount: rzpDetails.amount,
+      currency: rzpDetails.currency,
+      name: 'Sporekart',
+      description: 'Sporekart Order',
+      order_id: rzpDetails.orderId,
+      async handler(response) {
+        choiceModal.remove();
+        await completeOrderPayment(
+          response.razorpay_order_id,
+          response.razorpay_payment_id,
+          response.razorpay_signature,
+        );
+      },
+      prefill: {
+        name: state.user?.fullName || '',
+        email: state.user?.email || '',
+        contact: state.user?.whatsappNumber || '',
+        ...(extraPrefill || {}),
+      },
+      theme: { color: '#38b17b' },
+    };
+  }
+
+  const choiceModal = document.createElement('div');
+  choiceModal.id = 'payment-choice-modal';
+  choiceModal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(8px);font-family:Inter,sans-serif;';
+  choiceModal.innerHTML = `
+    <div style="background:#0d1f17;border:1px solid rgba(56,177,123,0.25);border-radius:22px;width:100%;max-width:460px;padding:32px;box-shadow:0 24px 80px rgba(0,0,0,0.6);color:#e2e8f0;">
+      <div style="text-align:center;margin-bottom:28px;">
+        <div style="width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#38b17b,#1a7a52);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;">
+          <i class="fa-solid fa-credit-card" style="color:#fff;font-size:22px;"></i>
+        </div>
+        <h3 style="margin:0 0 6px;font-size:1.18rem;font-weight:700;color:#fff;">Choose Payment Method</h3>
+        <p style="margin:0;color:#64748b;font-size:0.85rem;">Amount: <strong style="color:#fbbf24;font-size:1rem;">₹${amount}</strong></p>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:22px;">
+        <button id="pcm-btn-razorpay" style="width:100%;background:rgba(56,177,123,0.08);border:1.5px solid rgba(56,177,123,0.35);border-radius:14px;padding:18px 20px;cursor:pointer;color:#e2e8f0;font-family:inherit;display:flex;align-items:center;gap:16px;text-align:left;transition:all 0.2s;">
+          <div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#38b17b,#1a7a52);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i class="fa-solid fa-lock" style="color:#fff;font-size:18px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:0.95rem;font-weight:700;color:#fff;">Razorpay Secure Checkout</div>
+            <div style="font-size:0.75rem;color:#64748b;margin-top:3px;">Card · Net Banking · Wallet · UPI · EMI</div>
+          </div>
+          <i class="fa-solid fa-chevron-right" style="color:#38b17b;"></i>
+        </button>
+
+        <button id="pcm-btn-upi-id" style="width:100%;background:rgba(250,204,21,0.07);border:1.5px solid rgba(250,204,21,0.28);border-radius:14px;padding:18px 20px;cursor:pointer;color:#e2e8f0;font-family:inherit;display:flex;align-items:center;gap:16px;text-align:left;transition:all 0.2s;">
+          <div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i class="fa-solid fa-indian-rupee-sign" style="color:#fff;font-size:18px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:0.95rem;font-weight:700;color:#fff;">Pay via UPI ID</div>
+            <div style="font-size:0.75rem;color:#64748b;margin-top:3px;">Enter your UPI ID (GPay / PhonePe / Paytm)</div>
+          </div>
+          <i class="fa-solid fa-chevron-right" style="color:#f59e0b;"></i>
+        </button>
+
+        <button id="pcm-btn-upi-qr" style="width:100%;background:rgba(99,102,241,0.08);border:1.5px solid rgba(99,102,241,0.3);border-radius:14px;padding:18px 20px;cursor:pointer;color:#e2e8f0;font-family:inherit;display:flex;align-items:center;gap:16px;text-align:left;transition:all 0.2s;">
+          <div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#4f46e5);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <i class="fa-solid fa-qrcode" style="color:#fff;font-size:20px;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:0.95rem;font-weight:700;color:#fff;">Pay via UPI QR Code</div>
+            <div style="font-size:0.75rem;color:#64748b;margin-top:3px;">GPay · PhonePe · Paytm · BHIM · Any UPI App</div>
+          </div>
+          <i class="fa-solid fa-chevron-right" style="color:#6366f1;"></i>
+        </button>
+      </div>
+
+      <button id="pcm-btn-cancel" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:11px;color:#64748b;font-size:0.85rem;cursor:pointer;font-family:inherit;">✕ Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(choiceModal);
+
+  document.getElementById('pcm-btn-razorpay')?.addEventListener('click', () => {
+    choiceModal.remove();
+    const rzp = new Razorpay(buildRzpOptions());
+    rzp.open();
+  });
+  document.getElementById('pcm-btn-upi-id')?.addEventListener('click', () => {
+    choiceModal.remove();
+    showUpiIdModal(rzpDetails, orderRecord);
+  });
+  document.getElementById('pcm-btn-upi-qr')?.addEventListener('click', () => {
+    choiceModal.remove();
+    showUpiQrModal(rzpDetails, orderRecord);
+  });
+  document.getElementById('pcm-btn-cancel')?.addEventListener('click', () => {
+    choiceModal.remove();
+    showSuccessToast('⚠️ Payment cancelled.');
+  });
+  choiceModal.addEventListener('click', (e) => { if (e.target === choiceModal) choiceModal.remove(); });
+}
+
+// ── UPI ID Entry Modal ───────────────────────────────────────────────────────
+function showUpiIdModal(rzpDetails, orderRecord) {
+  document.getElementById('upi-id-modal')?.remove();
+  const amount = (rzpDetails.amount / 100).toFixed(2);
+
+  const modal = document.createElement('div');
+  modal.id = 'upi-id-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(8px);font-family:Inter,sans-serif;';
+  modal.innerHTML = `
+    <div style="background:#0d1f17;border:1px solid rgba(250,204,21,0.25);border-radius:22px;width:100%;max-width:420px;padding:32px;box-shadow:0 24px 80px rgba(0,0,0,0.6);color:#e2e8f0;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;">
+          <i class="fa-solid fa-indian-rupee-sign" style="color:#fff;font-size:22px;"></i>
+        </div>
+        <h3 style="margin:0 0 6px;font-size:1.1rem;font-weight:700;color:#fff;">Enter UPI ID</h3>
+        <div style="font-size:1.5rem;font-weight:800;color:#fbbf24;">₹${amount}</div>
+      </div>
+
+      <div style="margin-bottom:18px;">
+        <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:8px;letter-spacing:0.04em;">YOUR UPI ID</div>
+        <div style="display:flex;gap:8px;">
+          <input id="upi-id-input" type="text" placeholder="yourname@upi" style="flex:1;background:rgba(255,255,255,0.06);border:1.5px solid rgba(250,204,21,0.3);border-radius:10px;padding:12px 16px;color:#fff;font-size:0.95rem;font-family:monospace;outline:none;" />
+          <button id="upi-id-verify-btn" style="padding:12px 18px;background:rgba(250,204,21,0.12);border:1.5px solid rgba(250,204,21,0.3);border-radius:10px;color:#fbbf24;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;">Verify</button>
+        </div>
+        <div id="upi-id-status" style="margin-top:8px;font-size:0.8rem;color:#64748b;">Examples: 9876543210@ybl · name@okaxis · name@paytm</div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
+        ${['@ybl', '@oksbi', '@okaxis', '@paytm', '@ibl', '@upi'].map(s => `<button class="upi-suffix-chip" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:5px 13px;color:#94a3b8;font-size:0.75rem;cursor:pointer;font-family:inherit;">${s}</button>`).join('')}
+      </div>
+
+      <button id="upi-id-pay-btn" style="width:100%;padding:14px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:12px;color:#fff;font-size:0.95rem;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:12px;">
+        <i class="fa-solid fa-paper-plane"></i> Pay ₹${amount} via UPI
+      </button>
+      <button id="upi-id-back-btn" style="width:100%;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#64748b;font-size:0.82rem;cursor:pointer;font-family:inherit;">← Back</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // Suffix chips auto-fill
+  modal.querySelectorAll('.upi-suffix-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const inp = document.getElementById('upi-id-input');
+      const current = inp.value.split('@')[0];
+      inp.value = (current || '') + chip.textContent;
+      inp.focus();
+    });
+  });
+
+  // Verify button
+  document.getElementById('upi-id-verify-btn')?.addEventListener('click', () => {
+    const upiId = document.getElementById('upi-id-input').value.trim();
+    const status = document.getElementById('upi-id-status');
+    if (upiId.includes('@')) {
+      status.innerHTML = '<i class="fa-solid fa-circle-check" style="color:#38b17b;"></i> <span style="color:#38b17b;">UPI ID looks valid</span>';
+    } else {
+      status.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color:#f87171;"></i> <span style="color:#f87171;">Please enter a valid UPI ID (e.g. name@ybl)</span>';
+    }
+  });
+
+  // Pay button — open Razorpay with UPI pre-selected
+  document.getElementById('upi-id-pay-btn')?.addEventListener('click', () => {
+    const upiId = document.getElementById('upi-id-input').value.trim();
+    if (!upiId || !upiId.includes('@')) {
+      const status = document.getElementById('upi-id-status');
+      status.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color:#f87171;"></i> <span style="color:#f87171;">Please enter a valid UPI ID first</span>';
+      return;
+    }
+    modal.remove();
+    const opts = {
+      key: rzpDetails.keyId,
+      amount: rzpDetails.amount,
+      currency: rzpDetails.currency,
+      name: 'Sporekart',
+      description: 'UPI Payment',
+      order_id: rzpDetails.orderId,
+      async handler(response) {
+        await completeOrderPayment(response.razorpay_order_id, response.razorpay_payment_id, response.razorpay_signature);
+      },
+      prefill: { name: state.user?.fullName || '', email: state.user?.email || '', contact: state.user?.whatsappNumber || '', vpa: upiId },
+      method: 'upi',
+      theme: { color: '#f59e0b' },
+    };
+    const rzp = new Razorpay(opts);
+    rzp.open();
+  });
+
+  document.getElementById('upi-id-back-btn')?.addEventListener('click', () => { modal.remove(); showPaymentChoiceModal(rzpDetails, orderRecord); });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+}
+
+// ── UPI QR Code Modal ────────────────────────────────────────────────────────
+function showUpiQrModal(rzpDetails, orderRecord) {
+  document.getElementById('upi-qr-modal')?.remove();
+  const amount = (rzpDetails.amount / 100).toFixed(2);
+  const orderId = rzpDetails.orderId || orderRecord?.id || 'ORDER';
+  const merchantUpi = 'sporekart@ybl';
+  const upiUrl = `upi://pay?pa=${merchantUpi}&pn=Sporekart&am=${amount}&cu=INR&tn=Order%20${orderId}`;
+
+  const modal = document.createElement('div');
+  modal.id = 'upi-qr-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(10px);font-family:Inter,sans-serif;';
+  modal.innerHTML = `
+    <div style="background:#0d1f17;border:1px solid rgba(99,102,241,0.3);border-radius:22px;width:100%;max-width:400px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,0.6);color:#e2e8f0;text-align:center;">
+      <div style="margin-bottom:20px;">
+        <div style="width:50px;height:50px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#4f46e5);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;">
+          <i class="fa-solid fa-qrcode" style="color:#fff;font-size:22px;"></i>
+        </div>
+        <h3 style="margin:0 0 4px;font-size:1.1rem;font-weight:700;color:#fff;">Scan &amp; Pay via UPI</h3>
+        <div style="font-size:1.6rem;font-weight:800;color:#fbbf24;">₹${amount}</div>
+      </div>
+
+      <div style="background:#fff;display:inline-block;padding:14px;border-radius:16px;box-shadow:0 0 0 2px rgba(99,102,241,0.45),0 8px 32px rgba(0,0,0,0.3);margin-bottom:16px;">
+        <div id="upi-qr-canvas" style="width:200px;height:200px;"></div>
+      </div>
+
+      <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:10px;padding:9px 14px;margin-bottom:14px;">
+        <div style="font-size:0.7rem;color:#64748b;margin-bottom:2px;">MERCHANT UPI ID</div>
+        <div style="font-size:0.9rem;font-weight:600;color:#a5b4fc;font-family:monospace;">${merchantUpi}</div>
+      </div>
+
+      <div style="display:flex;justify-content:center;gap:12px;margin-bottom:14px;">
+        ${[{ l: 'GPay', c: '#4285F4', i: 'fa-google' }, { l: 'PhonePe', c: '#5F259F', i: 'fa-mobile' }, { l: 'Paytm', c: '#00BAF2', i: 'fa-p' }, { l: 'BHIM', c: '#138808', i: 'fa-indian-rupee-sign' }].map(a => `
+          <div><div style="width:38px;height:38px;border-radius:9px;background:${a.c};display:flex;align-items:center;justify-content:center;margin:0 auto 3px;"><i class="fa-solid ${a.i}" style="color:#fff;font-size:14px;"></i></div><div style="font-size:0.65rem;color:#94a3b8;">${a.l}</div></div>`).join('')}
+      </div>
+
+      <div style="font-size:0.78rem;color:#64748b;margin-bottom:18px;line-height:1.6;">Open any UPI app → Scan QR → Confirm <strong style="color:#fbbf24;">₹${amount}</strong></div>
+
+      <button id="upi-qr-confirm-btn" style="width:100%;padding:14px;background:linear-gradient(135deg,#6366f1,#4f46e5);border:none;border-radius:12px;color:#fff;font-size:0.95rem;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;">
+        <i class="fa-solid fa-circle-check"></i> I've Completed Payment
+      </button>
+      <button id="upi-qr-back-btn" style="width:100%;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#64748b;font-size:0.82rem;cursor:pointer;font-family:inherit;">← Back to Payment Options</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // Generate QR code
+  setTimeout(() => {
+    const canvas = document.getElementById('upi-qr-canvas');
+    if (canvas && window.QRCode) {
+      new QRCode(canvas, { text: upiUrl, width: 200, height: 200, colorDark: '#1a3a2a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+    } else if (canvas) {
+      canvas.style.cssText = 'display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:#475569;padding:8px;word-break:break-all;';
+      canvas.textContent = upiUrl;
+    }
+  }, 60);
+
+  // Confirm → record UPI payment directly, no Razorpay re-open
+  document.getElementById('upi-qr-confirm-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('upi-qr-confirm-btn');
+    if (!btn) return;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Confirming...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch(`${API_BASE}/orders/confirm-upi-payment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+        },
+        body: JSON.stringify({ razorpay_order_id: orderId }),
+      });
+      const data = await res.json();
+      modal.remove();
+
+      if (res.ok) {
+        // Clear cart
+        clearCart();
+        updateCartUI();
+        state.activePromo = null;
+        state.promoDiscountPct = 0;
+        const promoInput = document.getElementById('promo-input');
+        if (promoInput) promoInput.value = '';
+        const promoMsg = document.getElementById('promo-message');
+        if (promoMsg) promoMsg.classList.add('hidden');
+
+        await fetchProducts();
+        await loadUser();
+
+        const isPending = (data.data?.status || data.status) === 'pending_upi_verification';
+        const userName = state.user?.fullName || state.user?.full_name || 'Valued Cultivator';
+
+        // Notify other tabs (admin) that orders have been updated
+        try {
+          const bcOrders = new BroadcastChannel('spore-orders');
+          bcOrders.postMessage({ type: 'orders:updated', orderId: orderRecord?.id || null });
+        } catch (e) {
+          // ignore if BroadcastChannel isn't available
+        }
+
+        showPopupModal({
+          title: isPending ? '📋 UPI Payment Submitted' : '🎉 Payment Successful!',
+          message: isPending
+            ? `${userName}, your UPI payment has been submitted. We will verify and confirm your order within 24 hours.`
+            : `${userName}, your payment is confirmed. Your order has been placed successfully.`,
+          duration: 1500,
+          redirectHash: '#shop',
+        });
+      } else {
+        btn.innerHTML = orig;
+        btn.disabled = false;
+        showErrorToast(data.error || 'Could not confirm payment. Please contact support.');
+      }
+    } catch (err) {
+      btn.innerHTML = orig;
+      btn.disabled = false;
+      showErrorToast('Network error. Please try again or contact support.');
+    }
+  });
+  document.getElementById('upi-qr-back-btn')?.addEventListener('click', () => { modal.remove(); showPaymentChoiceModal(rzpDetails, orderRecord); });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 }
 
 function showMockPaymentModal(rzpDetails, orderRecord) {
@@ -3156,9 +4140,17 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
         <!-- RIGHT CONTENT PANEL -->
         <div style="flex:1; overflow-y:auto; padding:20px 22px;">
 
-          <!-- â•â• UPI â•â• -->
+          <!-- ═══ UPI ═══ -->
           <div class="pgw-panel" id="pgw-panel-upi" style="display:block;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">PAY VIA UPI</div>
+
+            <!-- UPI QR Code -->
+            <div style="text-align:center;margin-bottom:18px;padding:16px;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:14px;">
+              <div style="font-size:0.72rem;color:#64748b;margin-bottom:10px;letter-spacing:0.06em;font-weight:600;">SCAN TO PAY ₹${amount}</div>
+              <div id="pgw-upi-qr-box" style="display:inline-block;background:#fff;padding:10px;border-radius:12px;box-shadow:0 0 0 2px rgba(99,102,241,0.35),0 6px 20px rgba(0,0,0,0.25);"></div>
+              <div style="margin-top:10px;font-size:0.75rem;color:#a5b4fc;font-family:monospace;word-break:break-all;">sporekart@ybl</div>
+              <div style="margin-top:4px;font-size:0.7rem;color:#475569;">GPay · PhonePe · Paytm · BHIM · Any UPI App</div>
+            </div>
 
             <!-- UPI Apps -->
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;">
@@ -3205,7 +4197,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
       .join('')}
             </div>
 
-            <div style="text-align:center;color:#475569;font-size:0.78rem;margin-bottom:14px;">â€” or enter UPI ID â€”</div>
+            <div style="text-align:center;color:#475569;font-size:0.78rem;margin-bottom:14px;">— or enter UPI ID —</div>
 
             <div style="display:flex;gap:8px;margin-bottom:18px;">
               <input id="pgw-upi-id" type="text" placeholder="yourname@upi" value="test@upi" style="
@@ -3220,7 +4212,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               ">Verify</button>
             </div>
             <div id="pgw-upi-verified" style="display:none;background:rgba(56,177,123,0.1);border:1px solid rgba(56,177,123,0.3);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.82rem;color:#38b17b;">
-              <i class="fa-solid fa-circle-check"></i> UPI ID verified â€” Test User
+              <i class="fa-solid fa-circle-check"></i> UPI ID verified — Test User
             </div>
             <button class="pgw-pay-btn" id="pgw-btn-pay-upi" style="
               width:100%; padding:14px; background:linear-gradient(135deg,#38b17b,#1a7a52);
@@ -3231,7 +4223,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </button>
           </div>
 
-          <!-- â•â• CARD â•â• -->
+          <!-- ═══ CARD ═══ -->
           <div class="pgw-panel" id="pgw-panel-card" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">CREDIT / DEBIT CARD</div>
 
@@ -3299,7 +4291,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </div>
           </div>
 
-          <!-- â•â• NET BANKING â•â• -->
+          <!-- ═══ NET BANKING ═══ -->
           <div class="pgw-panel" id="pgw-panel-netbank" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">NET BANKING</div>
 
@@ -3348,11 +4340,11 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               border:none;border-radius:10px;color:#fff;font-size:0.95rem;font-weight:700;
               cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;
             ">
-              <i class="fa-solid fa-building-columns"></i> Proceed to Bank â€” ₹${amount}
+              <i class="fa-solid fa-building-columns"></i> Proceed to Bank — ₹${amount}
             </button>
           </div>
 
-          <!-- â•â• WALLETS â•â• -->
+          <!-- ═══ WALLETS ═══ -->
           <div class="pgw-panel" id="pgw-panel-wallet" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">MOBILE WALLETS</div>
 
@@ -3424,7 +4416,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </button>
           </div>
 
-          <!-- â•â• EMI â•â• -->
+          <!-- ═══ EMI ═══ -->
           <div class="pgw-panel" id="pgw-panel-emi" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">EMI OPTIONS</div>
 
@@ -3449,7 +4441,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
                     <input type="radio" name="pgw-emi" value="${e.months}" ${i === 0 ? 'checked' : ''} style="accent-color:#38b17b;">
                     <div style="flex:1;">
                       <div style="font-size:0.88rem;font-weight:600;">${e.months} Months EMI</div>
-                      <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${e.bank} Â· ${e.rate}% p.a.</div>
+                      <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${e.bank} · ${e.rate}% p.a.</div>
                     </div>
                     <div style="text-align:right;">
                       <div style="font-size:0.95rem;font-weight:700;color:#fbbf24;">₹${emi.toFixed(0)}/mo</div>
@@ -3474,12 +4466,12 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
             </button>
           </div>
 
-          <!-- â•â• COD â•â• -->
+          <!-- ═══ COD ═══ -->
           <div class="pgw-panel" id="pgw-panel-cod" style="display:none;">
             <div style="font-size:0.8rem;font-weight:600;color:#94a3b8;letter-spacing:0.05em;margin-bottom:14px;">CASH ON DELIVERY</div>
 
             <div style="background:rgba(56,177,123,0.08);border:1px solid rgba(56,177,123,0.2);border-radius:12px;padding:20px;margin-bottom:20px;text-align:center;">
-              <div style="font-size:2.5rem;margin-bottom:10px;">ðŸ’µ</div>
+              <div style="font-size:2.5rem;margin-bottom:10px;">💵</div>
               <div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin-bottom:6px;">Pay ₹${amount} at Delivery</div>
               <div style="font-size:0.82rem;color:#94a3b8;">Keep exact change ready. Our delivery partner will collect cash at your doorstep.</div>
             </div>
@@ -3489,7 +4481,7 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
       { icon: 'fa-box-open', text: 'Order confirmed immediately' },
       {
         icon: 'fa-truck-fast',
-        text: 'Delivered in 2â€“5 business days',
+        text: 'Delivered in 2–5 business days',
       },
       {
         icon: 'fa-hand-holding-dollar',
@@ -3516,14 +4508,14 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
               border:none;border-radius:10px;color:#fff;font-size:0.95rem;font-weight:700;
               cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;
             ">
-              <i class="fa-solid fa-box-open"></i> Place Order â€” Pay on Delivery
+              <i class="fa-solid fa-box-open"></i> Place Order — Pay on Delivery
             </button>
           </div>
 
         </div><!-- end right panel -->
       </div><!-- end body -->
 
-      <!-- â”€â”€â”€ FOOTER â”€â”€â”€ -->
+      <!-- ═══ FOOTER ═══ -->
       <div style="
         display:flex; align-items:center; justify-content:space-between;
         padding:10px 20px; background:#091410; border-top:1px solid rgba(56,177,123,0.12);
@@ -3536,14 +4528,23 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
           background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:6px;
           padding:5px 14px;color:#64748b;font-size:0.75rem;cursor:pointer;font-family:inherit;
           transition:all 0.18s;
-        ">âœ• Cancel</button>
+        ">✖ Cancel</button>
       </div>
     </div>
   `;
 
   document.body.appendChild(mockModal);
 
-  // â”€â”€ TAB SWITCHING â”€â”€
+  // Generate UPI QR code inside mock modal's UPI panel
+  (function () {
+    const upiQrUrl = `upi://pay?pa=sporekart@ybl&pn=Sporekart&am=${amount}&cu=INR&tn=Order%20${orderId}`;
+    const qrBox = document.getElementById('pgw-upi-qr-box');
+    if (qrBox && window.QRCode) {
+      new QRCode(qrBox, { text: upiQrUrl, width: 160, height: 160, colorDark: '#1a3a2a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+    }
+  }());
+
+  // ── TAB SWITCHING ──
   function switchTab(tabId) {
     mockModal.querySelectorAll('.pgw-tab-btn').forEach((btn) => {
       const active = btn.dataset.tab === tabId;
@@ -3669,9 +4670,8 @@ function showMockPaymentModal(rzpDetails, orderRecord) {
 
 async function completeOrderPayment(orderId, paymentId, signature) {
   try {
-    const res = await fetch(`${API_BASE}/orders/verify-payment`, {
+    const data = await fetchWithAuth('/orders/verify-payment', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         razorpay_order_id: orderId,
         razorpay_payment_id: paymentId,
@@ -3679,8 +4679,7 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       }),
     });
 
-    const data = await res.json();
-    if (res.ok) {
+    if (data) {
       // Clear cart
       clearCart();
       updateCartUI();
@@ -3699,6 +4698,7 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       if (state.token && state.user) {
         try {
           const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
+          const deliveryEmail = document.getElementById('checkout-delivery-email')?.value.trim() || state.user?.email || '';
           const addressLine1 = document.getElementById('checkout-address-line1')?.value.trim() || '';
           const addressLine2 = document.getElementById('checkout-address-line2')?.value.trim() || '';
           const landmark = document.getElementById('checkout-landmark')?.value.trim() || '';
@@ -3706,7 +4706,10 @@ async function completeOrderPayment(orderId, paymentId, signature) {
           const stateVal = document.getElementById('checkout-state')?.value.trim() || '';
           const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
 
+          const fullName = document.getElementById('checkout-delivery-name')?.value.trim() || '';
           const profilePayload = {};
+          if (fullName) profilePayload.fullName = fullName;
+          if (deliveryEmail) profilePayload.email = deliveryEmail;
           if (deliveryPhone) profilePayload.whatsappNumber = deliveryPhone;
           if (addressLine1) profilePayload.address_line1 = addressLine1;
           if (addressLine2) profilePayload.address_line2 = addressLine2;
@@ -3726,6 +4729,8 @@ async function completeOrderPayment(orderId, paymentId, signature) {
             // Update local state with saved profile
             const savedUser = {
               ...state.user,
+              fullName: updated.fullName || state.user.fullName,
+              email: updated.email || state.user.email,
               whatsappNumber: updated.whatsappNumber || state.user.whatsappNumber,
               addressLine1: updated.addressLine1 || state.user.addressLine1,
               addressLine2: updated.addressLine2 || state.user.addressLine2,
@@ -3775,6 +4780,83 @@ async function completeOrderPayment(orderId, paymentId, signature) {
 // ==========================================================================
 // CULTIVATION ORDER TRACKER & INVOICES
 // ==========================================================================
+function getStatusBadgeHTML(status) {
+  let bg = "#475569";
+  let color = "#f1f5f9";
+  let label = status;
+
+  switch (status) {
+    case "placed":
+      bg = "rgba(56,187,123,0.12)";
+      color = "#38b17b";
+      label = "Placed";
+      break;
+    case "processing":
+      bg = "rgba(59,130,246,0.12)";
+      color = "#3b82f6";
+      label = "Processing";
+      break;
+    case "shipped":
+      bg = "rgba(139,92,246,0.12)";
+      color = "#8b5cf6";
+      label = "Shipped";
+      break;
+    case "in_transit":
+      bg = "rgba(245,158,11,0.12)";
+      color = "#f59e0b";
+      label = "In Transit";
+      break;
+    case "delivered":
+      bg = "rgba(16,185,129,0.12)";
+      color = "#10b981";
+      label = "Delivered";
+      break;
+    case "cancelled":
+      bg = "rgba(239,68,68,0.12)";
+      color = "#ef4444";
+      label = "Cancelled";
+      break;
+    case "CANCEL_REQUESTED":
+      bg = "rgba(245,158,11,0.15)";
+      color = "#f59e0b";
+      label = "Cancellation Requested";
+      break;
+    case "CANCEL_APPROVED":
+      bg = "rgba(16,185,129,0.15)";
+      color = "#10b981";
+      label = "Cancellation Approved";
+      break;
+    case "CANCEL_REJECTED":
+      bg = "rgba(239,68,68,0.15)";
+      color = "#ef4444";
+      label = "Cancellation Rejected";
+      break;
+    case "REFUND_PENDING":
+      bg = "rgba(59,130,246,0.15)";
+      color = "#3b82f6";
+      label = "Refund Pending";
+      break;
+    case "REFUND_INITIATED":
+    case "REFUND_PROCESSING":
+      bg = "rgba(139,92,246,0.15)";
+      color = "#8b5cf6";
+      label = "Refund Processing";
+      break;
+    case "REFUND_COMPLETED":
+      bg = "rgba(16,185,129,0.2)";
+      color = "#10b981";
+      label = "Refund Successful";
+      break;
+    case "REFUND_FAILED":
+      bg = "rgba(239,68,68,0.2)";
+      color = "#ef4444";
+      label = "Refund Failed";
+      break;
+  }
+
+  return `<span class="order-status-badge" style="background:${bg}; color:${color}; padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:600; text-transform:uppercase;">${label}</span>`;
+}
+
 async function fetchOrders() {
   if (!state.token) return;
 
@@ -3809,27 +4891,27 @@ function renderOrdersSidebar() {
   list.innerHTML = sorted
     .map((order) => {
       const activeClass = state.activeTrackingId === order.id ? 'active' : '';
-      const dateFormatted = new Date(order.created_at).toLocaleDateString(
-        'en-IN',
-        {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        },
-      );
+      const dateFormatted = new Date(order.created_at).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+      const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED"];
+      const displayStatus = refundStates.includes(order.status) ? order.status : order.delivery_status;
+      const badgeHTML = getStatusBadgeHTML(displayStatus);
 
       return `
-      <div class="order-sidebar-card ${activeClass}" data-id="${order.id}">
-        <div class="order-card-header">
-          <span class="order-id-lbl">RUN-${order.id.substring(0, 8).toUpperCase()}</span>
-          <span class="order-status-badge ${order.delivery_status}">${order.delivery_status}</span>
+        <div class="order-sidebar-card ${activeClass}" data-id="${order.id}">
+          <div class="order-card-header">
+            <span class="order-id-lbl">RUN-${order.id.substring(0, 8).toUpperCase()}</span>
+            ${badgeHTML}
+          </div>
+          <div class="order-card-date">${dateFormatted}</div>
+          <div class="order-card-total">₹${order.total.toFixed(2)} (${order.items.length} culture${order.items.length > 1 ? "s" : ""})</div>
+          ${order.expected_delivery_date && ["shipped", "in_transit"].includes(order.delivery_status) ? `<div class="order-card-delivery">Expected: ${new Date(order.expected_delivery_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}${order.delivery_days_text ? " (" + order.delivery_days_text + ")" : ""}</div>` : ""}
+          ${(order.delivery_status === "cancelled" || order.status === "cancelled") && order.cancel_reason ? `<div class="order-card-reason">Reason: ${order.cancel_reason}</div>` : ""}
         </div>
-        <div class="order-card-date">${dateFormatted}</div>
-        <div class="order-card-total">₹${order.total.toFixed(2)} (${order.items.length} culture${order.items.length > 1 ? 's' : ''})</div>
-        ${order.expected_delivery_date && ['shipped', 'in_transit'].includes(order.delivery_status) ? `<div class="order-card-delivery">Expected: ${new Date(order.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${order.delivery_days_text ? ' (' + order.delivery_days_text + ')' : ''}</div>` : ''}
-        ${order.delivery_status === 'cancelled' && order.cancel_reason ? `<div class="order-card-reason">Reason: ${order.cancel_reason}</div>` : ''}
-      </div>
-    `;
+      `;
     })
     .join('');
 
@@ -3904,14 +4986,18 @@ function renderTrackingDetails(track) {
     })
     .join('');
 
-  const canCancel = track.deliveryStatus === 'processing';
-  const cancelReason = track.cancelReason || '';
+  const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED"];
+  const displayStatus = refundStates.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus;
+  const badgeHTML = getStatusBadgeHTML(displayStatus);
+
+  const canCancel = track.deliveryStatus === "processing" && track.paymentStatus === "paid";
+  const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `
     <div class="tracker-details-header">
       <div>
         <h3>Mycelium Incubator Log</h3>
-        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0, 8).toUpperCase()} | Stage: <span class="order-status-badge ${track.deliveryStatus}">${track.deliveryStatus}</span></p>
+        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0, 8).toUpperCase()} | Stage: ${badgeHTML}</p>
       </div>
       <span style="font-size:0.75rem; color:var(--color-text-muted);">Sync time: ${dateStr}</span>
     </div>
@@ -3948,13 +5034,29 @@ function renderTrackingDetails(track) {
     </div>
 
     <div class="tracker-cancel-section">
-      ${track.deliveryStatus === 'cancelled'
+      ${track.paymentStatus === "CANCEL_REQUESTED"
       ? `
-        <div class="tracker-cancelled-note">
-          <strong>Cancellation reason:</strong> ${cancelReason || 'Not provided'}
+        <div class="tracker-status-box" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); color:#fbbf24; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Cancellation Requested</strong>: Your cancellation request is pending administrator approval.
         </div>
       `
-      : ''
+      : ""
+    }
+      ${track.paymentStatus === "REFUND_COMPLETED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-circle-check"></i> <strong>Refund Processed</strong>: Refund of transaction was successfully completed. Ref: ${track.transactionId || track.paymentId || "N/A"}.
+        </div>
+      `
+      : ""
+    }
+      ${track.deliveryStatus === "cancelled" || track.paymentStatus === "cancelled"
+      ? `
+        <div class="tracker-cancelled-note">
+          <strong>Cancellation reason:</strong> ${cancelReason || "Not provided"}
+        </div>
+      `
+      : ""
     }
     </div>
 
@@ -3971,16 +5073,18 @@ function renderTrackingDetails(track) {
     </div>
   `;
 
-  document.querySelectorAll('.order-sidebar-card').forEach((card) => {
-    if (card.getAttribute('data-id') === track.orderId) {
-      card.classList.add('active');
-      const badge = card.querySelector('.order-status-badge');
-      if (badge) {
-        badge.textContent = track.deliveryStatus;
-        badge.className = `order-status-badge ${track.deliveryStatus}`;
+  document.querySelectorAll(".order-sidebar-card").forEach((card) => {
+    if (card.getAttribute("data-id") === track.orderId) {
+      card.classList.add("active");
+      const header = card.querySelector(".order-card-header");
+      if (header) {
+        // Re-render badge dynamically
+        const oldBadge = header.querySelector(".order-status-badge");
+        if (oldBadge) oldBadge.remove();
+        header.insertAdjacentHTML("beforeend", getStatusBadgeHTML(displayStatus));
       }
     } else {
-      card.classList.remove('active');
+      card.classList.remove("active");
     }
   });
 
@@ -4061,14 +5165,14 @@ function openCancelModal(orderId) {
     modal.remove();
 
     try {
-      await fetchWithAuth(`/orders/${orderId}/cancel`, {
-        method: 'PUT',
+      await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
+        method: "POST",
         body: JSON.stringify({ reason }),
       });
-      showSuccessToast('✅ Order cancelled successfully.');
+      showSuccessToast("✅ Cancellation request submitted successfully.");
       await fetchOrders();
     } catch (err) {
-      showErrorToast(getApiErrorMessage(err) || 'Unable to cancel order at this time.');
+      showErrorToast(getApiErrorMessage(err) || "Unable to request cancellation at this time.");
     }
   });
 }
@@ -4310,7 +5414,8 @@ async function fetchCategories() {
             .forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
           state.activeCategory = btn.dataset.category;
-          filterProducts(btn.dataset.category);
+          _shopInventoryPage = 1;
+          fetchProducts();
         });
       });
     }
@@ -4389,6 +5494,8 @@ function populateCategorySelects(categories) {
     if (allBtn) {
       allBtn.addEventListener('click', () => {
         state.activeCategory = 'all';
+        _shopInventoryPage = 1;
+        fetchProducts();
       });
     }
     // Remove existing dynamic category buttons (keep 'all')
@@ -4406,7 +5513,8 @@ function populateCategorySelects(categories) {
           .forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         state.activeCategory = cat.id;
-        filterProducts();
+        _shopInventoryPage = 1;
+        fetchProducts();
       });
       filtersRow.appendChild(btn);
     });

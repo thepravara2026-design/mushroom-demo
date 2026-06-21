@@ -2,38 +2,30 @@ import { state, saveUserProfile, deleteUserProfile, saveCart } from '../utils/st
 import { fetchWithAuth, API_BASE, getApiErrorMessage } from '../api/client.js';
 import { showErrorToast, showSuccessToast } from '../utils/notify.js';
 import { isValidIndianPhone, isValidEmail, isValidPincode, getFieldError } from '../utils/validation.js';
+import { locationApi } from '../api/locationApi.js';
 
-const STATE_CITIES = {
-  "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Tirupati", "Kurnool", "Rajahmundry", "Kadapa"],
-  "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tawang"],
-  "Assam": ["Guwahati", "Dibrugarh", "Silchar", "Jorhat", "Nagaon", "Tinsukia"],
-  "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur", "Purnia", "Darbhanga", "Ara"],
-  "Chhattisgarh": ["Raipur", "Bhilai", "Bilaspur", "Korba", "Rajnandgaon"],
-  "Delhi": ["New Delhi", "Delhi Cantt", "Dwarka", "Rohini", "Saket", "Vasant Kunj"],
-  "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa"],
-  "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Bhavnagar", "Jamnagar", "Gandhinagar"],
-  "Haryana": ["Faridabad", "Gurugram", "Panipat", "Ambala", "Yamunanagar", "Rohtak", "Hisar"],
-  "Himachal Pradesh": ["Shimla", "Dharamshala", "Solan", "Mandi"],
-  "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro", "Deoghar"],
-  "Karnataka": ["Bengaluru", "Davangere", "Mysuru", "Hubballi", "Mangaluru", "Belagavi", "Tumakuru", "Ballari", "Shimoga"],
-  "Kerala": ["Thiruvananthapuram", "Kochi", "Kozhikode", "Thrissur", "Kollam", "Alappuzha", "Palakkad"],
-  "Madhya Pradesh": ["Indore", "Bhopal", "Jabalpur", "Gwalior", "Ujjain", "Sagar", "Dewas"],
-  "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Kalyan-Dombivli", "Vasai-Virar", "Aurangabad", "Navi Mumbai", "Solapur"],
-  "Manipur": ["Imphal", "Thoubal"],
-  "Meghalaya": ["Shillong", "Tura"],
-  "Mizoram": ["Aizawl", "Lunglei"],
-  "Nagaland": ["Dimapur", "Kohima"],
-  "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Berhampur", "Sambalpur"],
-  "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala", "Bathinda"],
-  "Rajasthan": ["Jaipur", "Jodhpur", "Udaipur", "Kota", "Bikaner", "Ajmer", "Bhilwara"],
-  "Sikkim": ["Gangtok", "Namchi"],
-  "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tiruppur", "Erode", "Vellore"],
-  "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar", "Khammam", "Ramagundam"],
-  "Tripura": ["Agartala", "Dharmanagar"],
-  "Uttar Pradesh": ["Lucknow", "Kanpur", "Ghaziabad", "Agra", "Meerut", "Varanasi", "Prayagraj", "Noida", "Greater Noida", "Bareilly", "Aligarh"],
-  "Uttarakhand": ["Dehradun", "Haridwar", "Roorkee", "Haldwani"],
-  "West Bengal": ["Kolkata", "Howrah", "Darjeeling", "Siliguri", "Asansol", "Durgapur", "Kharagpur"]
-};
+let _pmStatesCache = [];
+let _pmCitiesCache = {};
+
+async function _pmLoadStates() {
+  try {
+    _pmStatesCache = await locationApi.getStates();
+  } catch {
+    _pmStatesCache = [];
+  }
+}
+
+async function _pmLoadCities(state) {
+  if (!state) return [];
+  if (_pmCitiesCache[state]) return _pmCitiesCache[state];
+  try {
+    const cities = await locationApi.getCities(state);
+    _pmCitiesCache[state] = cities;
+    return cities;
+  } catch {
+    return [];
+  }
+}
 
 function _resizeImage(file, maxW, maxH) {
   return new Promise((resolve, reject) => {
@@ -74,24 +66,25 @@ class ProfileModal {
     this.modal = document.createElement('div');
     this.modal.className = 'modal-overlay open';
     this.modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
+    const u = state.user || {};
     this.modal.innerHTML = `
-      <div class="profile-modal-card">
-        <div class="profile-modal-header">
-          <div>
-            <p class="profile-modal-overline">My Profile</p>
-            <h3 class="profile-modal-title">Your account dashboard</h3>
-            <p class="profile-modal-subtitle">A modern control center for your orders, delivery info and profile settings.</p>
+      <div class="pm-card">
+        <div class="pm-head">
+          <div class="pm-head-left">
+            <div class="pm-avatar-sm">
+              <img id="pm-avatar-img" src="${u.avatarUrl || '/images/default_avatar.png'}" onerror="this.src='/images/default_avatar.png'" />
+            </div>
+            <div>
+              <div class="pm-head-name">${u.fullName || 'My Account'}</div>
+              <div class="pm-head-sub">${u.email || u.whatsappNumber || 'Manage your profile'}</div>
+            </div>
           </div>
-          <div class="profile-modal-actions">
-            <button id="btn-profile-logout" class="btn btn-secondary profile-mini-btn">Logout</button>
-            <button id="btn-profile-close" class="btn btn-primary profile-mini-btn">Shop</button>
+          <div class="pm-head-right">
+            <button id="btn-profile-close" class="pm-btn pm-btn-sm pm-btn-ghost"><i class="fa-solid fa-store"></i> Shop</button>
+            <button id="btn-profile-logout" class="pm-btn pm-btn-sm pm-btn-ghost" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
           </div>
         </div>
-        <div class="profile-modal-content">
-          <div class="profile-main-column" style="width: 100%;">
-            <div id="profile-main"></div>
-          </div>
-        </div>
+        <div id="profile-main"></div>
       </div>
     `;
 
@@ -100,7 +93,7 @@ class ProfileModal {
     // close when clicking outside the card
     this._overlayClickHandler = (ev) => {
       if (!this.modal) return;
-      const card = this.modal.querySelector('.profile-modal-card');
+      const card = this.modal.querySelector('.pm-card');
       if (card && !card.contains(ev.target)) this.close();
     };
     this.modal.addEventListener('click', this._overlayClickHandler);
@@ -178,53 +171,34 @@ class ProfileModal {
   }
 
   async renderProfile() {
-    const mainCol = this.modal.querySelector('.profile-main-column');
     const container = this.modal.querySelector('#profile-main');
 
-    let tabsContainer = this.modal.querySelector('.profile-tabs');
+    let tabsContainer = this.modal.querySelector('.pm-tabs');
     if (!tabsContainer) {
       tabsContainer = document.createElement('div');
-      tabsContainer.className = 'profile-tabs';
-      tabsContainer.style.cssText = 'display:flex;gap:1rem;margin-bottom:1.5rem;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;overflow-x:auto;';
+      tabsContainer.className = 'pm-tabs';
       tabsContainer.innerHTML = `
-        <button class="profile-tab-btn active" data-tab="details" style="background:none;border:none;font-weight:600;color:var(--color-primary);cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid var(--color-primary);">My Details</button>
-        <button class="profile-tab-btn" data-tab="orders" style="background:none;border:none;font-weight:500;color:#64748b;cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid transparent;">My Orders</button>
-        <button class="profile-tab-btn" data-tab="recent" style="background:none;border:none;font-weight:500;color:#64748b;cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid transparent;">Recent Orders</button>
-        <button class="profile-tab-btn" data-tab="quick_actions" style="background:none;border:none;font-weight:500;color:#64748b;cursor:pointer;padding:0.5rem 0.5rem;border-bottom:2px solid transparent;">Quick Actions</button>
+        <button class="pm-tab active" data-tab="details"><i class="fa-solid fa-user"></i> Details</button>
+        <button class="pm-tab" data-tab="orders"><i class="fa-solid fa-box"></i> Orders</button>
+        <button class="pm-tab" data-tab="recent"><i class="fa-solid fa-clock-rotate-left"></i> Recent</button>
+        <button class="pm-tab" data-tab="quick_actions"><i class="fa-solid fa-bolt"></i> Actions</button>
       `;
-      mainCol.insertBefore(tabsContainer, container);
+      container.parentNode.insertBefore(tabsContainer, container);
 
-      tabsContainer.querySelectorAll('.profile-tab-btn').forEach(btn => {
+      tabsContainer.querySelectorAll('.pm-tab').forEach(btn => {
         btn.addEventListener('click', () => {
-          tabsContainer.querySelectorAll('.profile-tab-btn').forEach(b => {
-            b.classList.remove('active');
-            b.style.fontWeight = '500';
-            b.style.color = '#64748b';
-            b.style.borderBottom = '2px solid transparent';
-          });
+          tabsContainer.querySelectorAll('.pm-tab').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          btn.style.fontWeight = '600';
-          btn.style.color = 'var(--color-primary)';
-          btn.style.borderBottom = '2px solid var(--color-primary)';
           this.activeTab = btn.dataset.tab;
           this.renderTabContent();
         });
       });
       this.activeTab = this.initialTab || 'details';
 
-      // Select the active tab button visually
       const activeBtn = tabsContainer.querySelector(`[data-tab="${this.activeTab}"]`);
       if (activeBtn) {
-        tabsContainer.querySelectorAll('.profile-tab-btn').forEach(b => {
-          b.classList.remove('active');
-          b.style.fontWeight = '500';
-          b.style.color = '#64748b';
-          b.style.borderBottom = '2px solid transparent';
-        });
+        tabsContainer.querySelectorAll('.pm-tab').forEach(b => b.classList.remove('active'));
         activeBtn.classList.add('active');
-        activeBtn.style.fontWeight = '600';
-        activeBtn.style.color = 'var(--color-primary)';
-        activeBtn.style.borderBottom = '2px solid var(--color-primary)';
       }
     }
     this.renderTabContent();
@@ -237,88 +211,95 @@ class ProfileModal {
 
     if (this.activeTab === 'details') {
       container.innerHTML = `
-        <section class="profile-summary-card">
-          <div class="profile-summary-content">
-            <p class="profile-overline">Account overview</p>
-            <h4>Welcome back, ${user.fullName || 'Sporekart user'}</h4>
-            <p class="profile-copy">Update your contact details and shipping preferences to keep orders moving smoothly.</p>
-          </div>
-          <div class="profile-summary-meta" style="display:flex; align-items:center; gap: 1rem;">
-            <div class="profile-avatar-container" style="position:relative; width: 64px; height: 64px; border-radius: 50%; overflow: hidden; border: 2px solid var(--color-primary); cursor: pointer;" onclick="document.getElementById('avatar-upload').click()">
-              <img id="profile-avatar-img" src="${user.avatarUrl || '/images/default_avatar.png'}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='/images/default_avatar.png'">
-              <div style="position:absolute; bottom:0; left:0; right:0; background: rgba(0,0,0,0.5); color: white; font-size: 10px; text-align: center; padding: 2px 0;">Edit</div>
+        <section class="pm-section">
+          <div class="pm-user-card">
+            <div class="pm-user-card-avatar">
+              <div class="pm-avatar-wrap" onclick="document.getElementById('avatar-upload').click()">
+                <img id="profile-avatar-img" src="${user.avatarUrl || '/images/default_avatar.png'}" onerror="this.src='/images/default_avatar.png'">
+                <div class="pm-avatar-overlay"><i class="fa-solid fa-camera"></i></div>
+              </div>
+              <input type="file" id="avatar-upload" accept="image/*" style="display:none" onchange="window.profileModal.handleAvatarChange(event)">
             </div>
-            <input type="file" id="avatar-upload" accept="image/*" style="display: none;" onchange="window.profileModal.handleAvatarChange(event)">
-            <span class="profile-pill">${(user.role || 'buyer').toUpperCase()}</span>
+            <div class="pm-user-card-info">
+              <h3>Welcome back, ${user.fullName || 'Sporekart user'}</h3>
+              <div class="pm-user-card-meta">
+                <span><i class="fa-solid fa-envelope"></i> ${user.email || 'No email'}</span>
+                <span class="pm-dot">·</span>
+                <span><i class="fa-solid fa-phone"></i> ${user.whatsappNumber || 'No phone'}</span>
+                <span class="pm-dot">·</span>
+                <span class="pm-role-badge">${(user.role || 'buyer').toUpperCase()}</span>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section class="profile-form-card">
-          <div class="profile-card-header" style="cursor:pointer;" onclick="this.parentElement.querySelector('.profile-field-grid').classList.toggle('hidden'); this.querySelector('.profile-toggle-icon').classList.toggle('fa-chevron-down'); this.querySelector('.profile-toggle-icon').classList.toggle('fa-chevron-up');">
-            <div>
-              <h4>Basic details <i class="fa-solid fa-chevron-down profile-toggle-icon" style="font-size:0.8rem;margin-left:6px;"></i></h4>
-              <p class="profile-card-subtitle">Your personal information and default delivery address.</p>
-            </div>
+        <section class="pm-section">
+          <div class="pm-section-head">
+            <i class="fa-solid fa-pen-to-square pm-section-icon"></i>
+            <h4>Personal Information</h4>
           </div>
-          <div class="profile-field-grid hidden">
-            <div class="input-field">
+          <div class="pm-grid-2">
+            <div class="pm-field">
               <label>Full name</label>
-              <input id="profile-fullname" value="${user.fullName || ''}" class="profile-input">
+              <input id="profile-fullname" value="${user.fullName || ''}" class="pm-input">
             </div>
-            <div class="input-field">
+            <div class="pm-field">
               <label>Email</label>
-              <input id="profile-email" value="${user.email || ''}" class="profile-input" ${loginMethod === 'google' ? 'disabled' : ''}>
+              <input id="profile-email" value="${user.email || ''}" class="pm-input">
             </div>
-            <div class="input-field">
+            <div class="pm-field">
               <label>Phone</label>
-              <input id="profile-phone" value="${user.whatsappNumber || ''}" class="profile-input" ${loginMethod === 'phone' ? 'disabled' : ''}>
+              <input id="profile-phone" value="${user.whatsappNumber || ''}" class="pm-input" ${loginMethod === 'phone' ? 'disabled' : ''}>
             </div>
-            <div class="input-field">
+            <div class="pm-field">
               <label>Role</label>
-              <input value="${user.role || 'buyer'}" disabled class="profile-input">
+              <input value="${user.role || 'buyer'}" disabled class="pm-input">
             </div>
-            <div class="input-field" style="grid-column: 1 / -1;">
-              <label>Address Line 1 <span style="color:var(--color-danger)">*</span></label>
-              <input id="profile-address-line1" value="${user.addressLine1 || ''}" class="profile-input" placeholder="House/Flat No, Building, Street">
-            </div>
-            <div class="input-field" style="grid-column: 1 / -1;">
-              <label>Address Line 2 <span style="color:var(--color-danger)">*</span></label>
-              <input id="profile-address-line2" value="${user.addressLine2 || ''}" class="profile-input" placeholder="Area, Sector, Locality">
-            </div>
-            <div class="input-field">
-              <label>Landmark <span style="color:var(--color-danger)">*</span></label>
-              <input id="profile-landmark" value="${user.landmark || ''}" class="profile-input" placeholder="Near XYZ">
-            </div>
-            <div class="input-field">
-              <label>Pincode <span style="color:var(--color-danger)">*</span></label>
-              <input id="profile-pincode" value="${user.defaultPincode || ''}" class="profile-input">
-            </div>
-            <div class="input-field">
-              <label>State <span style="color:var(--color-danger)">*</span></label>
-              <select id="profile-state" class="profile-input" style="background: #fff; color: var(--color-text-dark);"></select>
-            </div>
-            <div class="input-field">
-              <label>City <span style="color:var(--color-danger)">*</span></label>
-              <select id="profile-city" class="profile-input" style="background: #fff; color: var(--color-text-dark);"></select>
-            </div>
-            <div class="input-field" style="grid-column: 1 / -1;">
-              <label>Default Address (Legacy)</label>
-              <input id="profile-address" value="${user.defaultAddress || ''}" class="profile-input" disabled>
-            </div>
-          </div>
-          <div class="profile-form-footer">
-            <button id="btn-save-profile" class="btn btn-primary">Save changes</button>
           </div>
         </section>
 
-        <section class="profile-card profile-section">
-          <div class="profile-card-header">
-            <div>
-              <h4>Current cart</h4>
-              <p class="profile-card-subtitle">A quick snapshot of the items you are ready to purchase.</p>
+        <section class="pm-section">
+          <div class="pm-section-head">
+            <i class="fa-solid fa-location-dot pm-section-icon"></i>
+            <h4>Delivery Address</h4>
+          </div>
+          <div class="pm-grid-2">
+            <div class="pm-field pm-field-full">
+              <label>Address Line 1 <span class="pm-req">*</span></label>
+              <input id="profile-address-line1" value="${user.addressLine1 || ''}" class="pm-input" placeholder="House/Flat No, Building, Street">
+            </div>
+            <div class="pm-field pm-field-full">
+              <label>Address Line 2 <span class="pm-req">*</span></label>
+              <input id="profile-address-line2" value="${user.addressLine2 || ''}" class="pm-input" placeholder="Area, Sector, Locality">
+            </div>
+            <div class="pm-field">
+              <label>Landmark <span class="pm-req">*</span></label>
+              <input id="profile-landmark" value="${user.landmark || ''}" class="pm-input" placeholder="Near XYZ">
+            </div>
+            <div class="pm-field">
+              <label>Pincode <span class="pm-req">*</span></label>
+              <input id="profile-pincode" value="${user.defaultPincode || ''}" class="pm-input">
+            </div>
+            <div class="pm-field">
+              <label>State <span class="pm-req">*</span></label>
+              <select id="profile-state" class="pm-input"></select>
+            </div>
+            <div class="pm-field">
+              <label>City <span class="pm-req">*</span></label>
+              <select id="profile-city" class="pm-input"></select>
             </div>
           </div>
-          <div id="profile-cart" class="profile-cart-list"></div>
+          <div class="pm-form-actions">
+            <button id="btn-save-profile" class="pm-btn pm-btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+          </div>
+        </section>
+
+        <section class="pm-section">
+          <div class="pm-section-head">
+            <i class="fa-solid fa-cart-shopping pm-section-icon"></i>
+            <h4>Current Cart</h4>
+          </div>
+          <div id="profile-cart" class="pm-cart"></div>
         </section>
       `;
       this.modal.querySelector('#btn-save-profile')?.addEventListener('click', () => this.saveProfile());
@@ -326,43 +307,37 @@ class ProfileModal {
       this.initAddressDropdownsAndPincode();
     } else if (this.activeTab === 'orders') {
       container.innerHTML = `
-        <section class="profile-card profile-section">
-          <div class="profile-card-header">
-            <div>
-              <h4>Active Orders</h4>
-              <p class="profile-card-subtitle">Track your current shipments.</p>
-            </div>
+        <section class="pm-section">
+          <div class="pm-section-head">
+            <i class="fa-solid fa-box-open pm-section-icon"></i>
+            <h4>Active Orders</h4>
           </div>
-          <div id="profile-active-orders" class="profile-orders-list"></div>
+          <div id="profile-active-orders" class="pm-orders-list"></div>
         </section>
       `;
       this.renderOrdersList('#profile-active-orders', false);
     } else if (this.activeTab === 'recent') {
       container.innerHTML = `
-        <section class="profile-card profile-section">
-          <div class="profile-card-header">
-            <div>
-              <h4>Recent Orders</h4>
-              <p class="profile-card-subtitle">Your delivered and cancelled orders.</p>
-            </div>
+        <section class="pm-section">
+          <div class="pm-section-head">
+            <i class="fa-solid fa-clock-rotate-left pm-section-icon"></i>
+            <h4>Recent Orders</h4>
           </div>
-          <div id="profile-recent-orders" class="profile-orders-list"></div>
+          <div id="profile-recent-orders" class="pm-orders-list"></div>
         </section>
       `;
       this.renderOrdersList('#profile-recent-orders', true);
     } else if (this.activeTab === 'quick_actions') {
       container.innerHTML = `
-        <section class="profile-card profile-section">
-          <div class="profile-card-header">
-            <div>
-              <h4>Quick Actions</h4>
-              <p class="profile-card-subtitle">Manage your account and local data.</p>
-            </div>
+        <section class="pm-section">
+          <div class="pm-section-head">
+            <i class="fa-solid fa-bolt pm-section-icon"></i>
+            <h4>Quick Actions</h4>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 300px; padding: 1rem 0;">
-            <button id="tab-btn-view-orders" class="btn btn-secondary profile-sidebar-btn" style="width: 100%">Refresh Orders</button>
-            <button id="tab-btn-clear-local" class="btn btn-secondary profile-sidebar-btn" style="width: 100%">Clear Local Profile</button>
-            <button id="tab-btn-delete-account" class="btn btn-danger profile-sidebar-btn" style="width: 100%">Delete Account</button>
+          <div class="pm-actions-grid">
+            <button id="tab-btn-view-orders" class="pm-action-btn"><i class="fa-solid fa-arrows-rotate"></i> <span>Refresh Orders</span></button>
+            <button id="tab-btn-clear-local" class="pm-action-btn"><i class="fa-solid fa-broom"></i> <span>Clear Local Profile</span></button>
+            <button id="tab-btn-delete-account" class="pm-action-btn pm-action-btn-danger"><i class="fa-solid fa-trash-can"></i> <span>Delete Account</span></button>
           </div>
         </section>
       `;
@@ -383,12 +358,12 @@ class ProfileModal {
     const el = this.modal.querySelector('#profile-cart');
     if (!el) return;
     if (!state.cart || !state.cart.length) {
-      el.innerHTML = '<div class="cart-empty-message">No items in cart.</div>';
+      el.innerHTML = '<div class="pm-cart-empty">No items in cart.</div>';
       return;
     }
     el.innerHTML = state.cart
       .map(
-        (i) => `<div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px dashed #eef2f7;"><img src="${i.image_url || '/images/product_fresh.png'}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;"><div style="flex:1"><div style="font-weight:700">${i.name}</div><div style="font-size:0.9rem;color:#475569">₹${(i.price || 0).toFixed(2)} × ${i.quantity}</div></div></div>`,
+        (i) => `<div class="pm-cart-item"><img src="${i.image_url || '/images/product_fresh.png'}"><div><div class="pm-cart-item-name">${i.name}</div><div class="pm-cart-item-price">₹${(i.price || 0).toFixed(2)} × ${i.quantity}</div></div></div>`,
       )
       .join('');
   }
@@ -444,40 +419,39 @@ class ProfileModal {
       ? `${window.location.origin}/api/orders/share/${o.invoice_token}`
       : '';
     const cancelNote = o.delivery_status === 'cancelled' && o.cancel_reason
-      ? `<div style="margin-top:10px;font-size:0.92rem;color:#b91c1c;"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
+      ? `<div class="pm-cancel-note"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
       : '';
     const canCancel = o.delivery_status === 'processing';
     const items = Array.isArray(o.items) ? o.items : [];
-    const itemsHtml = items.length
-      ? `<div class="profile-order-items">
-          <div class="profile-order-items-label">Ordered items</div>
-          <ul>${items
-        .map((item) => `<li>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</li>`)
-        .join('')}</ul>
-        </div>`
+    const itemsHtmlV2 = items.length
+      ? `<div class="pm-order-items">${items
+        .map((item) => `<div class="pm-order-item"><span>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</span></div>`)
+        .join('')}</div>`
       : '';
 
-    return `<div class="profile-order-card">
-      <div class="profile-order-header">
-        <div>
-          <div class="profile-order-title">Order ${o.id || o.orderId}</div>
-          <div class="profile-order-meta">Placed: ${placed}</div>
-          ${o.expected_delivery_date && ['shipped', 'in_transit'].includes(o.delivery_status) ? `<div class="profile-order-meta" style="color:var(--color-primary);">Expected delivery: ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</div>` : ''}
-        </div>
-        <span class="profile-order-status ${status}">${status}</span>
+    return `<div class="pm-order">
+      <div class="pm-order-top">
+        <div class="pm-order-id">#${o.id || o.orderId}</div>
+        <span class="pm-order-badge ${status}">${status}</span>
+        <div class="pm-order-total">₹${total}</div>
       </div>
-      <div class="profile-order-summary">₹${total} • ${items.length} item${items.length !== 1 ? 's' : ''}</div>
-      ${itemsHtml}
+      <div class="pm-order-meta">
+        <i class="fa-regular fa-calendar"></i> ${placed}
+        <span class="pm-dot">·</span>
+        ${items.length} item${items.length !== 1 ? 's' : ''}
+        ${o.expected_delivery_date && ['shipped', 'in_transit'].includes(o.delivery_status) ? `<span class="pm-dot">·</span> <span class="pm-order-eta">Expected ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</span>` : ''}
+      </div>
+      ${itemsHtmlV2}
       ${trackingHtml}
       ${cancelNote}
-      <div class="profile-order-actions">
+      <div class="pm-order-actions">
         ${['shipped', 'in_transit', 'delivered'].includes(status) ? `
-          <button class="btn btn-secondary" onclick="window.viewInvoice('${o.id}')">View invoice</button>
-          ${shareLink ? `<button class="btn btn-secondary" data-share-url="${shareLink}" onclick="window.open(this.dataset.shareUrl,'_blank')">Share invoice</button><button class="btn btn-secondary" onclick="window.copyInvoiceLink('${o.invoice_token}')">Copy invoice link</button>` : ''}
+          <button class="pm-action-btn-sm" onclick="window.viewInvoice('${o.id}')"><i class="fa-solid fa-file-invoice"></i> Invoice</button>
+          ${shareLink ? `<button class="pm-action-btn-sm" data-share-url="${shareLink}" onclick="window.open(this.dataset.shareUrl,'_blank')"><i class="fa-solid fa-share-nodes"></i> Share</button><button class="pm-action-btn-sm" onclick="window.copyInvoiceLink('${o.invoice_token}')"><i class="fa-solid fa-link"></i> Copy</button>` : ''}
         ` : ''}
-        ${canCancel ? `<button class="btn btn-cancel profile-order-cancel" onclick="window.cancelOrderFromProfile('${o.id}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
-        ${status === 'delivered' && !o.rating ? `<button class="btn btn-primary" onclick="window.openReviewModal('${o.id}')"><i class="fa-solid fa-star"></i> Leave a Review</button>` : ''}
-        ${isRecent ? `<button class="btn btn-primary" onclick="window.orderAgainFromProfile('${o.id}')"><i class="fa-solid fa-rotate-right"></i> Order Again</button>` : ''}
+        ${canCancel ? `<button class="pm-action-btn-sm pm-action-btn-danger" onclick="window.cancelOrderFromProfile('${o.id}')"><i class="fa-solid fa-ban"></i> Cancel</button>` : ''}
+        ${status === 'delivered' && !o.rating ? `<button class="pm-action-btn-sm pm-action-btn-primary" onclick="window.openReviewModal('${o.id}')"><i class="fa-solid fa-star"></i> Review</button>` : ''}
+        ${isRecent ? `<button class="pm-action-btn-sm pm-action-btn-primary" onclick="window.orderAgainFromProfile('${o.id}')"><i class="fa-solid fa-rotate-right"></i> Reorder</button>` : ''}
       </div>
     </div>`;
   }
@@ -547,7 +521,7 @@ class ProfileModal {
       });
     }
 
-    const html = `<div style="margin-top:8px;font-size:0.9rem;color:#475569">${lines.map((l) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px dashed #f1f5f9;"><div>${l.done ? '✅' : '🔘'} ${l.label}</div><div style="color:#64748b">${l.time || '—'}</div></div>`).join('')}</div>`;
+    const html = `<div class="pm-timeline">${lines.map((l) => `<div class="pm-timeline-row ${l.done ? 'pm-timeline-done' : ''}"><div class="pm-timeline-dot ${l.done ? 'done' : 'pending'}"></div><div class="pm-timeline-label">${l.label}</div><div class="pm-timeline-time">${l.time || '—'}</div></div>`).join('')}</div>`;
     return html;
   }
 
@@ -569,31 +543,32 @@ class ProfileModal {
     }
   }
 
-  initAddressDropdownsAndPincode() {
+  async initAddressDropdownsAndPincode() {
     const stateSelect = this.modal.querySelector('#profile-state');
     const citySelect = this.modal.querySelector('#profile-city');
     const pincodeInput = this.modal.querySelector('#profile-pincode');
     if (!stateSelect || !citySelect || !pincodeInput) return;
 
-    // Populate states
+    await _pmLoadStates();
+
     stateSelect.innerHTML = '<option value="">Select State</option>';
-    Object.keys(STATE_CITIES).sort().forEach(state => {
+    _pmStatesCache.forEach(state => {
       const opt = document.createElement('option');
       opt.value = state;
       opt.textContent = state;
       stateSelect.appendChild(opt);
     });
 
-    const updateCities = (stateVal, defaultCity = '') => {
+    const updateCities = async (stateVal, defaultCity = '') => {
       citySelect.innerHTML = '<option value="">Select City</option>';
-      if (stateVal && STATE_CITIES[stateVal]) {
-        STATE_CITIES[stateVal].sort().forEach(city => {
-          const opt = document.createElement('option');
-          opt.value = city;
-          opt.textContent = city;
-          citySelect.appendChild(opt);
-        });
-      }
+      if (!stateVal) return;
+      const cities = await _pmLoadCities(stateVal);
+      cities.forEach(city => {
+        const opt = document.createElement('option');
+        opt.value = city;
+        opt.textContent = city;
+        citySelect.appendChild(opt);
+      });
       if (defaultCity) {
         citySelect.value = defaultCity;
       }
@@ -603,7 +578,6 @@ class ProfileModal {
       updateCities(e.target.value);
     });
 
-    // Pincode autofill using real postal API
     pincodeInput.addEventListener('input', async (e) => {
       const pin = e.target.value.trim();
       if (pin.length === 6 && /^\d{6}$/.test(pin)) {
@@ -615,7 +589,7 @@ class ProfileModal {
             const fetchedState = postOffice.State || '';
             const fetchedCity = postOffice.District || postOffice.Region || '';
             if (fetchedState) {
-              if (!STATE_CITIES[fetchedState]) {
+              if (!_pmStatesCache.includes(fetchedState) && !stateSelect.querySelector(`option[value="${CSS.escape(fetchedState)}"]`)) {
                 const opt = document.createElement('option');
                 opt.value = fetchedState;
                 opt.textContent = fetchedState;
@@ -631,7 +605,6 @@ class ProfileModal {
       }
     });
 
-    // Set initial values
     const user = state.user || {};
     if (user.state) {
       stateSelect.value = user.state;
@@ -683,8 +656,7 @@ class ProfileModal {
     const addressVal = addressParts.join(', ');
 
     const user = { ...(state.user || {}) };
-    // apply edits only to allowed fields
-    if (user.loginMethod !== 'google') user.email = email;
+    user.email = email;
     if (user.loginMethod !== 'phone') user.whatsappNumber = phone;
     user.fullName = fullName;
     if (this.tempAvatarData) {
@@ -703,7 +675,7 @@ class ProfileModal {
             city: city,
             state: stateVal,
           };
-          if (user.loginMethod !== 'google') payload.email = user.email;
+          payload.email = user.email;
           if (user.loginMethod !== 'phone') payload.whatsappNumber = user.whatsappNumber;
           if (this.tempAvatarData) payload.avatar_url = this.tempAvatarData;
           if (typeof pincodeVal === 'string') payload.default_pincode = pincodeVal;
@@ -857,21 +829,11 @@ class ProfileModal {
         this.activeTab = 'recent';
         this.renderTabContent();
 
-        const tabsContainer = this.modal?.querySelector('.profile-tabs');
+        const tabsContainer = this.modal?.querySelector('.pm-tabs');
         if (tabsContainer) {
-          tabsContainer.querySelectorAll('.profile-tab-btn').forEach(b => {
-            b.classList.remove('active');
-            b.style.fontWeight = '500';
-            b.style.color = '#64748b';
-            b.style.borderBottom = '2px solid transparent';
-          });
+          tabsContainer.querySelectorAll('.pm-tab').forEach(b => b.classList.remove('active'));
           const recentBtn = tabsContainer.querySelector('[data-tab="recent"]');
-          if (recentBtn) {
-            recentBtn.classList.add('active');
-            recentBtn.style.fontWeight = '600';
-            recentBtn.style.color = 'var(--color-primary)';
-            recentBtn.style.borderBottom = '2px solid var(--color-primary)';
-          }
+          if (recentBtn) recentBtn.classList.add('active');
         }
       } catch (err) {
         showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');

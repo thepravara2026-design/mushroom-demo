@@ -151,35 +151,55 @@
           <button class="admin-tab" data-tab="blogs">
             <i class="fa-solid fa-newspaper"></i> Blogs
           </button>
+          <button class="admin-tab" data-tab="refunds">
+            <i class="fa-solid fa-hand-holding-dollar"></i> Refunds
+          </button>
         </div>
 
         <div class="admin-tab-content active" id="admin-content-products">
           <div class="admin-content-inner">
             <div class="admin-section-header">
               <h3><i class="fa-solid fa-list"></i> Product Inventory</h3>
-              <div class="admin-filter-row admin-inventory-controls">
-                <input type="text" id="admin-search-prod" placeholder="Search products..." class="admin-search-input" />
-                <select id="admin-filter-cat" class="admin-select-input">
-                  <option value="all">All Categories</option>
-                </select>
-                <div class="admin-sort-group">
-                  <label for="admin-inventory-sort" class="admin-sort-label">Sort by</label>
-                  <select id="admin-inventory-sort" class="admin-select-input">
-                    <option value="name_asc">Name A–Z</option>
-                    <option value="name_desc">Name Z–A</option>
-                    <option value="price_asc">Price low → high</option>
-                    <option value="price_desc">Price high → low</option>
-                    <option value="stock_asc">Stock low → high</option>
-                    <option value="stock_desc">Stock high → low</option>
-                  </select>
+              <div class="admin-capsules">
+                <button class="admin-capsule active" data-capsule="all" type="button"><i class="fa-solid fa-cubes"></i> All Products</button>
+                <button class="admin-capsule" data-capsule="recent" type="button"><i class="fa-solid fa-clock-rotate-left"></i> Recently Added</button>
+                <button class="admin-capsule" data-capsule="add-product" type="button"><i class="fa-solid fa-plus-circle"></i> Add Product</button>
+              </div>
+            </div>
+            <div class="af-bar">
+              <div class="af-bar-inner">
+                <div class="af-search-wrap">
+                  <i class="fa-solid fa-search af-search-icon"></i>
+                  <input type="text" id="admin-search-prod" placeholder="Search products..." class="af-search-input" />
+                  <button class="af-search-clear hidden" id="af-search-clear" type="button" tabindex="-1" aria-label="Clear search"><i class="fa-solid fa-xmark"></i></button>
                 </div>
-                <div style="min-width:120px;">
-                  <label for="admin-inventory-page-size" class="admin-sort-label">Page size</label>
-                  <select id="admin-inventory-page-size" class="admin-select-input">
-                    <option value="10" selected>10</option>
-                    <option value="20">20</option>
-                    <option value="50">50</option>
-                  </select>
+                <div class="af-divider"></div>
+                <div class="af-select-group">
+                  <div class="af-select-wrap">
+                    <i class="fa-solid fa-tags af-select-icon"></i>
+                    <select id="admin-filter-cat" class="af-select">
+                      <option value="all">All Categories</option>
+                    </select>
+                  </div>
+                  <div class="af-select-wrap">
+                    <i class="fa-solid fa-arrow-down-wide-short af-select-icon"></i>
+                    <select id="admin-inventory-sort" class="af-select">
+                      <option value="name_asc">Name A–Z</option>
+                      <option value="name_desc">Name Z–A</option>
+                      <option value="price_asc">Price ↑</option>
+                      <option value="price_desc">Price ↓</option>
+                      <option value="stock_asc">Stock ↑</option>
+                      <option value="stock_desc">Stock ↓</option>
+                    </select>
+                  </div>
+                  <div class="af-select-wrap af-select-wrap--sm">
+                    <i class="fa-solid fa-list-ol af-select-icon"></i>
+                    <select id="admin-inventory-page-size" class="af-select">
+                      <option value="10" selected>10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
@@ -190,9 +210,134 @@
               products...
             </div>
           </div>
-        </div>
-  </div>
-  <!--
+          <div id="admin-capsule-add-form" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="admin-form-wrap">
+              <form id="form-admin-capsule-add" class="admin-product-form">
+                <input type="hidden" id="admin-capsule-edit-id" value="" />
+                <div class="admin-form-compact-grid">
+                  <div class="input-field">
+                    <label>Category *</label>
+                    <select id="admin-capsule-prod-category" class="admin-select-input"></select>
+                  </div>
+                  <div class="input-field">
+                    <label>Product ID</label>
+                    <input type="text" id="admin-capsule-prod-id-display" readonly placeholder="Auto-generated" />
+                  </div>
+                  <div class="input-field">
+                    <label>Product Name *</label>
+                    <input type="text" id="admin-capsule-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit" />
+                  </div>
+                  <div class="input-field span-2">
+                    <label>Description *</label>
+                    <textarea id="admin-capsule-prod-desc" required placeholder="Product details, cultivation notes..." class="admin-textarea-compact"></textarea>
+                  </div>
+                  <div class="input-field">
+                    <label>GST Slab (%)</label>
+                    <select id="admin-capsule-prod-gst" class="admin-select-input">
+                      <option value="0">0% (Exempt)</option>
+                      <option value="5" selected>5% (Food/Agri)</option>
+                      <option value="12">12% (Standard)</option>
+                      <option value="18">18% (Standard+)</option>
+                      <option value="28">28% (Luxury)</option>
+                    </select>
+                  </div>
+                  <div class="input-field span-2">
+                    <label>Weight-Based Pricing * <span class="admin-wp-hint">(add at least one variant)</span></label>
+                    <div id="admin-capsule-weight-container">
+                      <div class="admin-weight-pricing-row">
+                        <select class="admin-weight-select admin-capsule-weight-select">
+                          <option value="">Select weight</option>
+                          <option value="100g">100 g</option>
+                          <option value="200g">200 g</option>
+                          <option value="250g">250 g</option>
+                          <option value="400g">400 g</option>
+                          <option value="500g">500 g</option>
+                          <option value="1kg">1 kg</option>
+                          <option value="2kg">2 kg</option>
+                          <option value="5kg">5 kg</option>
+                        </select>
+                        <div class="awp-fields">
+                          <div class="awp-field">
+                            <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
+                            <input type="number" step="0.01" class="admin-weight-price admin-capsule-weight-price" placeholder="Price" />
+                          </div>
+                          <div class="awp-field">
+                            <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
+                            <input type="number" step="0.01" class="admin-weight-mrp admin-capsule-weight-mrp" placeholder="MRP" />
+                          </div>
+                          <div class="awp-field awp-field-stock">
+                            <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
+                            <input type="number" class="admin-weight-stock admin-capsule-weight-stock" placeholder="Stock" min="0" />
+                          </div>
+                        </div>
+                        <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
+                      </div>
+                    </div>
+                    <button type="button" class="btn-capsule-add-weight btn btn-secondary" style="margin-top:4px;font-size:0.82rem;padding:4px 12px;">
+                      <i class="fa-solid fa-plus"></i> Add Weight
+                    </button>
+                    <div class="admin-total-stock-wrap" id="admin-capsule-total-stock-wrap">
+                      <i class="fa-solid fa-cubes"></i>
+                      <span>Total Inventory:</span>
+                      <strong id="admin-capsule-total-stock">0</strong>
+                      <span>units</span>
+                    </div>
+                  </div>
+                  <div class="input-field">
+                    <label>Product Image</label>
+                    <div class="admin-cat-image-upload">
+                      <input type="url" id="admin-capsule-prod-image-url" placeholder="Paste image URL or click Browse" />
+                      <button type="button" class="admin-capsule-image-browse btn btn-secondary btn-image-browse">
+                        <i class="fa-solid fa-upload"></i> Browse
+                      </button>
+                      <input type="file" class="admin-capsule-image-file hidden-file-input" />
+                    </div>
+                  </div>
+                  <div class="admin-form-preview-compact" id="admin-capsule-img-preview">
+                    <i class="fa-solid fa-image"></i>
+                    <span>Image preview</span>
+                  </div>
+                  <div class="input-field span-2 admin-gallery-section">
+                    <div class="admin-gallery-head">
+                      <label>Gallery Images <span class="gallery-count-badge" id="capsule-gallery-count-badge">0 / 3 min</span></label>
+                      <div class="admin-gallery-actions">
+                        <button type="button" class="btn-gallery-upload" id="btn-gallery-upload-capsule"><i class="fa-solid fa-upload"></i> Upload</button>
+                        <button type="button" class="btn-gallery-add" id="btn-gallery-add-capsule"><i class="fa-solid fa-plus"></i> Add Image</button>
+                      </div>
+                      <input type="file" id="gallery-file-capsule" class="hidden-file-input" multiple accept="image/*" />
+                    </div>
+                    <div class="admin-gallery-grid" id="capsule-gallery-grid">
+                      <div class="gallery-slot" data-slot="0">
+                        <div class="gallery-preview" id="capsule-gallery-preview-0">
+                          <i class="fa-solid fa-image"></i>
+                          <span>URL #1</span>
+                        </div>
+                        <div class="gallery-input-row">
+                          <div class="gallery-input-wrap">
+                            <i class="fa-solid fa-link"></i>
+                            <input type="url" class="gallery-url-input" data-slot="0" placeholder="Paste image URL..." />
+                          </div>
+                          <button type="button" class="gallery-remove-btn" data-slot="0" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                      </div>
+                    </div>
+                    <small class="admin-gallery-hint">Add 3–8 images for carousel. First image becomes the main product image if none is set.</small>
+                  </div>
+                </div>
+                <div class="admin-error-msg hidden" id="admin-capsule-add-feedback"></div>
+                <div class="admin-form-actions">
+                  <button type="button" class="btn-capsule-reset-form btn btn-secondary">Reset</button>
+                  <button type="submit" class="btn btn-primary admin-submit-btn">
+                    <i class="fa-solid fa-plus-circle"></i>
+                    <span>Publish Product</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+      </div>
+
+      <!--
           <div class="admin-tab-content" id="admin-content-orders">
             <div class="admin-content-inner">
               <div class="admin-section-header">
@@ -535,7 +680,8 @@
             <input type="hidden" id="admin-train-edit-id" value="" />
             <div class="input-field">
               <label>Training ID</label>
-              <input type="text" id="admin-train-id-display" readonly style="background:#f1f5f9;color:#475569;font-family:monospace;" placeholder="Auto-generated on save" />
+              <input type="text" id="admin-train-id-display" readonly
+                style="background:#f1f5f9;color:#475569;font-family:monospace;" placeholder="Auto-generated on save" />
             </div>
             <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <div class="input-field">
@@ -568,13 +714,15 @@
               </div>
               <div class="input-field">
                 <label>Duration (Days)</label>
-                <input type="text" id="admin-train-duration" readonly style="background:#f1f5f9;color:#475569;font-weight:600;" placeholder="Auto-calculated" />
+                <input type="text" id="admin-train-duration" readonly
+                  style="background:#f1f5f9;color:#475569;font-weight:600;" placeholder="Auto-calculated" />
               </div>
             </div>
             <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <div class="input-field">
                 <label>Price (Strikeout) *</label>
-                <input type="number" id="admin-train-price-strikeout" min="0" step="0.01" required placeholder="₹ 1,999" />
+                <input type="number" id="admin-train-price-strikeout" min="0" step="0.01" required
+                  placeholder="₹ 1,999" />
                 <small style="color:#6b7280;font-size:0.75rem;">Must be at least 10% higher than actual price</small>
               </div>
               <div class="input-field">
@@ -791,6 +939,70 @@
     </div>
   </div>
 
+  <div class="admin-tab-content" id="admin-content-refunds">
+    <div class="admin-content-inner">
+      <div class="admin-section-header">
+        <h3>
+          <i class="fa-solid fa-hand-holding-dollar"></i> Refunds &amp; Cancellations
+        </h3>
+        <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+          <input type="text" id="admin-refunds-search" placeholder="Search order ID or email..." class="admin-search-input" style="min-width:200px;" />
+          <select id="admin-refunds-filter-status" class="admin-select-input" style="min-width:140px;">
+            <option value="">All statuses</option>
+            <option value="initiated">Initiated</option>
+            <option value="processing">Processing</option>
+            <option value="processed">Processed</option>
+            <option value="failed">Failed</option>
+            <option value="pending">Pending</option>
+          </select>
+          <button type="button" class="btn btn-secondary" onclick="loadRefundsDashboard()" style="white-space:nowrap;">
+            <i class="fa-solid fa-rotate"></i> Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+        <div class="refund-stat-card">
+          <div class="refund-stat-label">Total Refunded</div>
+          <div class="refund-stat-value refund-stat-value--green" id="admin-refund-stat-total">₹0.00</div>
+        </div>
+        <div class="refund-stat-card">
+          <div class="refund-stat-label">Pending</div>
+          <div class="refund-stat-value refund-stat-value--amber" id="admin-refund-stat-pending">0</div>
+        </div>
+        <div class="refund-stat-card">
+          <div class="refund-stat-label">Failed</div>
+          <div class="refund-stat-value refund-stat-value--red" id="admin-refund-stat-failed">0</div>
+        </div>
+        <div class="refund-stat-card">
+          <div class="refund-stat-label">Total Requests</div>
+          <div class="refund-stat-value" id="admin-refund-stat-count">0</div>
+        </div>
+      </div>
+
+      <!-- Refund table -->
+      <div class="refund-section-card">
+        <div class="refund-section-header">
+          <i class="fa-solid fa-list"></i> Refund Queue
+        </div>
+        <div id="admin-refunds-table-container">
+          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading refund queue...</div>
+        </div>
+      </div>
+
+      <!-- Audit trail -->
+      <div class="refund-section-card" style="margin-top:20px;">
+        <div class="refund-section-header">
+          <i class="fa-solid fa-clock-rotate-left"></i> Audit Trail
+        </div>
+        <div id="admin-refund-audits-container">
+          <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading audit trail...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="admin-tab-content" id="admin-content-add-product">
     <div class="admin-content-inner">
       <div class="admin-section-header">
@@ -831,10 +1043,11 @@
               </select>
             </div>
             <div class="input-field span-2">
-              <label>Weight-Based Pricing * <span style="font-weight:400;font-size:0.8rem;color:#e74c3c;">(add at least one variant)</span></label>
+              <label>Weight-Based Pricing * <span style="font-weight:400;font-size:0.8rem;color:#e74c3c;">(add at least
+                  one variant)</span></label>
               <div id="admin-weight-pricing-container">
-                <div class="admin-weight-pricing-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-                  <select class="admin-weight-select" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+                <div class="admin-weight-pricing-row">
+                  <select class="admin-weight-select">
                     <option value="">Select weight</option>
                     <option value="100g">100 g</option>
                     <option value="200g">200 g</option>
@@ -845,14 +1058,33 @@
                     <option value="2kg">2 kg</option>
                     <option value="5kg">5 kg</option>
                   </select>
-                  <input type="number" step="0.01" class="admin-weight-price" placeholder="Price (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
-                  <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
-                  <button type="button" class="btn-weight-remove" style="background:none;border:none;color:#e74c3c;cursor:pointer;padding:4px;"><i class="fa-solid fa-trash-can"></i></button>
+                  <div class="awp-fields">
+                    <div class="awp-field">
+                      <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
+                      <input type="number" step="0.01" class="admin-weight-price" placeholder="Price" />
+                    </div>
+                    <div class="awp-field">
+                      <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
+                      <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP" />
+                    </div>
+                    <div class="awp-field awp-field-stock">
+                      <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
+                      <input type="number" class="admin-weight-stock" placeholder="Stock" min="0" />
+                    </div>
+                  </div>
+                  <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
                 </div>
               </div>
-              <button type="button" id="btn-add-weight-row" class="btn btn-secondary" style="margin-top:4px;font-size:0.82rem;padding:4px 12px;">
+              <button type="button" id="btn-add-weight-row" class="btn btn-secondary"
+                style="margin-top:4px;font-size:0.82rem;padding:4px 12px;">
                 <i class="fa-solid fa-plus"></i> Add Weight
               </button>
+              <div class="admin-total-stock-wrap" id="admin-total-stock-wrap">
+                <i class="fa-solid fa-cubes"></i>
+                <span>Total Inventory:</span>
+                <strong id="admin-total-stock">0</strong>
+                <span>units</span>
+              </div>
             </div>
             <div class="input-field">
               <label>Product Image</label>
@@ -867,6 +1099,32 @@
             <div class="admin-form-preview-compact" id="admin-img-preview">
               <i class="fa-solid fa-image"></i>
               <span>Image preview</span>
+            </div>
+            <div class="input-field span-2 admin-gallery-section">
+              <div class="admin-gallery-head">
+                <label>Gallery Images <span class="gallery-count-badge" id="gallery-count-badge">0 / 3 min</span></label>
+                <div class="admin-gallery-actions">
+                  <button type="button" class="btn-gallery-upload" id="btn-gallery-upload-main"><i class="fa-solid fa-upload"></i> Upload</button>
+                  <button type="button" class="btn-gallery-add" id="btn-gallery-add-main"><i class="fa-solid fa-plus"></i> Add Image</button>
+                </div>
+                <input type="file" id="gallery-file-main" class="hidden-file-input" multiple accept="image/*" />
+              </div>
+              <div class="admin-gallery-grid" id="admin-gallery-grid">
+                <div class="gallery-slot" data-slot="0">
+                  <div class="gallery-preview" id="gallery-preview-0">
+                    <i class="fa-solid fa-image"></i>
+                    <span>URL #1</span>
+                  </div>
+                  <div class="gallery-input-row">
+                    <div class="gallery-input-wrap">
+                      <i class="fa-solid fa-link"></i>
+                      <input type="url" class="gallery-url-input" data-slot="0" placeholder="Paste image URL..." />
+                    </div>
+                    <button type="button" class="gallery-remove-btn" data-slot="0" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                </div>
+              </div>
+              <small class="admin-gallery-hint">Add 3–8 images for carousel. First image becomes the main product image if none is set.</small>
             </div>
           </div>
           <div class="admin-error-msg hidden" id="admin-add-feedback"></div>

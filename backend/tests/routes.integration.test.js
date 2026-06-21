@@ -20,30 +20,49 @@ describe('Backend API integration tests', () => {
     );
   });
 
-  test('POST /api/auth/admin-login succeeds with valid admin credentials', async () => {
+  test('POST /api/auth/admin-login sends OTP for valid admin email', async () => {
     const res = await request(app)
       .post('/api/auth/admin-login')
-      .send({ email: 'admin@sporekart.com', password: 'admin123' });
+      .send({ email: 'admin@sporekart.com' });
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveProperty('token');
-    expect(res.body.data.user.role).toBe('admin');
-  });
-
-  test('POST /api/auth/admin-login fails with wrong password', async () => {
-    const res = await request(app)
-      .post('/api/auth/admin-login')
-      .send({ email: 'admin@sporekart.com', password: 'wrongpass' });
-
-    expect(res.status).toBe(403);
+    expect(res.body.data).toHaveProperty('otp');
+    expect(res.body.data.message).toContain('OTP sent');
   });
 
   test('POST /api/auth/admin-login fails for non-admin user', async () => {
     const res = await request(app)
       .post('/api/auth/admin-login')
-      .send({ email: 'buyer@sporekart.com', password: '123456' });
+      .send({ email: 'buyer@sporekart.com' });
 
     expect(res.status).toBe(403);
+  });
+
+  test('POST /api/auth/admin-verify-otp verifies OTP and returns token', async () => {
+    // First request OTP
+    const otpRes = await request(app)
+      .post('/api/auth/admin-login')
+      .send({ email: 'admin@sporekart.com' });
+    expect(otpRes.status).toBe(200);
+    const otpCode = otpRes.body.data.otp;
+
+    // Then verify with the OTP
+    const verifyRes = await request(app)
+      .post('/api/auth/admin-verify-otp')
+      .send({ email: 'admin@sporekart.com', otpCode });
+
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.data).toHaveProperty('token');
+    expect(verifyRes.body.data.user.role).toBe('admin');
+  });
+
+  test('POST /api/auth/admin-verify-otp rejects invalid OTP', async () => {
+    const verifyRes = await request(app)
+      .post('/api/auth/admin-verify-otp')
+      .send({ email: 'admin@sporekart.com', otpCode: '654321' });
+
+    expect(verifyRes.status).toBe(400);
+    expect(verifyRes.body.error).toContain('No OTP request found');
   });
 
   test('GET /api/categories returns a list of categories', async () => {

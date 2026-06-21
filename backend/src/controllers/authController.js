@@ -74,12 +74,22 @@ router.post("/register", validateBody(registerSchema), async (req, res) => {
   }
 });
 
+const loginSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Enter a valid email address.",
+    "any.required": "Email is required.",
+  }),
+  password: Joi.string().min(1).required().messages({
+    "any.required": "Password is required.",
+  }),
+});
+
 /**
  * POST /api/auth/login
  * Supabase-native email+password login via signInWithPassword.
  * Returns { token, user } in the same shape as the OTP verify-otp flow.
  */
-router.post("/login", async (req, res) => {
+router.post("/login", validateBody(loginSchema), async (req, res) => {
   if (db.isMock || !supabaseAnon) {
     // In mock mode: fall through to the OTP/admin-login flow instead
     return respondError(
@@ -90,9 +100,6 @@ router.post("/login", async (req, res) => {
   }
 
   const { email, password } = req.body;
-  if (!email || !password) {
-    return respondError(res, "email and password are required.", 400);
-  }
 
   try {
     const { data, error } = await supabaseAnon.auth.signInWithPassword({
@@ -204,7 +211,7 @@ const verifyOtpSchema = Joi.object({
       "string.pattern.base": "OTP must be a 6-digit code.",
       "any.required": "OTP code is required.",
     }),
-  loginMethod: Joi.string().valid("email", "phone", "google").optional(),
+  loginMethod: Joi.string().valid("email", "phone").optional(),
   whatsappNumber: Joi.string().allow("").optional(),
 });
 
@@ -335,29 +342,62 @@ const adminLoginSchema = Joi.object({
     "string.email": "Enter a valid admin email address.",
     "any.required": "Admin email is required.",
   }),
-  password: Joi.string().min(1).required().messages({
-    "any.required": "Password is required.",
+});
+
+const adminVerifyOtpSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Enter a valid admin email address.",
+    "any.required": "Admin email is required.",
   }),
+  otpCode: Joi.string()
+    .pattern(/^\d{6}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "OTP must be a 6-digit code.",
+      "any.required": "OTP code is required.",
+    }),
 });
 
 /**
  * POST /api/auth/admin-login
- * Isolated Admin Login using static password credentials.
+ * Requests an OTP for admin login (passwordless).
  */
 router.post(
   "/admin-login",
   validateBody(adminLoginSchema),
   async (req, res) => {
     try {
-      const { email, password } = req.body;
-      const result = await authService.adminLogin(email, password);
-      if (result.token) setAuthCookie(res, result.token);
+      const { email } = req.body;
+      const result = await authService.adminRequestOTP(email);
       return success(res, result);
     } catch (err) {
       return respondError(
         res,
         err.message || "Admin login failed",
         err.status || 500,
+      );
+    }
+  },
+);
+
+/**
+ * POST /api/auth/admin-verify-otp
+ * Verifies the admin OTP and issues a JWT token.
+ */
+router.post(
+  "/admin-verify-otp",
+  validateBody(adminVerifyOtpSchema),
+  async (req, res) => {
+    try {
+      const { email, otpCode } = req.body;
+      const result = await authService.adminVerifyOTP(email, otpCode);
+      if (result.token) setAuthCookie(res, result.token);
+      return success(res, result);
+    } catch (err) {
+      return respondError(
+        res,
+        err.message || "OTP verification failed",
+        err.status || 400,
       );
     }
   },

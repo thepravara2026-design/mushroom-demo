@@ -236,24 +236,32 @@ async function run() {
   }
 
   // ──────────────────────────────────────────────────────
-  section('8. Admin Login');
+  section('8. Admin OTP Login');
   // ──────────────────────────────────────────────────────
 
-  const adminLogin = await api('/auth/admin-login', {
+  const adminOtpRes = await api('/auth/admin-login', {
     method: 'POST',
-    body: JSON.stringify({
-      email: 'admin@sporekart.com',
-      password: 'admin123',
-    }),
+    body: JSON.stringify({ email: 'admin@sporekart.com' }),
   }).catch((e) => { fail(e.message); return {}; });
-  if (adminLogin.user) {
-    pass(
-      `Admin login OK: ${adminLogin.user.email} (role: ${adminLogin.user.role})`,
-    );
-    if (adminLogin.user.role !== 'admin') fail('Admin role mismatch!');
+  if (adminOtpRes.otp) {
+    pass(`Admin OTP requested. OTP: ${adminOtpRes.otp}`);
+  } else {
+    fail(`No OTP returned from admin-login. Got: ${JSON.stringify(adminOtpRes)}`);
   }
 
-  const adminToken = adminLogin.token;
+  const otpCode = (adminOtpRes && adminOtpRes.otp) ? adminOtpRes.otp : '123456';
+  const adminVerify = await api('/auth/admin-verify-otp', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'admin@sporekart.com', otpCode }),
+  }).catch((e) => { fail(e.message); return {}; });
+  if (adminVerify.user) {
+    pass(
+      `Admin login OK: ${adminVerify.user.email} (role: ${adminVerify.user.role})`,
+    );
+    if (adminVerify.user.role !== 'admin') fail('Admin role mismatch!');
+  }
+
+  const adminToken = adminVerify.token;
 
   // ──────────────────────────────────────────────────────
   section('9. Admin Order Operations');

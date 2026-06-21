@@ -2,10 +2,68 @@ const productRepo = require("../repositories/productRepository");
 const categoryRepo = require("../repositories/categoryRepository");
 const escapeRegExp = require("../utils/escapeRegExp");
 
-async function listProducts() {
-  const { data, error } = await productRepo.findAll();
+function _computeStockStatus(stock) {
+  if (stock > 10) return { label: "Available", variant: "available" };
+  if (stock > 5) return { label: "Limited Stocks", variant: "limited" };
+  return { label: "Few Available", variant: "few" };
+}
+
+function _attachStockStatus(product) {
+  if (!product) return product;
+  return { ...product, stock_status: _computeStockStatus(product.stock) };
+}
+
+async function listProducts(filters = {}) {
+  const { sort, category, search, page, limit } = filters;
+
+  // If pagination params provided, return paginated result
+  if (page || limit) {
+    const p = parseInt(page, 10) || 1;
+    const l = parseInt(limit, 10) || 10;
+    const { count, error: countError } = await productRepo.countAll({ category, search });
+    if (countError) throw new Error(countError.message);
+
+    const { data, error } = await productRepo.findAll({ sort, category, search, page: p, limit: l });
+    if (error) throw new Error(error.message);
+
+    const total = count ?? (Array.isArray(data) ? data.length : 0);
+    const totalPages = Math.max(1, Math.ceil(total / l));
+
+    return {
+      products: (data || []).map(_attachStockStatus),
+      pagination: { page: p, limit: l, total, totalPages },
+    };
+  }
+
+  // No pagination — return all products (backward compatible)
+  const { data, error } = await productRepo.findAll({ sort, category, search });
   if (error) throw new Error(error.message);
-  return data;
+  return (data || []).map(_attachStockStatus);
+}
+
+async function getNextProductId(categoryId) {
+  const { data: allProds } = await productRepo.findAll();
+  const allProducts = Array.isArray(allProds) ? allProds : [];
+
+  // If categoryId provided, look up its uid
+  let prefix = "prod";
+  if (categoryId) {
+    const { data: categoriesList } = await categoryRepo.findAll();
+    if (Array.isArray(categoriesList)) {
+      const cat = categoriesList.find((c) => c.id === categoryId);
+      if (cat) {
+        prefix = cat.category_id || cat.categoryUid || cat.categoryId || categoryId;
+      }
+    }
+  }
+
+  const numbers = allProducts
+    .map(p => {
+      const m = new RegExp(`^${escapeRegExp(prefix)}-pid-(\\d+)$`).exec(String(p.id));
+      return m ? Number.parseInt(m[1], 10) : 0;
+    });
+  const nextNum = numbers.length ? Math.max(...numbers) + 1 : 1;
+  return `${prefix}-pid-${String(nextNum).padStart(5, "0")}`;
 }
 
 async function getProduct(id) {
@@ -15,13 +73,18 @@ async function getProduct(id) {
     err.status = 404;
     throw err;
   }
-  // Optionally compute growthMetadata as before
-  return data;
+  return _attachStockStatus(data);
+}
+
+function toBaseValue(weight, unit) {
+  if (unit === "kg") return weight * 1000;
+  if (unit === "l") return weight * 1000;
+  return weight; // g or ml
 }
 
 function derivePriceFromWeightPricing(weightPricing) {
   if (Array.isArray(weightPricing) && weightPricing.length > 0) {
-    const sorted = [...weightPricing].sort((a, b) => a.weight - b.weight);
+    const sorted = [...weightPricing].sort((a, b) => toBaseValue(a.weight, a.unit) - toBaseValue(b.weight, b.unit));
     return {
       price: sorted[0].price,
       mrp_price: sorted[0].mrp_price || null,
@@ -67,16 +130,20 @@ async function createProduct(payload) {
       throw err;
     }
 
+    // Ensure all variants use the same unit type (weight vs litre)
+    const unitTypes = new Set(weight_pricing.map(w => (w.unit === "g" || w.unit === "kg") ? "weight" : "litre"));
+    if (unitTypes.size > 1) {
+      const err = new Error("Cannot mix weight (g/kg) and litre (ml/l) units in the same product.");
+      err.status = 400;
+      throw err;
+    }
+
     // Ensure prices increase with weight
-    const sorted = [...weight_pricing].sort((a, b) => {
-      const aGrams = a.unit === 'kg' ? a.weight * 1000 : a.weight;
-      const bGrams = b.unit === 'kg' ? b.weight * 1000 : b.weight;
-      return aGrams - bGrams;
-    });
+    const sorted = [...weight_pricing].sort((a, b) => toBaseValue(a.weight, a.unit) - toBaseValue(b.weight, b.unit));
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i].price <= sorted[i - 1].price) {
         const err = new Error(
-          `Price for ${sorted[i].weight}${sorted[i].unit} (₹${sorted[i].price}) must be higher than price for ${sorted[i - 1].weight}${sorted[i - 1].unit} (₹${sorted[i - 1].price}). Larger weights must cost more.`
+          `Price for ${sorted[i].weight}${sorted[i].unit} (₹${sorted[i].price}) must be higher than price for ${sorted[i - 1].weight}${sorted[i - 1].unit} (₹${sorted[i - 1].price}). Larger quantities must cost more.`
         );
         err.status = 400;
         throw err;
@@ -178,6 +245,7 @@ async function createProduct(payload) {
     image_url:
       image_url ||
       "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600",
+    image_urls: payload.image_urls || [],
     category,
     difficulty: difficulty || "beginner",
     gst_rate: parseInt(gst_rate, 10) || 5,
@@ -218,6 +286,7 @@ async function updateProduct(productId, updates) {
   if (updates.mrp_price !== undefined)
     toUpdate.mrp_price = parseFloat(updates.mrp_price);
   if (updates.image_url !== undefined) toUpdate.image_url = updates.image_url;
+  if (updates.image_urls !== undefined) toUpdate.image_urls = updates.image_urls;
   if (updates.category !== undefined) {
     const { data: categoriesList } = await categoryRepo.findAll();
     const validCategoryIds = categoriesList
@@ -258,16 +327,20 @@ async function updateProduct(productId, updates) {
       throw err;
     }
 
+    // Ensure all variants use the same unit type (weight vs litre)
+    const unitTypes = new Set(updates.weight_pricing.map(w => (w.unit === "g" || w.unit === "kg") ? "weight" : "litre"));
+    if (unitTypes.size > 1) {
+      const err = new Error("Cannot mix weight (g/kg) and litre (ml/l) units in the same product.");
+      err.status = 400;
+      throw err;
+    }
+
     // Ensure prices increase with weight
-    const sorted = [...updates.weight_pricing].sort((a, b) => {
-      const aGrams = a.unit === 'kg' ? a.weight * 1000 : a.weight;
-      const bGrams = b.unit === 'kg' ? b.weight * 1000 : b.weight;
-      return aGrams - bGrams;
-    });
+    const sorted = [...updates.weight_pricing].sort((a, b) => toBaseValue(a.weight, a.unit) - toBaseValue(b.weight, b.unit));
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i].price <= sorted[i - 1].price) {
         const err = new Error(
-          `Price for ${sorted[i].weight}${sorted[i].unit} (₹${sorted[i].price}) must be higher than price for ${sorted[i - 1].weight}${sorted[i - 1].unit} (₹${sorted[i - 1].price}). Larger weights must cost more.`
+          `Price for ${sorted[i].weight}${sorted[i].unit} (₹${sorted[i].price}) must be higher than price for ${sorted[i - 1].weight}${sorted[i - 1].unit} (₹${sorted[i - 1].price}). Larger quantities must cost more.`
         );
         err.status = 400;
         throw err;
@@ -322,6 +395,7 @@ async function deleteProduct(productId) {
 module.exports = {
   listProducts,
   getProduct,
+  getNextProductId,
   createProduct,
   updateProduct,
   deleteProduct,

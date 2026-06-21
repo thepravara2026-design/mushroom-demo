@@ -11,15 +11,38 @@ const { validateBody, Joi } = require("../middleware/validate");
 const escapeRegExp = require("../utils/escapeRegExp");
 
 // GET /api/products
-// Fetch all products
+// Fetch products with optional server-side filtering, sorting, and pagination
 router.get("/", async (req, res) => {
   try {
-    const products = await productService.listProducts();
+    const { sort, category, search, page, limit } = req.query;
+    const filters = {};
+    if (sort) filters.sort = sort;
+    if (category) filters.category = category;
+    if (search) filters.search = search;
+    if (page) filters.page = parseInt(page, 10);
+    if (limit) filters.limit = parseInt(limit, 10);
+    const products = await productService.listProducts(filters);
     return success(res, products);
   } catch (error) {
     return respondError(
       res,
       error.message || "Failed to fetch products",
+      error.status || 500,
+    );
+  }
+});
+
+// GET /api/products/next-id
+// Compute the next available product ID for a given category (admin preview)
+router.get("/next-id", async (req, res) => {
+  try {
+    const { category } = req.query;
+    const productId = await productService.getNextProductId(category || null);
+    return success(res, { productId });
+  } catch (error) {
+    return respondError(
+      res,
+      error.message || "Failed to generate product ID",
       error.status || 500,
     );
   }
@@ -54,13 +77,14 @@ router.post(
       category: Joi.string().required(),
       mrp_price: Joi.number().optional(),
       image_url: Joi.string().uri().optional(),
+      image_urls: Joi.array().items(Joi.string().uri()).optional(),
       difficulty: Joi.string().optional(),
       gst_rate: Joi.number().optional(),
       stock: Joi.number().optional(),
       weight_pricing: Joi.array().items(
         Joi.object({
           weight: Joi.number().required(),
-          unit: Joi.string().valid("g", "kg").required(),
+          unit: Joi.string().valid("g", "kg", "ml", "l").required(),
           price: Joi.number().required(),
           mrp_price: Joi.number().optional(),
         }),
@@ -88,13 +112,14 @@ const updateProductSchema = Joi.object({
   category: Joi.string().optional(),
   mrp_price: Joi.number().optional(),
   image_url: Joi.string().uri().optional(),
+  image_urls: Joi.array().items(Joi.string().uri()).optional(),
   difficulty: Joi.string().optional(),
   gst_rate: Joi.number().optional(),
   stock: Joi.number().optional(),
   weight_pricing: Joi.array().items(
     Joi.object({
       weight: Joi.number().required(),
-      unit: Joi.string().valid("g", "kg").required(),
+      unit: Joi.string().valid("g", "kg", "ml", "l").required(),
       price: Joi.number().required(),
       mrp_price: Joi.number().optional(),
     }),

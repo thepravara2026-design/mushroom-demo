@@ -156,6 +156,25 @@ function initAdminSse() {
     adminEs.addEventListener('error', () => {
       // noop; BroadcastChannel remains as fallback
     });
+    // Auto-refresh refunds tab on webhook-driven refund updates
+    adminEs.addEventListener('refund:updated', (ev) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        if (state.user?.role === 'admin') {
+          // Only reload if the refunds tab is currently active
+          const refundsContent = document.getElementById('admin-content-refunds');
+          if (refundsContent?.classList.contains('active')) {
+            loadRefundsDashboard();
+          }
+          const refund = payload.refund;
+          if (refund) {
+            showSuccessToast(`\u{1F4B0} Refund ${refund.status || 'updated'} for order ${(refund.order_id || '').substring(0, 8).toUpperCase()}`);
+          }
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    });
   } catch (e) {
     console.warn(e);
   }
@@ -166,13 +185,29 @@ globalThis.addEventListener('auth:changed', () => initAdminSse());
 function showLoginPanel() {
   loginPanel.classList.remove('hidden');
   dashboard.classList.add('hidden');
+
+  // Reset form to initial state (email step)
+  const otpField = document.getElementById('admin-auth-otp-field');
+  const emailField = document.getElementById('admin-auth-email-field');
+  const btn = document.getElementById('admin-auth-btn');
+  const sentEl = document.getElementById('admin-auth-otp-sent');
+  const emailInput = document.getElementById('admin-auth-email');
+  const otpInput = document.getElementById('admin-auth-otp');
+
+  if (otpField) otpField.classList.add('hidden');
+  if (emailField) emailField.classList.remove('hidden');
+  if (btn) btn.textContent = 'Send OTP';
+  if (sentEl) sentEl.textContent = '';
+  if (emailInput) emailInput.value = '';
+  if (otpInput) otpInput.value = '';
+  loginError.classList.add('hidden');
 }
 
 function showDashboard() {
   loginPanel.classList.add('hidden');
   dashboard.classList.remove('hidden');
 
-  if (state.user) {
+  if (state.user && dashboardSubtitle) {
     dashboardSubtitle.textContent = `Welcome, ${state.user.fullName || state.user.email}`;
   }
 
@@ -242,8 +277,11 @@ function generateProductId(categoryUid) {
   return `${categoryUid}-pid-${String(nextNumber).padStart(5, '0')}`;
 }
 
+let _activeCapsule = 'all';
+
 function getAdminInventorySortValue() {
-  return document.getElementById('admin-inventory-sort')?.value || 'name_asc';
+  const sel = document.getElementById('admin-inventory-sort');
+  return sel?.value || 'date_desc';
 }
 
 function applyAdminInventorySort(products) {
@@ -252,6 +290,9 @@ function applyAdminInventorySort(products) {
   const sortMultiplier = sortDirection === 'desc' ? -1 : 1;
 
   return [...products].sort((a, b) => {
+    if (sortKey === 'date') {
+      return sortMultiplier * (_adminProducts.indexOf(a) - _adminProducts.indexOf(b));
+    }
     if (sortKey === 'price') {
       return sortMultiplier * ((a.price || 0) - (b.price || 0));
     }
@@ -269,14 +310,20 @@ function applyAdminInventorySort(products) {
   });
 }
 
-function updateProductIdDisplay() {
+async function updateProductIdDisplay() {
   const editId = document.getElementById('admin-edit-id')?.value;
   if (editId) return;
   const productCategory = document.getElementById('admin-prod-category');
   if (!productIdDisplay || !productCategory) return;
   const selectedOption = productCategory.selectedOptions?.[0];
-  const categoryUid = selectedOption?.dataset?.categoryUid || '';
-  productIdDisplay.value = generateProductId(categoryUid);
+  const categoryId = productCategory.value;
+  try {
+    const res = await fetchWithAuth(`/products/next-id${categoryId ? `?category=${encodeURIComponent(categoryId)}` : ''}`);
+    productIdDisplay.value = res.productId;
+  } catch {
+    // fallback: clear field on error
+    productIdDisplay.value = '';
+  }
 }
 
 function updateCategoryImagePreview() {
@@ -471,37 +518,94 @@ async function readFileAsDataUrl(file) {
 }
 
 // -----------------------------
-// Weight pricing row management
+// Weight / Litre pricing row management
 // -----------------------------
+const WEIGHT_OPTIONS = [
+  { value: '100g', label: '100 g' },
+  { value: '200g', label: '200 g' },
+  { value: '250g', label: '250 g' },
+  { value: '400g', label: '400 g' },
+  { value: '500g', label: '500 g' },
+  { value: '1kg', label: '1 kg' },
+  { value: '2kg', label: '2 kg' },
+  { value: '5kg', label: '5 kg' },
+];
+
+const LITRE_OPTIONS = [
+  { value: '10ml', label: '10 ml' },
+  { value: '20ml', label: '20 ml' },
+  { value: '40ml', label: '40 ml' },
+  { value: '50ml', label: '50 ml' },
+  { value: '100ml', label: '100 ml' },
+  { value: '200ml', label: '200 ml' },
+  { value: '1l', label: '1 l' },
+  { value: '2l', label: '2 l' },
+  { value: '5l', label: '5 l' },
+];
+
+function getActivePricingMode() {
+  const activeBtn = document.querySelector('.pricing-type-btn.active');
+  return activeBtn ? activeBtn.getAttribute('data-mode') : 'weight';
+}
+
+function toggleStockField() {
+  const rows = weightPricingContainer.querySelectorAll('.admin-weight-pricing-row');
+  const hasVariants = rows.length > 0 && Array.from(rows).some(r => r.querySelector('.admin-weight-select')?.value);
+  const stockFieldContainer = document.getElementById('admin-prod-stock')?.closest('.admin-pf-field');
+  if (stockFieldContainer) {
+    stockFieldContainer.style.display = hasVariants ? 'none' : '';
+  }
+}
+
 function createWeightRow(value) {
+  const mode = getActivePricingMode();
+  const options = mode === 'litre' ? LITRE_OPTIONS : WEIGHT_OPTIONS;
   const row = document.createElement('div');
   row.className = 'admin-weight-pricing-row';
-  row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
   row.innerHTML = `
-    <select class="admin-weight-select" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
-      <option value="">Select weight</option>
-      <option value="100g">100 g</option>
-      <option value="200g">200 g</option>
-      <option value="250g">250 g</option>
-      <option value="400g">400 g</option>
-      <option value="500g">500 g</option>
-      <option value="1kg">1 kg</option>
-      <option value="2kg">2 kg</option>
-      <option value="5kg">5 kg</option>
+    <select class="admin-weight-select">
+      <option value="">Select ${mode === 'litre' ? 'volume' : 'weight'}</option>
+      ${options.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
     </select>
-    <input type="number" step="0.01" class="admin-weight-price" placeholder="Price (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
-    <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP (₹)" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;" />
-    <button type="button" class="btn-weight-remove" style="background:none;border:none;color:#e74c3c;cursor:pointer;padding:4px;"><i class="fa-solid fa-trash-can"></i></button>
+    <div class="awp-fields">
+      <div class="awp-field">
+        <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
+        <input type="number" step="0.01" class="admin-weight-price" placeholder="Price" />
+      </div>
+      <div class="awp-field">
+        <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
+        <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP" />
+      </div>
+      <div class="awp-field awp-field-stock">
+        <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
+        <input type="number" class="admin-weight-stock" placeholder="Stock" min="0" />
+      </div>
+    </div>
+    <button type="button" class="btn-weight-remove" title="Remove variant"><i class="fa-solid fa-trash-can"></i></button>
   `;
   if (value) {
     const sel = row.querySelector('.admin-weight-select');
-    const key = value.unit === 'kg' ? `${value.weight}kg` : `${value.weight}g`;
+    const key = value.unit === 'kg' ? `${value.weight}kg` : value.unit === 'l' ? `${value.weight}l` : `${value.weight}${value.unit}`;
     if ([...sel.options].some(o => o.value === key)) sel.value = key;
     row.querySelector('.admin-weight-price').value = value.price;
     row.querySelector('.admin-weight-mrp').value = value.mrp_price || '';
+    row.querySelector('.admin-weight-stock').value = value.stock ?? '';
   }
-  row.querySelector('.btn-weight-remove').addEventListener('click', () => row.remove());
+  row.querySelector('.btn-weight-remove').addEventListener('click', () => {
+    if (weightPricingContainer.querySelectorAll('.admin-weight-pricing-row').length > 1) {
+      row.remove();
+    }
+    toggleStockField();
+    updateMainTotalStock();
+  });
   return row;
+}
+
+function sortWeightVariants(data) {
+  return [...data].sort((a, b) => {
+    const toBase = (v) => (v.unit === 'kg' || v.unit === 'l') ? v.weight * 1000 : v.weight;
+    return toBase(a) - toBase(b);
+  });
 }
 
 function getWeightPricingData() {
@@ -511,35 +615,44 @@ function getWeightPricingData() {
     const sel = row.querySelector('.admin-weight-select');
     const price = row.querySelector('.admin-weight-price').value;
     const mrp = row.querySelector('.admin-weight-mrp').value;
+    const stockVal = row.querySelector('.admin-weight-stock')?.value;
     if (sel.value && price) {
-      const match = sel.value.match(/^(\d+)(g|kg)$/);
+      const match = sel.value.match(/^(\d+)(g|kg|ml|l)$/);
       if (match) {
         data.push({
           weight: parseInt(match[1], 10),
           unit: match[2],
           price: parseFloat(price),
           ...(mrp ? { mrp_price: parseFloat(mrp) } : {}),
+          ...(stockVal ? { stock: parseInt(stockVal, 10) } : { stock: 0 }),
         });
       }
     }
   });
-  return data;
+  return sortWeightVariants(data);
 }
 
 function setWeightPricingData(data) {
   weightPricingContainer.innerHTML = '';
-  if (Array.isArray(data)) {
-    data.forEach(item => weightPricingContainer.appendChild(createWeightRow(item)));
+  if (Array.isArray(data) && data.length > 0) {
+    // Detect mode from existing data
+    const isLitre = data.some(v => v.unit === 'ml' || v.unit === 'l');
+    const targetMode = isLitre ? 'litre' : 'weight';
+    document.querySelectorAll('.pricing-type-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-mode') === targetMode);
+    });
+    sortWeightVariants(data).forEach(item => weightPricingContainer.appendChild(createWeightRow(item)));
   }
   if (!weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
     weightPricingContainer.appendChild(createWeightRow(null));
   }
+  toggleStockField();
+  updateMainTotalStock();
 }
-
 // -----------------------------
 // Helper: product/category helpers
 // -----------------------------
-function buildProductBody({ name, category, description, gstRate, image_url, productId, editId, weightPricing }) {
+function buildProductBody({ name, category, description, gstRate, image_url, productId, editId, weightPricing, stock, image_urls }) {
   const body = {
     name,
     category,
@@ -547,7 +660,9 @@ function buildProductBody({ name, category, description, gstRate, image_url, pro
     gst_rate: Number.parseInt(String(gstRate || 0), 10),
     image_url,
     weight_pricing: weightPricing,
+    stock: Math.max(0, stock || 0),
   };
+  if (image_urls && image_urls.length > 0) body.image_urls = image_urls;
   if (!editId) body.id = productId;
   return body;
 }
@@ -595,9 +710,34 @@ async function fetchAdminInventory() {
   }
 }
 
+function variantLabel(v) {
+  if (v.unit === 'kg') return `${v.weight} kg`;
+  if (v.unit === 'l') return `${v.weight} l`;
+  if (v.unit === 'ml') return `${v.weight} ml`;
+  return `${v.weight} g`;
+}
+
 function renderAdminInventory() {
   const grid = document.getElementById('admin-inventory-grid');
   if (!grid) return;
+
+  const afBar = document.querySelector('#admin-content-products .af-bar');
+  const capsuleForm = document.getElementById('admin-capsule-add-form');
+
+  // ── Add Product capsule ────────────────────────
+  if (_activeCapsule === 'add-product') {
+    if (afBar) afBar.style.display = 'none';
+    if (capsuleForm) {
+      capsuleForm.style.display = 'block';
+      populateCapsuleCategorySelect();
+    }
+    grid.innerHTML = '';
+    return;
+  }
+
+  // ── Show grid + filter bar, hide inline form ───
+  if (afBar) afBar.style.display = '';
+  if (capsuleForm) capsuleForm.style.display = 'none';
 
   const query = (
     document.getElementById('admin-search-prod')?.value || ''
@@ -613,79 +753,112 @@ function renderAdminInventory() {
     return;
   }
   products = applyAdminInventorySort(products);
-  const totalPages = Math.max(1, Math.ceil(products.length / adminInventoryPageSize));
+
+  // Capsule filtering — recently added: last 5 products with all their variants
+  if (_activeCapsule === 'recent') {
+    products = products.slice(0, 5);
+  }
+
+  // Build a flat row list: one row per variant for multi-variant products
+  const rows = [];
+  products.forEach(p => {
+    const hasWp = Array.isArray(p.weight_pricing) && p.weight_pricing.length > 0;
+    if (hasWp) {
+      p.weight_pricing.forEach((v, vi) => {
+        rows.push({ product: p, variant: v, variantIndex: vi });
+      });
+    } else {
+      rows.push({ product: p, variant: null, variantIndex: -1 });
+    }
+  });
+
+  const totalItems = rows.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / adminInventoryPageSize));
   if (_adminInventoryPage > totalPages) _adminInventoryPage = totalPages;
   const pageStart = (_adminInventoryPage - 1) * adminInventoryPageSize;
-  const pageProducts = products.slice(pageStart, pageStart + adminInventoryPageSize);
-  const pageEnd = Math.min(pageStart + pageProducts.length, products.length);
+  const pageRows = rows.slice(pageStart, pageStart + adminInventoryPageSize);
+  const pageEnd = Math.min(pageStart + pageRows.length, totalItems);
 
-  grid.innerHTML = `
-    <div class="admin-product-grid">
-      ${pageProducts
-      .map((p) => {
-        // stock display removed (inventory managed separately)
-        const categoryObj = _adminCategories.find((c) => c.id === p.category);
-        const categoryName = categoryObj ? categoryObj.name : 'Unknown';
-        const categoryId = categoryObj
-          ? categoryObj.category_id || categoryObj.categoryId || ''
-          : '';
+  const isRecent = _activeCapsule === 'recent';
+  const chevHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
+  grid.innerHTML = pageRows
+    .map((r) => {
+      const p = r.product;
+      const categoryObj = _adminCategories.find((c) => c.id === p.category);
+      const categoryName = categoryObj ? categoryObj.name : 'Unknown';
+      const isVariant = r.variant !== null;
+
+      if (isVariant) {
+        const v = r.variant;
+        const vLabel = variantLabel(v);
+        const vStock = v.stock ?? 0;
         return `
-          <div class="admin-product-card" data-id="${p.id}">
-            <div class="admin-card-meta">
-              <img src="${p.image_url}" alt="${p.name}">
-              <div class="admin-card-title">
-                <div class="admin-card-title-head">
-                  <h4>${p.name}</h4>
-                  <span class="admin-prod-id">ID: ${p.id}</span>
-                </div>
-                <p>${p.description}</p>
-              </div>
-            </div>
-            <div class="admin-card-body">
-              <div class="admin-card-details">
-                <div class="admin-price-cell">
-                  ${(() => {
-                    const hasWp = Array.isArray(p.weight_pricing) && p.weight_pricing.length > 0;
-                    if (hasWp) {
-                      const first = p.weight_pricing[0];
-                      return `<span class="price-act">₹${first.price.toFixed(2)}</span>${first.mrp_price ? `<span class="price-mrp">₹${first.mrp_price.toFixed(2)}</span>` : ''}<span style="font-size:0.7rem;color:#6b7280;display:block;">${p.weight_pricing.length} weight variant(s)</span>`;
-                    }
-                    return `<span class="price-act">₹${(p.price || 0).toFixed(2)}</span>${p.mrp_price ? `<span class="price-mrp">₹${p.mrp_price.toFixed(2)}</span>` : ''}`;
-                  })()}
-                </div>
-                <div class="admin-badge-row">
-                  <span class="admin-gst-badge">GST ${p.gst_rate}%</span>
-                </div>
-              </div>
-              <span class="admin-category-chip">${categoryName}${categoryId ? ` (${categoryId})` : ''}</span>
-            </div>
-            <div class="admin-card-footer">
-              <div class="admin-card-stats">
-                <span class="admin-card-tag">${categoryName}</span>
-              </div>
-              <div class="admin-row-actions">
-                  <button class="btn-admin-edit" onclick="globalThis.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-                <button class="btn-admin-delete" onclick="globalThis.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
-              </div>
-            </div>
+      <div class="ac-card ${isRecent ? 'ac-card--recent' : ''}" data-id="${p.id}" data-variant="${r.variantIndex}">
+        <div class="ac-row">
+          <img class="ac-thumb" src="${p.image_url}" alt="${p.name}">
+          <span class="ac-title">${p.name} — ${vLabel}</span>
+          <span class="ac-meta">${categoryName}</span>
+          <span class="ac-prod-price">₹${v.price.toFixed(2)}${v.mrp_price ? ` <span class="ac-mrp-strike">₹${v.mrp_price.toFixed(2)}</span>` : ''}</span>
+          <span class="ac-prod-gst">GST ${p.gst_rate}%</span>
+          <span class="ac-prod-stock">Stock: ${vStock}</span>
+          <div class="ac-actions">
+            <button class="ac-btn-edit" onclick="event.stopPropagation();globalThis.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button class="ac-btn-del" onclick="event.stopPropagation();globalThis.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
           </div>
-        `;
-      })
-      .join('')}
-    </div>
-    <div class="admin-pagination">
-      <div class="admin-pagination-info">Showing ${pageStart + 1}–${pageEnd} of ${products.length} products</div>
+        </div>
+      </div>`;
+      }
+
+      return `
+      <div class="ac-card ${isRecent ? 'ac-card--recent' : ''}" data-id="${p.id}">
+        <div class="ac-row" onclick="globalThis.toggleOrderExpand(this)">
+          <img class="ac-thumb" src="${p.image_url}" alt="${p.name}">
+          <span class="ac-title">${p.name}</span>
+          <span class="ac-meta">${categoryName}</span>
+          <span class="ac-prod-price">₹${(p.price || 0).toFixed(2)}${p.mrp_price ? ` <span class="ac-mrp-strike">₹${p.mrp_price.toFixed(2)}</span>` : ''}</span>
+          <span class="ac-prod-gst">GST ${p.gst_rate}%</span>
+          <span class="ac-prod-stock">Stock: ${p.stock ?? 0}</span>
+          <div class="ac-actions">
+            <button class="ac-btn-edit" onclick="event.stopPropagation();globalThis.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button class="ac-btn-del" onclick="event.stopPropagation();globalThis.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
+          </div>
+          <span class="ac-chev">${chevHtml}</span>
+        </div>
+        <div class="ac-detail" style="max-height:0;opacity:0;">
+          <div class="ac-detail-inner">
+            <p><strong>ID:</strong> ${p.id}</p>
+            <p>${p.description}</p>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('') + (!isRecent ? `
+    <div class="admin-pagination" style="margin-top:12px;">
+      <div class="admin-pagination-info">Showing ${pageStart + 1}–${pageEnd} of ${totalItems} item${totalItems > 1 ? 's' : ''}</div>
       <div class="admin-pagination-actions">
-        <button type="button" class="btn btn-secondary" id="admin-page-prev" ${_adminInventoryPage === 1 ? 'disabled' : ''}>
+        <button type="button" class="btn-pagination" id="admin-page-prev" ${_adminInventoryPage === 1 ? 'disabled' : ''}>
           <i class="fa-solid fa-chevron-left"></i>
         </button>
-        <span class="admin-pagination-label">Page ${_adminInventoryPage} of ${totalPages}</span>
-        <button type="button" class="btn btn-secondary" id="admin-page-next" ${_adminInventoryPage === totalPages ? 'disabled' : ''}>
+        <div class="admin-page-jump">
+          <input type="text" id="admin-go-to-page" class="admin-go-page-input" inputmode="numeric" placeholder="Go to" />
+          <span class="admin-pagination-label">Page ${_adminInventoryPage} of ${totalPages}</span>
+        </div>
+        <button type="button" class="btn-pagination" id="admin-page-next" ${_adminInventoryPage === totalPages ? 'disabled' : ''}>
           <i class="fa-solid fa-chevron-right"></i>
         </button>
+        <select id="admin-inventory-page-size" class="pagination-page-size" title="Page size">
+          <option value="10"${adminInventoryPageSize === 10 ? ' selected' : ''}>10 / page</option>
+          <option value="20"${adminInventoryPageSize === 20 ? ' selected' : ''}>20 / page</option>
+          <option value="50"${adminInventoryPageSize === 50 ? ' selected' : ''}>50 / page</option>
+        </select>
       </div>
-    </div>`;
+    </div>` : '');
 
+  const goToInput = document.getElementById('admin-go-to-page');
+  if (goToInput) goToInput.value = '';
+
+  // ── Capsule pagination event listeners ──
   const prevBtn = document.getElementById('admin-page-prev');
   const nextBtn = document.getElementById('admin-page-next');
   if (prevBtn) {
@@ -704,6 +877,376 @@ function renderAdminInventory() {
       }
     });
   }
+  const pageSizeSelect = document.getElementById('admin-inventory-page-size');
+  if (pageSizeSelect) {
+    pageSizeSelect.addEventListener('change', () => {
+      const v = Number.parseInt(pageSizeSelect.value, 10) || 10;
+      adminInventoryPageSize = v;
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  }
+}
+
+/* ── Gallery helpers ─────────────────────────── */
+function getGalleryUrlInputs(containerId) {
+  const grid = document.getElementById(containerId);
+  return grid ? [...grid.querySelectorAll('.gallery-url-input')] : [];
+}
+
+function getGalleryUrls(containerId) {
+  return getGalleryUrlInputs(containerId)
+    .map(inp => inp.value.trim())
+    .filter(Boolean);
+}
+
+function updateGalleryCount(containerId, badgeId) {
+  const urls = getGalleryUrls(containerId);
+  const badge = document.getElementById(badgeId);
+  if (badge) badge.textContent = `${urls.length} / 3 min`;
+}
+
+function createGallerySlotHTML(index, previewPrefix, galleryName, initialValue) {
+  const dataAttr = galleryName ? `data-gallery="${galleryName}"` : '';
+  const previewContent = initialValue
+    ? `<img src="${initialValue}" alt="Gallery ${index + 1}" />`
+    : `<i class="fa-solid fa-image"></i><span>URL #${index + 1}</span>`;
+  return `
+    <div class="gallery-slot" data-slot="${index}">
+      <div class="gallery-preview" id="${previewPrefix}-${index}">
+        ${previewContent}
+      </div>
+      <div class="gallery-input-row">
+        <div class="gallery-input-wrap">
+          <i class="fa-solid fa-link"></i>
+          <input type="url" class="gallery-url-input" ${dataAttr} data-slot="${index}" placeholder="Paste image URL..." value="${initialValue || ''}" />
+        </div>
+        <button type="button" class="gallery-remove-btn" ${dataAttr} data-slot="${index}" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>`;
+}
+
+function wireGalleryInput(input, newIdx, previewPrefix) {
+  input.addEventListener('input', () => {
+    const preview = document.getElementById(`${previewPrefix}-${newIdx}`);
+    const val = input.value.trim();
+    if (preview) {
+      if (val) {
+        preview.innerHTML = `<img src="${val}" alt="Gallery ${newIdx + 1}" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-image\\\\\\'></i><span>URL #${newIdx + 1}</span>'">`;
+      } else {
+        preview.innerHTML = `<i class="fa-solid fa-image"></i><span>URL #${newIdx + 1}</span>`;
+      }
+    }
+  });
+}
+
+function wireGalleryRemove(rmBtn, newSlot, containerId, previewPrefix, badgeId) {
+  rmBtn.style.display = '';
+  rmBtn.addEventListener('click', () => {
+    const g = document.getElementById(containerId);
+    if (g && g.querySelectorAll('.gallery-slot').length <= 1) return;
+    newSlot.remove();
+    reindexGallerySlots(containerId, previewPrefix);
+    updateGalleryCount(containerId, badgeId);
+    const g2 = document.getElementById(containerId);
+    if (g2 && g2.querySelectorAll('.gallery-slot').length === 1) {
+      const lastRm = g2.querySelector('.gallery-remove-btn');
+      if (lastRm) lastRm.style.display = 'none';
+    }
+  });
+}
+
+function addGallerySlot(containerId, previewPrefix, galleryName, initialValue) {
+  const grid = document.getElementById(containerId);
+  if (!grid) return;
+  const slots = grid.querySelectorAll('.gallery-slot');
+  if (slots.length >= 8) return;
+  const newIdx = slots.length;
+  grid.insertAdjacentHTML('beforeend', createGallerySlotHTML(newIdx, previewPrefix, galleryName, initialValue));
+  const newSlot = grid.querySelector(`.gallery-slot[data-slot="${newIdx}"]`);
+  const input = newSlot?.querySelector('.gallery-url-input');
+  if (input) wireGalleryInput(input, newIdx, previewPrefix);
+  const rmBtn = newSlot?.querySelector('.gallery-remove-btn');
+  const badgeId = `${galleryName === 'capsule' ? 'capsule-' : ''}gallery-count-badge`;
+  if (rmBtn) wireGalleryRemove(rmBtn, newSlot, containerId, previewPrefix, badgeId);
+  updateGalleryCount(containerId, badgeId);
+  return newSlot;
+}
+
+async function handleGalleryFiles(fileInputId, containerId, previewPrefix, galleryName) {
+  const fileInput = document.getElementById(fileInputId);
+  if (!fileInput || !fileInput.files || !fileInput.files.length) return;
+  const badgeId = `${galleryName === 'capsule' ? 'capsule-' : ''}gallery-count-badge`;
+  const grid = document.getElementById(containerId);
+  // Determine starting slot — fill empty inputs first, then add new slots
+  const slots = grid ? [...grid.querySelectorAll('.gallery-slot')] : [];
+  let slotIdx = 0;
+  const files = [...fileInput.files];
+  for (let fi = 0; fi < files.length; fi++) {
+    if (slotIdx >= 8) break;
+    const file = files[fi];
+    let dataUrl;
+    try {
+      dataUrl = await readFileAsDataUrl(file);
+    } catch { continue; }
+    // Find next slot without a value
+    while (slotIdx < slots.length) {
+      const inp = slots[slotIdx].querySelector('.gallery-url-input');
+      if (inp && !inp.value.trim()) break;
+      slotIdx++;
+    }
+    if (slotIdx < slots.length) {
+      // Fill existing empty slot
+      const inp = slots[slotIdx].querySelector('.gallery-url-input');
+      const preview = document.getElementById(`${previewPrefix}-${slotIdx}`);
+      if (inp) { inp.value = dataUrl; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+      slotIdx++;
+    } else {
+      // Add new slot
+      const newSlot = addGallerySlot(containerId, previewPrefix, galleryName, dataUrl);
+      if (newSlot) {
+        const newInp = newSlot.querySelector('.gallery-url-input');
+        if (newInp) newInp.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+  }
+  // Reset file input so same files can be re-selected
+  fileInput.value = '';
+  updateGalleryCount(containerId, badgeId);
+}
+
+function reindexGallerySlots(containerId, previewPrefix) {
+  const grid = document.getElementById(containerId);
+  if (!grid) return;
+  grid.querySelectorAll('.gallery-slot').forEach((slot, i) => {
+    slot.dataset.slot = i;
+    const preview = slot.querySelector('.gallery-preview');
+    if (preview) preview.id = `${previewPrefix}-${i}`;
+    const input = slot.querySelector('.gallery-url-input');
+    if (input) {
+      input.dataset.slot = i;
+      // restore preview on reindex
+      const val = input.value.trim();
+      if (val) {
+        preview.innerHTML = `<img src="${val}" alt="Gallery ${i + 1}" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-image\\\\\\'></i><span>URL #${i + 1}</span>'">`;
+      } else {
+        preview.innerHTML = `<i class="fa-solid fa-image"></i><span>URL #${i + 1}</span>`;
+      }
+    }
+    const rmBtn = slot.querySelector('.gallery-remove-btn');
+    if (rmBtn) rmBtn.dataset.slot = i;
+  });
+}
+
+function resetGallery(containerId, previewPrefix, badgeId) {
+  const grid = document.getElementById(containerId);
+  if (!grid) return;
+  grid.innerHTML = createGallerySlotHTML(0, previewPrefix, '');
+  const firstSlot = grid.querySelector('.gallery-slot');
+  const firstInput = firstSlot?.querySelector('.gallery-url-input');
+  if (firstInput) wireGalleryInput(firstInput, 0, previewPrefix);
+  const rmBtn = firstSlot?.querySelector('.gallery-remove-btn');
+  if (rmBtn) rmBtn.style.display = 'none';
+  if (badgeId) {
+    const badge = document.getElementById(badgeId);
+    if (badge) badge.textContent = '0 / 3 min';
+  }
+}
+
+function initGallery(containerId, previewPrefix, badgeId, addBtnId, galleryName) {
+  const addBtn = document.getElementById(addBtnId);
+  if (addBtn) addBtn.addEventListener('click', () => addGallerySlot(containerId, previewPrefix, galleryName));
+  const grid = document.getElementById(containerId);
+  if (grid) {
+    grid.querySelectorAll('.gallery-slot').forEach((slot) => {
+      const input = slot.querySelector('.gallery-url-input');
+      const slotIdx = parseInt(slot.dataset.slot, 10);
+      if (input) wireGalleryInput(input, slotIdx, previewPrefix);
+      const rmBtn = slot.querySelector('.gallery-remove-btn');
+      if (rmBtn) wireGalleryRemove(rmBtn, slot, containerId, previewPrefix, badgeId);
+    });
+  }
+  updateGalleryCount(containerId, badgeId);
+}
+
+/* ── Live total stock helpers ─────────────────── */
+function updateCapsuleTotalStock() {
+  const container = document.getElementById('admin-capsule-weight-container');
+  const totalEl = document.getElementById('admin-capsule-total-stock');
+  if (!container || !totalEl) return;
+  let total = 0;
+  container.querySelectorAll('.admin-weight-stock').forEach(inp => {
+    const v = parseInt(inp.value, 10);
+    if (Number.isFinite(v) && v > 0) total += v;
+  });
+  totalEl.textContent = total;
+}
+
+function updateMainTotalStock() {
+  const container = document.getElementById('admin-weight-pricing-container');
+  const totalEl = document.getElementById('admin-total-stock');
+  if (!container || !totalEl) return;
+  let total = 0;
+  container.querySelectorAll('.admin-weight-stock').forEach(inp => {
+    const v = parseInt(inp.value, 10);
+    if (Number.isFinite(v) && v > 0) total += v;
+  });
+  totalEl.textContent = total;
+}
+
+// Delegate input events for both stock containers
+document.addEventListener('input', (ev) => {
+  const target = ev.target;
+  if (target.classList.contains('admin-weight-stock')) {
+    if (target.closest('#admin-capsule-weight-container')) {
+      updateCapsuleTotalStock();
+    } else if (target.closest('#admin-weight-pricing-container')) {
+      updateMainTotalStock();
+    }
+  }
+});
+
+/* ── Capsule add‑product form helpers ──────────── */
+function populateCapsuleCategorySelect() {
+  const sel = document.getElementById('admin-capsule-prod-category');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Select a category</option>';
+  (_adminCategories || []).forEach(c => {
+    sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+  });
+  // Sync default category from the main form if available
+  const mainCat = document.getElementById('admin-prod-category');
+  if (mainCat && mainCat.value) sel.value = mainCat.value;
+}
+
+function resetCapsuleAddForm() {
+  const form = document.getElementById('form-admin-capsule-add');
+  if (form) form.reset();
+  populateCapsuleCategorySelect();
+  const preview = document.getElementById('admin-capsule-img-preview');
+  if (preview) preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+  document.getElementById('admin-capsule-edit-id').value = '';
+  const wc = document.getElementById('admin-capsule-weight-container');
+  if (wc) {
+    wc.innerHTML = `
+      <div class="admin-weight-pricing-row">
+        <select class="admin-weight-select admin-capsule-weight-select">
+          <option value="">Select weight</option>
+          <option value="100g">100 g</option>
+          <option value="200g">200 g</option>
+          <option value="250g">250 g</option>
+          <option value="400g">400 g</option>
+          <option value="500g">500 g</option>
+          <option value="1kg">1 kg</option>
+          <option value="2kg">2 kg</option>
+          <option value="5kg">5 kg</option>
+        </select>
+        <div class="awp-fields">
+          <div class="awp-field">
+            <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
+            <input type="number" step="0.01" class="admin-weight-price admin-capsule-weight-price" placeholder="Price" />
+          </div>
+          <div class="awp-field">
+            <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
+            <input type="number" step="0.01" class="admin-weight-mrp admin-capsule-weight-mrp" placeholder="MRP" />
+          </div>
+          <div class="awp-field awp-field-stock">
+            <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
+            <input type="number" class="admin-weight-stock admin-capsule-weight-stock" placeholder="Stock" min="0" />
+          </div>
+        </div>
+        <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
+      </div>`;
+  }
+  updateCapsuleTotalStock();
+  resetGallery('capsule-gallery-grid', 'capsule-gallery-preview', 'capsule-gallery-count-badge');
+  const fb = document.getElementById('admin-capsule-add-feedback');
+  if (fb) { fb.classList.add('hidden'); fb.textContent = ''; }
+}
+
+async function handleCapsuleAddSubmit(e) {
+  e.preventDefault();
+  const feedback = document.getElementById('admin-capsule-add-feedback');
+  if (feedback) { feedback.classList.add('hidden'); feedback.textContent = ''; }
+
+  const categoryId = document.getElementById('admin-capsule-prod-category')?.value;
+  const name = document.getElementById('admin-capsule-prod-name')?.value.trim();
+  const desc = document.getElementById('admin-capsule-prod-desc')?.value.trim();
+  const gstRate = parseFloat(document.getElementById('admin-capsule-prod-gst')?.value || '5');
+
+  if (!categoryId || !name || !desc) {
+    if (feedback) { feedback.textContent = 'Please fill in all required fields.'; feedback.classList.remove('hidden'); }
+    return;
+  }
+
+  // Gather weight rows
+  const weightContainer = document.getElementById('admin-capsule-weight-container');
+  const weightPricing = [];
+  if (weightContainer) {
+    weightContainer.querySelectorAll('.admin-weight-pricing-row').forEach(row => {
+      const w = row.querySelector('.admin-capsule-weight-select')?.value;
+      const price = parseFloat(row.querySelector('.admin-capsule-weight-price')?.value);
+      const mrp = parseFloat(row.querySelector('.admin-capsule-weight-mrp')?.value);
+      const stockVal = row.querySelector('.admin-capsule-weight-stock')?.value;
+      if (w && !isNaN(price)) {
+        weightPricing.push({
+          weight: w,
+          price,
+          mrp_price: isNaN(mrp) ? undefined : mrp,
+          stock: stockVal ? parseInt(stockVal, 10) : 0,
+        });
+      }
+    });
+  }
+
+  if (!weightPricing.length) {
+    if (feedback) { feedback.textContent = 'Add at least one weight variant with a price.'; feedback.classList.remove('hidden'); }
+    return;
+  }
+
+  const imageUrl = document.getElementById('admin-capsule-prod-image-url')?.value.trim() || '';
+  const galleryUrls = getGalleryUrls('capsule-gallery-grid');
+
+  const editId = document.getElementById('admin-capsule-edit-id')?.value || '';
+  const isEdit = Boolean(editId);
+
+  const payload = {
+    category: categoryId,
+    name,
+    description: desc,
+    gst_rate: gstRate,
+    weight_pricing: weightPricing,
+    image_url: imageUrl,
+    gallery_urls: galleryUrls,
+  };
+
+  if (isEdit) payload.id = editId;
+
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const res = await fetchWithAuth(isEdit ? `/products/${editId}` : '/products', {
+      method: isEdit ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    showSuccessToast(isEdit ? 'Product updated successfully' : 'Product added successfully');
+    resetCapsuleAddForm();
+    // Refresh product list
+    _adminProducts = await fetchWithAuth('/products');
+    // Switch back to All Products capsule
+    document.querySelectorAll('.admin-capsule').forEach(b => b.classList.remove('active'));
+    const allBtn = document.querySelector('.admin-capsule[data-capsule="all"]');
+    if (allBtn) allBtn.classList.add('active');
+    _activeCapsule = 'all';
+    _adminInventoryPage = 1;
+    renderAdminInventory();
+  } catch (err) {
+    if (feedback) { feedback.textContent = getApiErrorMessage(err); feedback.classList.remove('hidden'); }
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 function adminEditProduct(productId) {
@@ -717,6 +1260,8 @@ function adminEditProduct(productId) {
   document.getElementById('admin-prod-desc').value = product.description;
   document.getElementById('admin-prod-category').value = product.category;
   document.getElementById('admin-prod-gst').value = String(product.gst_rate);
+  const stockField = document.getElementById('admin-prod-stock');
+  if (stockField) stockField.value = product.stock ?? 100;
   if (productImageUrl) productImageUrl.value = product.image_url || '';
   if (productImageFile) productImageFile.value = '';
 
@@ -728,6 +1273,41 @@ function adminEditProduct(productId) {
 
   // Load weight pricing if available
   setWeightPricingData(product.weight_pricing || null);
+
+  // Load gallery images
+  const galleryUrls = product.image_urls || [];
+  resetGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge');
+  if (galleryUrls.length > 0) {
+    const grid = document.getElementById('admin-gallery-grid');
+    if (grid) grid.innerHTML = '';
+    galleryUrls.forEach((url, i) => {
+      // remove any existing slot at this index first
+      const grid2 = document.getElementById('admin-gallery-grid');
+      if (grid2 && i > 0) {
+        const btn = document.getElementById('btn-gallery-add-main');
+        if (btn) btn.click();
+      } else if (grid2 && i === 0) {
+        // fill first slot
+        const firstInput = grid2.querySelector('.gallery-url-input');
+        if (firstInput) {
+          firstInput.value = url;
+          firstInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+    });
+    // Now fill in values for all slots (they were added via the add button)
+    const grid3 = document.getElementById('admin-gallery-grid');
+    if (grid3) {
+      const inputs = grid3.querySelectorAll('.gallery-url-input');
+      inputs.forEach((inp, idx) => {
+        if (galleryUrls[idx]) {
+          inp.value = galleryUrls[idx];
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+    }
+    updateGalleryCount('admin-gallery-grid', 'gallery-count-badge');
+  }
 
   const label = document.getElementById('admin-submit-label');
   if (label) label.textContent = 'Update Product';
@@ -771,7 +1351,12 @@ async function handleAdminAddProduct(event) {
 
     const expectedPrefix = selectedCategoryUid ? `${selectedCategoryUid}-pid-` : '';
     if (!productId || (expectedPrefix && !productId.startsWith(expectedPrefix))) {
-      productId = generateProductId(selectedCategoryUid);
+      try {
+        const res = await fetchWithAuth(`/products/next-id${selectedCategoryUid ? `?category=${encodeURIComponent(document.getElementById('admin-prod-category')?.value || '')}` : ''}`);
+        productId = res.productId;
+      } catch {
+        productId = generateProductId(selectedCategoryUid);
+      }
       if (productIdDisplay) productIdDisplay.value = productId;
     }
 
@@ -795,36 +1380,49 @@ async function handleAdminAddProduct(event) {
     // Check for duplicate weight variants within this product
     const weightKeys = weightPricing.map(w => `${w.weight}${w.unit}`);
     if (new Set(weightKeys).size !== weightKeys.length) {
-      feedback.textContent = 'Duplicate weight variants are not allowed. Each weight (e.g. 500g, 1kg) can only be added once per product.';
+      feedback.textContent = 'Duplicate variants are not allowed. Each option can only be added once per product.';
       feedback.classList.remove('hidden');
       feedback.style.color = 'var(--color-danger)';
       return;
     }
 
-    // Ensure prices increase with weight (larger weight → higher price)
-    const sorted = [...weightPricing].sort((a, b) => {
-      const aGrams = a.unit === 'kg' ? a.weight * 1000 : a.weight;
-      const bGrams = b.unit === 'kg' ? b.weight * 1000 : b.weight;
-      return aGrams - bGrams;
-    });
+    // Ensure all variants use the same unit type
+    const unitTypes = new Set(weightPricing.map(w => (w.unit === 'g' || w.unit === 'kg') ? 'weight' : 'litre'));
+    if (unitTypes.size > 1) {
+      feedback.textContent = 'Cannot mix weight (g/kg) and litre (ml/l) units in the same product.';
+      feedback.classList.remove('hidden');
+      feedback.style.color = 'var(--color-danger)';
+      return;
+    }
+
+    // Helper to convert to base unit for sorting
+    function toBaseValue(weight, unit) {
+      if (unit === 'kg' || unit === 'l') return weight * 1000;
+      return weight; // g or ml
+    }
+
+    // Ensure prices increase with quantity
+    const sorted = [...weightPricing].sort((a, b) => toBaseValue(a.weight, a.unit) - toBaseValue(b.weight, b.unit));
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i].price <= sorted[i - 1].price) {
-        const prevLabel = sorted[i - 1].unit === 'kg' ? `${sorted[i - 1].weight} kg` : `${sorted[i - 1].weight} g`;
-        const currLabel = sorted[i].unit === 'kg' ? `${sorted[i].weight} kg` : `${sorted[i].weight} g`;
-        feedback.textContent = `Price for ${currLabel} (₹${sorted[i].price}) must be higher than price for ${prevLabel} (₹${sorted[i - 1].price}). Larger weights must cost more.`;
+        const prevLabel = variantLabel(sorted[i - 1]);
+        const currLabel = variantLabel(sorted[i]);
+        feedback.textContent = `Price for ${currLabel} (₹${sorted[i].price}) must be higher than price for ${prevLabel} (₹${sorted[i - 1].price}). Larger quantities must cost more.`;
         feedback.classList.remove('hidden');
         feedback.style.color = 'var(--color-danger)';
         return;
       }
     }
 
-    // Check for duplicate product name across all categories
+    // Check for duplicate product name within the same category
     const nameDup = _adminProducts.find(p =>
       p.name.toLowerCase() === name.toLowerCase() &&
+      p.category === category &&
       p.id !== editId
     );
     if (nameDup) {
-      feedback.textContent = `A product with the name "${name}" already exists. Product names must be unique.`;
+      const catName = _adminCategories.find(c => c.id === category)?.name || category;
+      feedback.textContent = `A product named "${name}" already exists in the "${catName}" category.`;
       feedback.classList.remove('hidden');
       feedback.style.color = 'var(--color-danger)';
       return;
@@ -832,20 +1430,35 @@ async function handleAdminAddProduct(event) {
 
     const method = editId ? 'PUT' : 'POST';
     const url = editId ? `${API_BASE}/products/${editId}` : `${API_BASE}/products`;
-    const body = buildProductBody({ name, category, description, gstRate: gst_rate, image_url, productId, editId, weightPricing });
+    const stock = weightPricing.reduce((sum, v) => sum + (v.stock || 0), 0);
 
-    const { res, data } = await submitJson(url, method, body);
+    // Parse gallery URLs from gallery grid
+    let image_urls = getGalleryUrls('admin-gallery-grid');
+
+    const body = buildProductBody({ name, category, description, gstRate: gst_rate, image_url, productId, editId, weightPricing, stock, image_urls });
+
+    const { res, data: respData } = await submitJson(url, method, body);
     if (res.ok) {
       showSuccessToast(editId ? '✅ Product updated successfully!' : '✅ Product published successfully!');
       resetAdminForm();
+      // Update local cache instead of re-fetching all products
+      if (editId) {
+        const idx = _adminProducts.findIndex(p => p.id === editId);
+        if (idx !== -1) _adminProducts[idx] = { ..._adminProducts[idx], ...body, id: editId };
+      } else {
+        // Check if product was already added (from next-id flow)
+        if (!_adminProducts.some(p => p.id === productId)) {
+          _adminProducts.push({ id: productId, ...body });
+        }
+      }
+      renderAdminInventory();
       try {
         bcProducts?.postMessage({ type: 'products:updated' });
       } catch (e) {
         console.warn(e);
       }
-      window.location.href = '/';
     } else {
-      feedback.textContent = data.error || 'Failed to save product.';
+      feedback.textContent = respData.error || 'Failed to save product.';
       feedback.classList.remove('hidden');
     }
   } catch (err) {
@@ -873,6 +1486,24 @@ async function fetchAdminOrders() {
   }
 }
 
+function toggleOrderExpand(rowEl) {
+  const card = rowEl.closest('.aoc-card, .ac-card');
+  if (!card) return;
+  const detail = card.querySelector('.aoc-detail');
+  if (!detail) return;
+  const isOpen = card.classList.contains('aoc-expanded');
+  if (isOpen) {
+    card.classList.remove('aoc-expanded');
+    detail.style.maxHeight = '0';
+    detail.style.opacity = '0';
+  } else {
+    card.classList.add('aoc-expanded');
+    detail.style.maxHeight = detail.scrollHeight + 'px';
+    detail.style.opacity = '1';
+  }
+}
+globalThis.toggleOrderExpand = toggleOrderExpand;
+
 function renderAdminOrders(orders) {
   const wrap = document.getElementById('admin-orders-list');
   if (!wrap) return;
@@ -895,7 +1526,6 @@ function renderAdminOrders(orders) {
       const date = new Date(o.created_at).toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'short',
-        year: 'numeric',
       });
       const customerName = o.customer_name || o.user_email || 'Customer';
       const phone = o.delivery_phone || 'Not specified';
@@ -911,120 +1541,132 @@ function renderAdminOrders(orders) {
         : '';
       const productDisplay = o.items && o.items.length > 1
         ? `
-      <details class="admin-order-items">
-        <summary>${o.items.length} products</summary>
+      <details class="aoc-prod-details">
+        <summary>${o.items.length} items</summary>
         <ul>${itemRows}</ul>
       </details>
     `
         : `
-      <div class="admin-order-items-single">${itemRows}</div>
+      <div class="aoc-prod-list">${itemRows}</div>
     `;
 
       const currentStage = statusSteps.indexOf(o.delivery_status || 'placed');
       const progressSteps = statusSteps
         .map(
           (step, index) => `
-      <div class="admin-progress-step ${step} ${index <= currentStage ? 'active' : ''}">
-        <span>${statusLabels[step]}</span>
-      </div>
-      ${index < statusSteps.length - 1 ? '<div class="admin-progress-connector"></div>' : ''}
+      <div class="aoc-pstep ${index <= currentStage ? 'aoc-pstep--active' : ''}" title="${statusLabels[step]}"></div>
+      ${index < statusSteps.length - 1 ? `<div class="aoc-pline ${index < currentStage ? 'aoc-pline--fill' : ''}"></div>` : ''}
     `,
         )
         .join('');
+
       const invoiceLink = o.invoice_token
         ? `${globalThis.location.origin}/api/orders/share/${o.invoice_token}`
         : '';
 
+      const statusEmoji = {
+        placed: '📋',
+        processing: '⚙️',
+        shipped: '📦',
+        in_transit: '🚚',
+        delivered: '✅',
+        cancelled: '❌',
+      };
+
       return `
-      <div class="admin-order-card">
-        <div class="admin-order-card-header">
-          <div>
-            <div class="admin-order-id">${o.id}</div>
-            <div class="admin-order-title">${customerName}</div>
-            <div class="admin-order-meta-text">${date} · ${o.items.length} item(s) · ₹${o.total.toFixed(2)}</div>
-          </div>
-          <div class="admin-order-status-badge-wrap">
-            <span class="admin-order-status ${o.delivery_status}">${o.delivery_status}</span>
-          </div>
+      <div class="aoc-card ${o.delivery_status === 'cancelled' ? 'aoc-card--cancelled' : ''}" data-id="${o.id}">
+        <div class="aoc-row" onclick="globalThis.toggleOrderExpand(this)">
+          <span class="aoc-id">#${o.id}</span>
+          <span class="aoc-customer">${customerName}</span>
+          <span class="aoc-summary-meta">
+            ${date} · ${o.items.length} item${o.items.length > 1 ? 's' : ''} · ₹${o.total.toFixed(2)}
+          </span>
+          <span class="aoc-badge aoc-badge--${o.delivery_status === 'cancelled' ? 'cancelled' : o.delivery_status}">
+            ${o.delivery_status === 'cancelled' ? '' : statusEmoji[o.delivery_status] || ''} ${o.delivery_status === 'cancelled' ? 'Cancelled' : o.delivery_status}
+          </span>
+          <span class="aoc-chev">${'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'}</span>
         </div>
 
-        <div class="admin-order-card-grid">
-          <div class="admin-order-card-section">
-            <div class="admin-order-section-title">Shipping details</div>
-            <p><strong>${customerName}</strong></p>
-            <p>${phone}</p>
-            <p class="admin-order-address">${address}</p>
-            ${o.expected_delivery_date ? `<p class="admin-order-delivery-date"><strong>Expected delivery:</strong> ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</p>` : ''}
-          </div>
+        <div class="aoc-detail" style="max-height:0;opacity:0;">
+          <div class="aoc-detail-inner">
+            <div class="aoc-detail-grid">
 
-          <div class="admin-order-card-section admin-order-actions-panel">
-            <div class="admin-order-section-title">Shipment status</div>
-            ${o.delivery_status === 'cancelled'
-          ? `
-              <div class="admin-order-cancelled-note">
-                <div class="admin-order-cancelled-label">Cancelled</div>
-                <div class="admin-order-cancelled-subtitle">Cancelled by ${o.cancelled_by === 'admin' ? 'admin' : 'user'}</div>
-                <div class="admin-order-cancelled-reason">${o.cancel_reason || 'Reason not provided'}</div>
+              <div class="aoc-detail-col">
+                <div class="aoc-dlabel">SHIPPING</div>
+                <div class="aoc-ship-info">
+                  <span class="aoc-ship-name">${customerName}</span>
+                  <span class="aoc-ship-phone">${phone}</span>
+                  <span class="aoc-ship-addr">${address}</span>
+                  ${o.expected_delivery_date
+          ? `<span class="aoc-ship-del"><strong>ETA:</strong> ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</span>`
+          : ''}
+                </div>
+
+                <div class="aoc-dlabel">ITEMS</div>
+                ${productDisplay}
               </div>
-            `
+
+              <div class="aoc-detail-col">
+                ${o.delivery_status === 'cancelled'
+          ? `
+                  <div class="aoc-cancelled-box">
+                    <span class="aoc-cancelled-title">Cancelled by ${o.cancelled_by === 'admin' ? 'admin' : 'user'}</span>
+                    <span class="aoc-cancelled-why">${o.cancel_reason || 'Reason not provided'}</span>
+                  </div>
+                `
           : `
-              <select class="admin-ship-select" onchange="globalThis.adminUpdateShipping('${o.id}', this.value)">
-                <option value="placed" ${o.delivery_status === 'placed' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 0 ? 'disabled' : ''}>Placed</option>
-                <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 1 ? 'disabled' : ''}>Processing</option>
-                <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 2 ? 'disabled' : ''}>Shipped</option>
-                <option value="in_transit" ${o.delivery_status === 'in_transit' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 3 ? 'disabled' : ''}>In Transit</option>
-                <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 4 ? 'disabled' : ''}>Delivered</option>
-              </select>
-              <div class="admin-delivery-input-wrap" style="margin-top:8px;${['shipped', 'in_transit'].includes(o.delivery_status) ? '' : 'display:none;'}" id="admin-delivery-wrap-${o.id}">
-                <label class="admin-cancel-label" for="admin-delivery-days-${o.id}">Expected delivery (days)</label>
-                <select id="admin-delivery-days-${o.id}" class="admin-cancel-select" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
-                  <option value="">Select days</option>
-                  ${[1,2,3,4,5,6,7].map(d => `<option value="${d} day${d > 1 ? 's' : ''}" ${o.delivery_days_text === `${d} day${d > 1 ? 's' : ''}` ? 'selected' : ''}>${d} day${d > 1 ? 's' : ''}</option>`).join('')}
-                </select>
-              </div>
-              <div class="admin-order-cancel-controls">
-                <label class="admin-cancel-label" for="admin-cancel-reason-${o.id}">Cancel reason</label>
-                <select id="admin-cancel-reason-${o.id}" class="admin-cancel-select" onchange="globalThis.adminToggleCancelReason('${o.id}', this.value)">
-                  <option value="">Select a reason</option>
-                  <option value="Stock not available">Stock not available</option>
-                  <option value="We are not extended our service to your area">We are not extended our service to your area</option>
-                  <option value="Invalid pincode">Invalid pincode</option>
-                  <option value="Invalid address">Invalid address</option>
-                  <option value="Other">Other</option>
-                </select>
-                <input id="admin-cancel-other-${o.id}" type="text" placeholder="Specify cancel reason" class="admin-cancel-other" style="display:none;">
-                <button class="btn btn-danger admin-cancel-btn" onclick="globalThis.adminCancelOrder('${o.id}')">Cancel order</button>
-              </div>
-            `
-        }
-            <div class="admin-order-summary-block">
-              <div><span>Order total</span><strong>₹${o.total.toFixed(2)}</strong></div>
-              <div><span>Payment mode</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
-              <div><span>Transaction</span><strong>${o.transaction_id || o.razorpay_payment_id || 'Pending'}</strong></div>
-              <div><span>Customer</span><strong>${customerName}</strong></div>
-            </div>
-            ${invoiceLink && ['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)
+                  <div class="aoc-status-row">
+                    <select class="aoc-ship-select" id="admin-ship-select-${o.id}" onchange="globalThis.onAdminStatusChange('${o.id}', this)">
+                      <option value="placed" ${o.delivery_status === 'placed' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 0 ? 'disabled' : ''}>Placed</option>
+                      <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 1 ? 'disabled' : ''}>Processing</option>
+                      <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 2 ? 'disabled' : ''}>Shipped</option>
+                      <option value="in_transit" ${o.delivery_status === 'in_transit' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 3 ? 'disabled' : ''}>In Transit</option>
+                      <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 4 ? 'disabled' : ''}>Delivered</option>
+                    </select>
+                    <div class="aoc-del-wrap" id="admin-delivery-wrap-${o.id}" style="${['shipped', 'in_transit'].includes(o.delivery_status) ? '' : 'display:none;'}">
+                      <select id="admin-delivery-days-${o.id}" class="aoc-days-select" onchange="globalThis.adminUpdateShipping('${o.id}', document.getElementById('admin-ship-select-${o.id}').value)">
+                        <option value="">Delivery in</option>
+                        ${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d} day${d > 1 ? 's' : ''}" ${o.delivery_days_text === `${d} day${d > 1 ? 's' : ''}` ? 'selected' : ''}>${d} day${d > 1 ? 's' : ''}</option>`).join('')}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="aoc-cancel-controls">
+                    <select id="admin-cancel-reason-${o.id}" class="aoc-cancel-sel" onchange="globalThis.adminToggleCancelReason('${o.id}', this.value)">
+                      <option value="">Cancel reason</option>
+                      <option value="Stock not available">Stock not available</option>
+                      <option value="We are not extended our service to your area">Area not serviceable</option>
+                      <option value="Invalid pincode">Invalid pincode</option>
+                      <option value="Invalid address">Invalid address</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    <input id="admin-cancel-other-${o.id}" type="text" placeholder="Specify cancel reason" class="aoc-cancel-other" style="display:none;">
+                    <button class="aoc-btn-cancel" onclick="globalThis.adminCancelOrder('${o.id}')">Cancel</button>
+                  </div>
+                `}
+
+                <div class="aoc-summary">
+                  <div><span>Total</span><strong>₹${o.total.toFixed(2)}</strong></div>
+                  <div><span>Payment</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
+                  <div><span>Transaction</span><strong title="${o.transaction_id || o.razorpay_payment_id || 'Pending'}">${(o.transaction_id || o.razorpay_payment_id || 'Pending').substring(0, 16)}${((o.transaction_id || o.razorpay_payment_id || 'Pending').length > 16) ? '…' : ''}</strong></div>
+                </div>
+
+                ${invoiceLink && ['placed', 'processing', 'shipped', 'in_transit', 'delivered'].includes(o.delivery_status)
           ? `
-              <div class="admin-order-summary-block" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-secondary" onclick="globalThis.open('${invoiceLink}','_blank')">Open Invoice</button>
-                <button class="btn btn-secondary" onclick="globalThis.copyInvoiceLink('${o.invoice_token}')">Copy Link</button>
-              </div>
-            `
-          : ''
+                  <div class="aoc-actions">
+                    <button class="aoc-btn" onclick="globalThis.open('${invoiceLink}','_blank')" title="View Invoice">📄</button>
+                    <button class="aoc-btn" onclick="globalThis.open('${invoiceLink}?download=1','_blank')" title="Download PDF">⬇️</button>
+                    <button class="aoc-btn aoc-btn--wa" onclick="globalThis.shareInvoiceWhatsApp('${o.id}')" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></button>
+                    <button class="aoc-btn" onclick="globalThis.copyInvoiceLink('${o.invoice_token}')" title="Copy Link">🔗</button>
+                  </div>
+                ` : ''
         }
-          </div>
-        </div>
+              </div>
+            </div>
 
-        <div class="admin-order-progress-wrap">
-          <div class="admin-order-progress-label">Shipment progress</div>
-          <div class="admin-order-progress-track">
-            ${progressSteps}
+            <div class="aoc-progress">
+              ${progressSteps}
+            </div>
           </div>
-        </div>
-
-        <div class="admin-order-items-panel">
-          <div class="admin-order-section-title">Order items</div>
-          ${productDisplay}
         </div>
       </div>
     `;
@@ -1050,6 +1692,26 @@ function copyInvoiceLink(token) {
     showSuccessToast('Invoice share link copied to clipboard.');
   }
 } */
+
+function onAdminStatusChange(orderId, selectEl) {
+  const status = selectEl.value;
+  const wrap = document.getElementById(`admin-delivery-wrap-${orderId}`);
+
+  if (status === 'shipped' || status === 'in_transit') {
+    if (wrap) {
+      wrap.style.display = '';
+      const daysSelect = document.getElementById(`admin-delivery-days-${orderId}`);
+      if (daysSelect && !daysSelect.value) {
+        return;
+      }
+    }
+  } else {
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  adminUpdateShipping(orderId, status);
+}
+globalThis.onAdminStatusChange = onAdminStatusChange;
 
 async function adminUpdateShipping(orderId, status) {
   try {
@@ -1103,9 +1765,11 @@ function renderAdminFilterValueControl(filterType) {
 
   let html = '';
   switch (filterType) {
-    case 'modified_date':
-      html = '<input type="date" id="admin-filter-value-input" class="admin-filter-input">';
+    case 'modified_date': {
+      const today = new Date().toISOString().split('T')[0];
+      html = `<input type="date" id="admin-filter-value-input" class="admin-filter-input" max="${today}">`;
       break;
+    }
     case 'year':
       html = `
         <select id="admin-filter-value-input" class="admin-filter-input">
@@ -1247,9 +1911,11 @@ function renderAdminHistoryFilterValueControl(filterType) {
 
   let html = '';
   switch (filterType) {
-    case 'date':
-      html = '<input type="date" id="admin-history-filter-value-input" class="admin-filter-input">';
+    case 'date': {
+      const today = new Date().toISOString().split('T')[0];
+      html = `<input type="date" id="admin-history-filter-value-input" class="admin-filter-input" max="${today}">`;
       break;
+    }
     case 'order_id':
       html = '<input type="text" id="admin-history-filter-value-input" class="admin-filter-input" placeholder="Enter order id">';
       break;
@@ -1421,36 +2087,40 @@ function renderAdminHistory() {
       const itemRows = items
         .map((item) => `<li>${item.name || item.product_name || 'Product'} × ${item.quantity || item.qty || 1}</li>`)
         .join('');
+      const isDel = o.delivery_status !== 'cancelled';
 
       return `
-        <div class="admin-order-card">
-          <div class="admin-order-card-header">
-            <div>
-              <div class="admin-order-id">${o.id}</div>
-              <div class="admin-order-title">${o.customer_name || o.user_email || 'Customer'}</div>
-              <div class="admin-order-meta-text">Delivered: ${delivered} · ${items.length} item${items.length !== 1 ? 's' : ''} · ₹${(o.total || 0).toFixed(2)}</div>
-            </div>
-            <div class="admin-order-status-badge-wrap">
-              <span class="admin-order-status delivered">Delivered</span>
-            </div>
+        <div class="aoc-card">
+          <div class="aoc-row" onclick="globalThis.toggleOrderExpand(this)">
+            <span class="aoc-id">#${o.id}</span>
+            <span class="aoc-customer">${o.customer_name || o.user_email || 'Customer'}</span>
+            <span class="aoc-summary-meta">${delivered} · ${items.length} item${items.length !== 1 ? 's' : ''} · ₹${(o.total || 0).toFixed(2)}</span>
+            <span class="aoc-badge aoc-badge--${isDel ? 'delivered' : 'cancelled'}">${isDel ? '✅ Delivered' : '❌ Cancelled'}</span>
+            <span class="aoc-chev">${'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'}</span>
           </div>
-          <div class="admin-order-card-grid" style="grid-template-columns:1.4fr minmax(240px,1fr); gap:18px;">
-            <div class="admin-order-card-section">
-              <div class="admin-order-section-title">Delivery details</div>
-              <p><strong>Customer ID:</strong> ${customerId}</p>
-              <p><strong>Phone:</strong> ${phone}</p>
-              <p class="admin-order-address">${o.delivery_address || 'No address provided'}</p>
+          <div class="aoc-detail" style="max-height:0;opacity:0;">
+            <div class="aoc-detail-inner">
+              <div class="aoc-detail-grid">
+                <div class="aoc-detail-col">
+                  <div class="aoc-dlabel">DELIVERY DETAILS</div>
+                  <div class="aoc-ship-info">
+                    <span class="aoc-ship-name">Customer ID: ${customerId}</span>
+                    <span class="aoc-ship-phone">${phone}</span>
+                    <span class="aoc-ship-addr">${o.delivery_address || 'No address'}</span>
+                  </div>
+                </div>
+                <div class="aoc-detail-col">
+                  <div class="aoc-dlabel">REFERENCE</div>
+                  <div class="aoc-summary">
+                    <div><span>Order ID</span><strong>${o.id}</strong></div>
+                    <div><span>Payment</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
+                    <div><span>Transaction</span><strong title="${o.transaction_id || o.razorpay_payment_id || 'Pending'}">${(o.transaction_id || o.razorpay_payment_id || 'Pending').substring(0, 16)}${((o.transaction_id || o.razorpay_payment_id || 'Pending').length > 16) ? '…' : ''}</strong></div>
+                  </div>
+                </div>
+              </div>
+              <div class="aoc-dlabel" style="margin-top:6px;">ITEMS</div>
+              <ul style="margin:0 0 0 16px;padding:0;">${itemRows}</ul>
             </div>
-            <div class="admin-order-card-section">
-              <div class="admin-order-section-title">Order reference</div>
-              <p><strong>Order ID:</strong> ${o.id}</p>
-              <p><strong>Payment:</strong> ${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</p>
-              <p><strong>Txn:</strong> ${o.transaction_id || o.razorpay_payment_id || 'Pending'}</p>
-            </div>
-          </div>
-          <div class="admin-order-items-panel">
-            <div class="admin-order-section-title">Items</div>
-            <ul style="margin:0;padding-left:18px;">${itemRows}</ul>
           </div>
         </div>
       `;
@@ -1535,8 +2205,9 @@ async function adminDeleteProduct(productId) {
     });
 
     if (res.ok) {
+      _adminProducts = _adminProducts.filter(p => p.id !== productId);
       showSuccessToast('🗑️ Product successfully deleted.');
-      window.location.href = '/';
+      renderAdminInventory();
     } else {
       const data = await res.json();
       showErrorToast(data.error || 'Failed to remove item.');
@@ -1595,31 +2266,30 @@ function renderAdminTrainings() {
     list.innerHTML = '<div class="admin-loading">No trainings available.</div>';
     return;
   }
+
+  const chevHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
   list.innerHTML = _adminTrainings
     .map(
       (t) => `
-    <div class="admin-training-row" data-id="${t.id}">
-      <div style="display:flex;gap:12px;align-items:center;flex:1;">
-        <img src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;">
-        <div style="flex:1;min-width:0;">
-          <strong>${t.title}</strong>
-          <div style="font-size:0.82rem;color:#475569;display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;">
-            <span>${t.category}</span>
-            <span>·</span>
-            <span style="font-family:monospace;font-size:0.78rem;color:#6b7280;">${t.training_id || '—'}</span>
-            <span>·</span>
-            <span>${formatDate(t.start_date)} – ${formatDate(t.end_date)}</span>
-            <span>·</span>
-            <span><strong>${t.duration_days || '—'}</strong> days</span>
-            ${(t.price_strikeout && t.price_actual)
-              ? `<span>·</span><span style="text-decoration:line-through;color:#9ca3af;">₹${Number(t.price_strikeout).toLocaleString()}</span><span style="color:var(--color-primary);font-weight:600;">₹${Number(t.price_actual).toLocaleString()}</span>`
-              : ''}
-          </div>
+    <div class="ac-card" data-id="${t.id}">
+      <div class="ac-row" onclick="globalThis.toggleOrderExpand(this)">
+        <img class="ac-thumb" src="${t.image_url || '/images/training_farm.png'}" alt="${t.title}">
+        <span class="ac-title">${t.title}</span>
+        <span class="ac-meta">${t.category} · ${formatDate(t.start_date)} – ${formatDate(t.end_date)} · ${t.duration_days || '—'}d</span>
+        <span class="ac-train-price">${t.price_actual ? '₹' + Number(t.price_actual).toLocaleString() : ''}</span>
+        <div class="ac-actions">
+          <button class="ac-btn-edit" onclick="event.stopPropagation();globalThis.adminEditTraining('${t.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+          <button class="ac-btn-del" onclick="event.stopPropagation();globalThis.adminDeleteTraining('${t.id}')"><i class="fa-solid fa-trash"></i></button>
         </div>
+        <span class="ac-chev">${chevHtml}</span>
       </div>
-      <div class="admin-row-actions">
-        <button class="btn-admin-edit" onclick="globalThis.adminEditTraining('${t.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn-admin-delete" onclick="globalThis.adminDeleteTraining('${t.id}')"><i class="fa-solid fa-trash"></i></button>
+      <div class="ac-detail" style="max-height:0;opacity:0;">
+        <div class="ac-detail-inner">
+          <p><strong>ID:</strong> ${t.training_id || '—'}</p>
+          <p>${t.description || ''}</p>
+          ${t.price_strikeout ? `<p><span style="text-decoration:line-through;color:#9ca3af;">₹${Number(t.price_strikeout).toLocaleString()}</span> <strong style="color:var(--color-primary);">₹${Number(t.price_actual).toLocaleString()}</strong></p>` : ''}
+        </div>
       </div>
     </div>
   `,
@@ -1779,6 +2449,7 @@ function calcDuration(startVal, endVal) {
 function adminEditTraining(id) {
   const t = _adminTrainings.find((x) => x.id === id);
   if (!t) return;
+  openAdminTrainForm(true);
   document.getElementById('admin-train-edit-id').value = t.id;
   document.getElementById('admin-train-title').value = t.title || '';
   document.getElementById('admin-train-category').value = t.category || '';
@@ -1840,35 +2511,31 @@ function renderAdminBlogs(blogs) {
     return;
   }
 
-  list.innerHTML = `
-    <div class="admin-blog-table">
-      ${blogs.map(blog => {
-    return `
-          <div class="admin-blog-row" data-id="${blog.id}">
-            <div class="admin-blog-info">
-              <div class="admin-blog-thumb">
-                ${blog.featured_image
-        ? `<img src="${blog.featured_image}" alt="${blog.title}" loading="lazy">`
-        : '<i class="fa-solid fa-newspaper"></i>'
-      }
-              </div>
-              <div class="admin-blog-details">
-                <h4>${blog.title}</h4>
-                <div class="admin-blog-meta-row">
-                  <span>${blog.author || 'Admin'}</span>
-                  <span>·</span>
-                  <span>${formatAdminDate(blog.published_at || blog.created_at)}</span>
-                </div>
-              </div>
-            </div>
-            <div class="admin-blog-actions">
-              <button class="btn-admin-delete" onclick="globalThis.adminDeleteBlog('${blog.id}')"><i class="fa-solid fa-trash"></i></button>
-            </div>
-          </div>
-        `;
-  }).join('')}
+  const chevHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
+  list.innerHTML = blogs.map(blog => `
+    <div class="ac-card" data-id="${blog.id}">
+      <div class="ac-row" onclick="globalThis.toggleOrderExpand(this)">
+        <div class="ac-thumb">
+          ${blog.featured_image
+      ? `<img src="${blog.featured_image}" alt="${blog.title}" loading="lazy">`
+      : '<i class="fa-solid fa-newspaper"></i>'
+    }
+        </div>
+        <span class="ac-title">${blog.title}</span>
+        <span class="ac-meta">${blog.author || 'Admin'} · ${formatAdminDate(blog.published_at || blog.created_at)}</span>
+        <div class="ac-actions">
+          <button class="ac-btn-del" onclick="event.stopPropagation();globalThis.adminDeleteBlog('${blog.id}')"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <span class="ac-chev">${chevHtml}</span>
+      </div>
+      <div class="ac-detail" style="max-height:0;opacity:0;">
+        <div class="ac-detail-inner">
+          ${(blog.content || '').substring(0, 300)}${(blog.content || '').length > 300 ? '…' : ''}
+        </div>
+      </div>
     </div>
-  `;
+  `).join('');
 }
 
 function formatAdminDate(dateString) {
@@ -2128,19 +2795,28 @@ function renderAdminCategoriesList(categories) {
     return;
   }
 
+  const chevHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+
   list.innerHTML = categories
     .map(
       (cat) => `
-    <div class="admin-cat-row" data-id="${cat.id}">
-      <div class="admin-cat-info">
-        <span class="admin-cat-uid">${cat.category_id || cat.categoryId || 'spore-000000'}</span>
-        <span class="admin-cat-slug">${cat.id}</span>
-        <strong class="admin-cat-name">${cat.name}</strong>
-        <span class="admin-cat-desc">${cat.description || ''}</span>
+    <div class="ac-card" data-id="${cat.id}">
+      <div class="ac-row" onclick="globalThis.toggleOrderExpand(this)">
+        <span class="ac-cat-uid">${cat.category_id || cat.categoryId || 'spore-000000'}</span>
+        <span class="ac-id">${cat.id}</span>
+        <span class="ac-title">${cat.name}</span>
+        <span class="ac-meta">${cat.description || ''}</span>
+        <div class="ac-actions">
+          <button class="ac-btn-edit" onclick="event.stopPropagation();globalThis.adminEditCategory('${cat.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+          <button class="ac-btn-del" onclick="event.stopPropagation();globalThis.adminDeleteCategory('${cat.id}')"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <span class="ac-chev">${chevHtml}</span>
       </div>
-      <div class="admin-row-actions">
-        <button class="btn-admin-edit" onclick="globalThis.adminEditCategory('${cat.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn-admin-delete" onclick="globalThis.adminDeleteCategory('${cat.id}')"><i class="fa-solid fa-trash"></i></button>
+      <div class="ac-detail" style="max-height:0;opacity:0;">
+        <div class="ac-detail-inner">
+          <p>${cat.description || 'No description provided.'}</p>
+          ${cat.image_url ? `<img src="${cat.image_url}" alt="${cat.name}">` : ''}
+        </div>
       </div>
     </div>
   `,
@@ -2161,6 +2837,13 @@ function populateAdminCategorySelect(categories) {
     )
     .join('');
   updateProductIdDisplay();
+
+  const filterCat = document.getElementById('admin-filter-cat');
+  if (filterCat) {
+    filterCat.innerHTML = `<option value="all">All Categories</option>` + categories
+      .map((cat) => `<option value="${cat.id}">${cat.name}</option>`)
+      .join('');
+  }
 }
 
 function adminEditCategory(catId) {
@@ -2193,7 +2876,97 @@ function adminEditCategory(catId) {
     feedback.classList.remove('hidden');
     feedback.style.color = 'var(--color-primary)';
   }
+
+  openAdminCatForm(true);
 }
+
+function toggleAdminCatForm() {
+  const collapse = document.getElementById('admin-cat-form-collapse');
+  const btn = document.getElementById('btn-toggle-cat-form');
+  if (!collapse) return;
+  const isOpen = collapse.style.display !== 'none';
+  if (isOpen) {
+    collapse.style.display = 'none';
+    collapse.style.maxHeight = '0';
+    if (btn) {
+      btn.innerHTML = '<i class="fa-solid fa-plus"></i> New Category';
+      btn.classList.remove('admin-pill-btn--active');
+    }
+    resetAdminCatForm();
+  } else {
+    collapse.style.display = '';
+    collapse.style.maxHeight = collapse.scrollHeight + 'px';
+    collapse.style.opacity = '1';
+    if (btn) {
+      btn.innerHTML = '<i class="fa-solid fa-times"></i> Cancel';
+      btn.classList.add('admin-pill-btn--active');
+    }
+  }
+}
+globalThis.toggleAdminCatForm = toggleAdminCatForm;
+
+function openAdminCatForm(isEdit = false) {
+  const collapse = document.getElementById('admin-cat-form-collapse');
+  const btn = document.getElementById('btn-toggle-cat-form');
+  if (!collapse) return;
+  collapse.style.display = '';
+  requestAnimationFrame(() => {
+    collapse.style.maxHeight = collapse.scrollHeight + 'px';
+    collapse.style.opacity = '1';
+  });
+  if (btn) {
+    btn.innerHTML = '<i class="fa-solid fa-times"></i> ' + (isEdit ? 'Editing' : 'Cancel');
+    btn.classList.add('admin-pill-btn--active');
+  }
+}
+globalThis.openAdminCatForm = openAdminCatForm;
+
+function toggleAdminTrainForm() {
+  const collapse = document.getElementById('admin-train-form-collapse');
+  const btn = document.getElementById('btn-toggle-train-form');
+  if (!collapse) return;
+  const isHidden = collapse.style.display === 'none' || getComputedStyle(collapse).maxHeight === '0px';
+  if (!isHidden) {
+    collapse.style.maxHeight = '0';
+    collapse.style.opacity = '0';
+    collapse.style.display = 'none';
+    if (btn) {
+      btn.innerHTML = '<i class="fa-solid fa-plus"></i> New Training';
+      btn.classList.remove('admin-pill-btn--active');
+    }
+    const editId = document.getElementById('admin-train-edit-id');
+    if (editId) editId.value = '';
+    const resetBtn = document.getElementById('btn-admin-reset-train');
+    if (resetBtn) resetBtn.click();
+  } else {
+    collapse.style.display = '';
+    requestAnimationFrame(() => {
+      collapse.style.maxHeight = collapse.scrollHeight + 'px';
+      collapse.style.opacity = '1';
+    });
+    if (btn) {
+      btn.innerHTML = '<i class="fa-solid fa-times"></i> Cancel';
+      btn.classList.add('admin-pill-btn--active');
+    }
+  }
+}
+globalThis.toggleAdminTrainForm = toggleAdminTrainForm;
+
+function openAdminTrainForm(isEdit = false) {
+  const collapse = document.getElementById('admin-train-form-collapse');
+  const btn = document.getElementById('btn-toggle-train-form');
+  if (!collapse) return;
+  collapse.style.display = '';
+  requestAnimationFrame(() => {
+    collapse.style.maxHeight = collapse.scrollHeight + 'px';
+    collapse.style.opacity = '1';
+  });
+  if (btn) {
+    btn.innerHTML = '<i class="fa-solid fa-times"></i> ' + (isEdit ? 'Editing' : 'Cancel');
+    btn.classList.add('admin-pill-btn--active');
+  }
+}
+globalThis.openAdminTrainForm = openAdminTrainForm;
 
 function parseAdminHashEdit() {
   const hash = globalThis.location.hash || '';
@@ -2353,6 +3126,8 @@ function resetAdminForm() {
   if (productImageUrl) productImageUrl.value = '';
   if (productImageFile) productImageFile.value = '';
   productImagePreviewValid = false;
+  const stockField = document.getElementById('admin-prod-stock');
+  if (stockField) stockField.value = 100;
   const label = document.getElementById('admin-submit-label');
   if (label) label.textContent = 'Publish Product';
   const preview = document.getElementById('admin-img-preview');
@@ -2362,6 +3137,8 @@ function resetAdminForm() {
   updateProductIdDisplay();
   // Reset weight pricing to single empty row
   setWeightPricingData(null);
+  updateMainTotalStock();
+  resetGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge');
 }
 
 function updateImagePreview() {
@@ -2456,6 +3233,307 @@ function copyInvoiceLink(token) {
 }
 globalThis.copyInvoiceLink = copyInvoiceLink;
 
+// ==========================================================================
+// REFUNDS & CANCELLATIONS ADMIN DASHBOARD
+// ==========================================================================
+
+let _refundsDashboardData = null;
+
+function getRefundStatusBadge(status) {
+  const map = {
+    initiated: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6', label: 'Initiated' },
+    processing: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6', label: 'Processing' },
+    processed: { bg: 'rgba(16,185,129,0.18)', color: '#10b981', label: 'Processed' },
+    failed: { bg: 'rgba(239,68,68,0.18)', color: '#ef4444', label: 'Failed' },
+    pending: { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b', label: 'Pending' },
+  };
+  const s = map[status] || { bg: 'rgba(100,116,139,0.12)', color: '#94a3b8', label: status || 'Unknown' };
+  return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">${s.label}</span>`;
+}
+
+function getOrderStatusBadge(status) {
+  const map = {
+    CANCEL_REQUESTED: { color: '#f59e0b', label: 'Cancel Requested' },
+    CANCEL_APPROVED: { color: '#10b981', label: 'Cancel Approved' },
+    CANCEL_REJECTED: { color: '#ef4444', label: 'Cancel Rejected' },
+    REFUND_PENDING: { color: '#3b82f6', label: 'Refund Pending' },
+    REFUND_INITIATED: { color: '#8b5cf6', label: 'Refund Initiated' },
+    REFUND_PROCESSING: { color: '#8b5cf6', label: 'Refund Processing' },
+    REFUND_COMPLETED: { color: '#10b981', label: 'Refund Done' },
+    REFUND_FAILED: { color: '#ef4444', label: 'Refund Failed' },
+  };
+  const s = map[status] || { color: '#94a3b8', label: status || '-' };
+  return `<span style="color:${s.color};font-size:0.72rem;font-weight:600;">${s.label}</span>`;
+}
+
+async function loadRefundsDashboard() {
+  const tableContainer = document.getElementById('admin-refunds-table-container');
+  const auditsContainer = document.getElementById('admin-refund-audits-container');
+
+  if (tableContainer) tableContainer.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading refund queue...</div>';
+  if (auditsContainer) auditsContainer.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading audit trail...</div>';
+
+  try {
+    const searchVal = document.getElementById('admin-refunds-search')?.value?.trim() || '';
+    const statusVal = document.getElementById('admin-refunds-filter-status')?.value || '';
+
+    const params = new URLSearchParams();
+    if (searchVal) params.set('search', searchVal);
+    if (statusVal) params.set('status', statusVal);
+
+    const [dashRes, auditRes] = await Promise.all([
+      fetchWithAuth(`/refunds/dashboard?${params.toString()}`),
+      fetchWithAuth('/refunds/audit-logs'),
+    ]);
+
+    _refundsDashboardData = dashRes;
+    renderRefundStats(dashRes.stats || {});
+    renderRefundQueue(dashRes.refunds || []);
+    renderAuditLogs(auditRes || []);
+  } catch (err) {
+    const errMsg = getApiErrorMessage(err) || 'Failed to load refunds dashboard.';
+    if (tableContainer) tableContainer.innerHTML = `<p style="color:#ef4444;padding:1rem;">${errMsg}</p>`;
+    if (auditsContainer) auditsContainer.innerHTML = `<p style="color:#ef4444;padding:1rem;">${errMsg}</p>`;
+  }
+}
+
+function renderRefundStats(stats) {
+  const el = (id) => document.getElementById(id);
+  if (el('admin-refund-stat-total')) el('admin-refund-stat-total').textContent = `\u20b9${Number(stats.totalRefunded || 0).toFixed(2)}`;
+  if (el('admin-refund-stat-pending')) el('admin-refund-stat-pending').textContent = stats.pendingCount || 0;
+  if (el('admin-refund-stat-failed')) el('admin-refund-stat-failed').textContent = stats.failedCount || 0;
+  if (el('admin-refund-stat-count')) el('admin-refund-stat-count').textContent = stats.totalCount || 0;
+}
+
+function renderRefundQueue(refunds) {
+  const container = document.getElementById('admin-refunds-table-container');
+  if (!container) return;
+
+  if (!refunds.length) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:#475569;"><i class="fa-solid fa-check-circle" style="font-size:2rem;color:#38b17b;display:block;margin-bottom:12px;"></i>No refunds matching your filters.</div>`;
+    return;
+  }
+
+  const rows = refunds.map(r => {
+    const created = r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+    const processed = r.processed_at ? new Date(r.processed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-';
+    const isRetryable = r.refund_status === 'failed' || r.status === 'failed';
+    const isPending = (r.refund_status === 'initiated' || r.status === 'initiated');
+    const orderId = r.order_id || '-';
+    const shortOrder = orderId.length > 8 ? `RUN-${orderId.substring(0, 8).toUpperCase()}` : orderId;
+
+    return `
+      <tr style="border-bottom:1px solid rgba(56,177,123,0.06);transition:background 0.15s;" onmouseenter="this.style.background='rgba(56,177,123,0.03)'" onmouseleave="this.style.background='transparent'">
+        <td style="padding:12px 8px;font-size:0.78rem;color:#94a3b8;">${created}</td>
+        <td style="padding:12px 8px;">
+          <div style="font-size:0.8rem;font-weight:600;color:#e2e8f0;">${shortOrder}</div>
+          <div style="font-size:0.68rem;color:#475569;margin-top:2px;">${(r.user_name || '') + (r.user_email ? ' — ' + r.user_email : '')}</div>
+        </td>
+        <td style="padding:12px 8px;">
+          <div style="font-size:0.72rem;color:#94a3b8;font-family:monospace;">${(r.razorpay_payment_id || '-').substring(0, 18)}</div>
+          <div style="font-size:0.68rem;color:#475569;">${r.razorpay_refund_id ? '↳ ' + r.razorpay_refund_id.substring(0, 16) : 'Refund ID pending'}</div>
+        </td>
+        <td style="padding:12px 8px;font-size:0.9rem;font-weight:700;color:#38b17b;">\u20b9${Number(r.refund_amount || 0).toFixed(2)}</td>
+        <td style="padding:12px 8px;">${getRefundStatusBadge(r.refund_status || r.status)}</td>
+        <td style="padding:12px 8px;font-size:0.72rem;color:#64748b;">${processed}</td>
+        <td style="padding:12px 8px;">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${isPending ? `<button class="btn btn-secondary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminApproveRefund('${r.order_id}')"><i class="fa-solid fa-circle-check"></i> Approve</button>` : ''}
+            ${isRetryable ? `<button class="btn btn-primary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminRetryRefund('${r.order_id}')"><i class="fa-solid fa-rotate-right"></i> Retry</button>` : ''}
+            <button class="btn btn-secondary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminViewRefundDetails('${r.order_id}')"><i class="fa-solid fa-eye"></i></button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid rgba(56,177,123,0.12);">
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Date</th>
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;">Order / Customer</th>
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;">Transaction IDs</th>
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;">Amount</th>
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;">Status</th>
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;">Processed</th>
+            <th style="padding:10px 8px;text-align:left;font-size:0.72rem;color:#64748b;font-weight:600;text-transform:uppercase;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderAuditLogs(logs) {
+  const container = document.getElementById('admin-refund-audits-container');
+  if (!container) return;
+
+  if (!logs.length) {
+    container.innerHTML = `<div style="text-align:center;padding:32px;color:#475569;">No audit log entries found.</div>`;
+    return;
+  }
+
+  const iconMap = {
+    CANCEL_REQUESTED: { icon: 'fa-ban', color: '#f59e0b' },
+    CANCEL_APPROVED: { icon: 'fa-check-circle', color: '#10b981' },
+    CANCEL_REJECTED: { icon: 'fa-times-circle', color: '#ef4444' },
+    REFUND_INITIATED: { icon: 'fa-rotate-right', color: '#8b5cf6' },
+    REFUND_COMPLETED: { icon: 'fa-circle-check', color: '#10b981' },
+    REFUND_FAILED: { icon: 'fa-triangle-exclamation', color: '#ef4444' },
+    ADMIN_CANCELLED: { icon: 'fa-user-slash', color: '#ef4444' },
+    REFUND_RETRIED: { icon: 'fa-arrow-rotate-right', color: '#3b82f6' },
+  };
+
+  const entries = logs.slice(0, 50).map(log => {
+    const ts = log.created_at ? new Date(log.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+    const icon = iconMap[log.action] || { icon: 'fa-circle-info', color: '#94a3b8' };
+    const actor = log.actor_role === 'admin' ? `<span style="color:#38b17b;font-size:0.68rem;font-weight:700;">ADMIN</span>` : `<span style="color:#94a3b8;font-size:0.68rem;">CUSTOMER</span>`;
+    const shortOrder = log.order_id ? `RUN-${log.order_id.substring(0, 8).toUpperCase()}` : '-';
+
+    return `
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:12px 4px;border-bottom:1px solid rgba(56,177,123,0.05);">
+        <div style="width:32px;height:32px;border-radius:50%;background:rgba(${icon.color.replace('#', '').match(/../g).map(h => parseInt(h, 16)).join(',')},0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;">
+          <i class="fa-solid ${icon.icon}" style="color:${icon.color};font-size:0.75rem;"></i>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px;">
+            ${actor}
+            <span style="font-size:0.78rem;font-weight:600;color:#e2e8f0;">${(log.action || '').replace(/_/g, ' ')}</span>
+            <span style="font-size:0.7rem;color:#475569;">• ${shortOrder}</span>
+          </div>
+          ${log.notes ? `<div style="font-size:0.73rem;color:#94a3b8;margin-bottom:3px;">${log.notes}</div>` : ''}
+          ${log.meta ? `<div style="font-size:0.68rem;color:#475569;font-family:monospace;">${typeof log.meta === 'object' ? JSON.stringify(log.meta).substring(0, 80) : String(log.meta).substring(0, 80)}</div>` : ''}
+        </div>
+        <div style="font-size:0.68rem;color:#475569;white-space:nowrap;flex-shrink:0;">${ts}</div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `<div style="max-height:420px;overflow-y:auto;">${entries}</div>`;
+}
+
+async function adminApproveRefund(orderId) {
+  try {
+    const adminNote = prompt('Enter admin note for this approval (optional):') || '';
+    await fetchWithAuth(`/refunds/cancel-requests/${orderId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ adminNote }),
+    });
+    showSuccessToast('\u2705 Cancellation approved. Refund initiated.');
+    loadRefundsDashboard();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to approve cancellation.');
+  }
+}
+globalThis.adminApproveRefund = adminApproveRefund;
+
+async function adminRejectRefund(orderId) {
+  try {
+    const reason = prompt('Enter rejection reason:');
+    if (!reason) { showErrorToast('Reason is required.'); return; }
+    await fetchWithAuth(`/refunds/cancel-requests/${orderId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    showSuccessToast('Cancellation request rejected.');
+    loadRefundsDashboard();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to reject cancellation.');
+  }
+}
+globalThis.adminRejectRefund = adminRejectRefund;
+
+async function adminRetryRefund(orderId) {
+  try {
+    await fetchWithAuth(`/refunds/retry/${orderId}`, { method: 'POST' });
+    showSuccessToast('\u2705 Refund retry initiated.');
+    loadRefundsDashboard();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to retry refund.');
+  }
+}
+globalThis.adminRetryRefund = adminRetryRefund;
+
+async function adminViewRefundDetails(orderId) {
+  const existing = document.getElementById('admin-refund-detail-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'admin-refund-detail-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML = `
+    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.2);border-radius:16px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;padding:28px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h3 style="margin:0;font-size:1.1rem;color:#e2e8f0;"><i class="fa-solid fa-hand-holding-dollar" style="color:#38b17b;"></i> Refund Details</h3>
+        <button onclick="document.getElementById('admin-refund-detail-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.2rem;">&times;</button>
+      </div>
+      <div style="text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin" style="color:#38b17b;font-size:1.5rem;"></i></div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+  try {
+    const data = await fetchWithAuth(`/refunds/dashboard?search=${encodeURIComponent(orderId)}`);
+    const refund = (data.refunds || []).find(r => r.order_id === orderId) || data.refunds?.[0];
+    if (!refund) throw new Error('Refund record not found.');
+
+    const content = modal.querySelector('div > div:last-child');
+    content.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        ${[
+        ['Order ID', `RUN-${(refund.order_id || '').substring(0, 8).toUpperCase()}`],
+        ['Customer', refund.user_name || refund.user_email || '-'],
+        ['Email', refund.user_email || '-'],
+        ['Refund Amount', `\u20b9${Number(refund.refund_amount || 0).toFixed(2)}`],
+        ['Order Total', `\u20b9${Number(refund.order_total || 0).toFixed(2)}`],
+        ['Refund Status', refund.refund_status || refund.status || '-'],
+        ['Order Status', refund.order_status || '-'],
+        ['Payment ID', refund.razorpay_payment_id || '-'],
+        ['Refund ID', refund.razorpay_refund_id || 'Pending'],
+        ['Initiated At', refund.created_at ? new Date(refund.created_at).toLocaleString('en-IN') : '-'],
+        ['Processed At', refund.processed_at ? new Date(refund.processed_at).toLocaleString('en-IN') : '-'],
+        ['Reason', refund.cancel_reason || refund.reason || '-'],
+      ].map(([label, val]) => `
+          <div style="background:rgba(56,177,123,0.04);border:1px solid rgba(56,177,123,0.08);border-radius:8px;padding:10px;">
+            <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:600;margin-bottom:4px;">${label}</div>
+            <div style="font-size:0.83rem;color:#e2e8f0;word-break:break-all;">${val}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap;">
+        ${(refund.refund_status === 'failed' || refund.status === 'failed') ? `<button class="btn btn-primary" onclick="adminRetryRefund('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-rotate-right"></i> Retry Refund</button>` : ''}
+        ${(refund.order_status === 'CANCEL_REQUESTED') ? `<button class="btn btn-primary" onclick="adminApproveRefund('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-cancel" onclick="adminRejectRefund('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
+        <button class="btn btn-secondary" onclick="document.getElementById('admin-refund-detail-modal').remove();">Close</button>
+      </div>
+    `;
+  } catch (err) {
+    modal.querySelector('div > div:last-child').innerHTML = `<p style="color:#ef4444;">Error: ${getApiErrorMessage(err)}</p>`;
+  }
+}
+globalThis.adminViewRefundDetails = adminViewRefundDetails;
+
+async function adminDirectCancel(orderId) {
+  const reason = prompt('Enter reason for direct admin cancellation:');
+  if (!reason) { showErrorToast('Reason is required.'); return; }
+  const adminNote = prompt('Admin note (optional):') || '';
+  try {
+    await fetchWithAuth(`/refunds/admin-cancel/${orderId}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, adminNote }),
+    });
+    showSuccessToast('\u2705 Order cancelled by admin. Refund initiated.');
+    fetchAdminOrders();
+    loadRefundsDashboard();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Admin cancellation failed.');
+  }
+}
+globalThis.adminDirectCancel = adminDirectCancel;
+
 function activateAdminTab(tabName) {
   document.querySelectorAll('.admin-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === tabName);
@@ -2466,6 +3544,10 @@ function activateAdminTab(tabName) {
       content.id === `admin-content-${tabName}`,
     );
   });
+  // Load refund dashboard data when tab is activated
+  if (tabName === 'refunds') {
+    loadRefundsDashboard();
+  }
 }
 
 function setupAdminEventHandlers() {
@@ -2476,24 +3558,70 @@ function setupAdminEventHandlers() {
     });
   });
 
-  // Login handler
+  // Login handler — OTP two-step flow
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       clearAuthError();
+
       const email = document.getElementById('admin-auth-email').value.trim();
-      const password = document.getElementById('admin-auth-password').value.trim();
-      try {
-        const res = await authApi.adminLogin(email, password);
-        if (res?.token) {
-          saveAuth(res.token, res.user);
+      const otpField = document.getElementById('admin-auth-otp-field');
+      const emailField = document.getElementById('admin-auth-email-field');
+      const btn = document.getElementById('admin-auth-btn');
+      const sentEl = document.getElementById('admin-auth-otp-sent');
+
+      // Step 2: Verify OTP
+      if (otpField && !otpField.classList.contains('hidden')) {
+        const otpCode = document.getElementById('admin-auth-otp').value.trim();
+        if (!/^\d{6}$/.test(otpCode)) {
+          renderAuthError('Enter a valid 6-digit OTP');
+          return;
+        }
+        if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+        try {
+          const data = await authApi.adminVerifyOtp(email, otpCode);
+          saveAuth(data.token, data.user);
           showDashboard();
+        } catch (err) {
+          renderAuthError(err.message || 'OTP verification failed');
+          if (btn) { btn.disabled = false; btn.textContent = 'Verify & Login'; }
+        }
+        return;
+      }
+
+      // Step 1: Send OTP
+      if (btn) { btn.disabled = true; btn.textContent = 'Sending OTP…'; }
+      try {
+        const result = await authApi.adminLogin(email);
+        clearAuthError();
+
+        if (emailField) emailField.classList.add('hidden');
+        if (otpField) otpField.classList.remove('hidden');
+        if (btn) btn.textContent = 'Verify & Login';
+
+        if (result?.otp && sentEl) {
+          sentEl.textContent = `Demo OTP: ${result.otp}`;
+          document.getElementById('admin-auth-otp').value = result.otp;
+        } else if (sentEl) {
+          sentEl.textContent = 'OTP sent to registered mobile';
         }
       } catch (err) {
-        renderAuthError(err.message || 'Login failed');
+        renderAuthError(err.message || 'Failed to send OTP');
+        if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
       }
     });
   }
+
+  // Change email button
+  document.getElementById('admin-auth-change-email')?.addEventListener('click', () => {
+    const otpField = document.getElementById('admin-auth-otp-field');
+    const emailField = document.getElementById('admin-auth-email-field');
+    const btn = document.getElementById('admin-auth-btn');
+    if (otpField) otpField.classList.add('hidden');
+    if (emailField) emailField.classList.remove('hidden');
+    if (btn) btn.textContent = 'Send OTP';
+    clearAuthError();
+  });
 
   // Logout
   if (btnLogout) btnLogout.addEventListener('click', () => { clearAuth(); showLoginPanel(); });
@@ -2518,6 +3646,34 @@ function setupAdminEventHandlers() {
   if (btnAddWeightRow) {
     btnAddWeightRow.addEventListener('click', () => {
       weightPricingContainer.appendChild(createWeightRow(null));
+      toggleStockField();
+      updateMainTotalStock();
+    });
+  }
+
+  // Pricing type toggle
+  document.querySelectorAll('.pricing-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pricing-type-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      // Rebuild rows with new mode options
+      const existingData = getWeightPricingData();
+      weightPricingContainer.innerHTML = '';
+      if (existingData.length > 0) {
+        existingData.forEach(item => weightPricingContainer.appendChild(createWeightRow(item)));
+      } else {
+        weightPricingContainer.appendChild(createWeightRow(null));
+      }
+      toggleStockField();
+    });
+  });
+
+  // Toggle stock field when weight select changes in any variant row
+  if (weightPricingContainer) {
+    weightPricingContainer.addEventListener('change', (e) => {
+      if (e.target.classList.contains('admin-weight-select')) {
+        toggleStockField();
+      }
     });
   }
 
@@ -2619,11 +3775,190 @@ function setupAdminEventHandlers() {
   const adminSearchProd = document.getElementById('admin-search-prod');
   const adminFilterCat = document.getElementById('admin-filter-cat');
   const adminSortSelect = document.getElementById('admin-inventory-sort');
-  const adminPageSizeSelect = document.getElementById('admin-inventory-page-size');
-  if (adminSearchProd) adminSearchProd.addEventListener('input', () => { _adminInventoryPage = 1; renderAdminInventory(); });
+  const adminGoToPage = document.getElementById('admin-go-to-page');
+  const afSearchClear = document.getElementById('af-search-clear');
+  let searchDebounce = null;
+  if (adminSearchProd) {
+    adminSearchProd.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      if (afSearchClear) {
+        afSearchClear.classList.toggle('visible', adminSearchProd.value.length > 0);
+      }
+      searchDebounce = setTimeout(() => { _adminInventoryPage = 1; renderAdminInventory(); }, 250);
+    });
+  }
+  if (afSearchClear) {
+    afSearchClear.addEventListener('click', () => {
+      if (adminSearchProd) {
+        adminSearchProd.value = '';
+        adminSearchProd.focus();
+        afSearchClear.classList.remove('visible');
+        _adminInventoryPage = 1;
+        renderAdminInventory();
+      }
+    });
+  }
   if (adminFilterCat) adminFilterCat.addEventListener('change', () => { _adminInventoryPage = 1; renderAdminInventory(); });
-  if (adminSortSelect) adminSortSelect.addEventListener('change', () => { _adminInventoryPage = 1; renderAdminInventory(); });
-  if (adminPageSizeSelect) adminPageSizeSelect.addEventListener('change', () => { const v = Number.parseInt(adminPageSizeSelect.value, 10) || 10; adminInventoryPageSize = v; _adminInventoryPage = 1; renderAdminInventory(); });
+  if (adminSortSelect) {
+    adminSortSelect.addEventListener('change', () => {
+      if (_activeCapsule === 'recent' && adminSortSelect.value !== 'date_desc') {
+        _activeCapsule = 'all';
+        document.querySelectorAll('.admin-capsule').forEach(b => b.classList.toggle('active', b.getAttribute('data-capsule') === 'all'));
+      }
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  }
+  if (adminGoToPage) {
+    adminGoToPage.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const v = parseInt(adminGoToPage.value, 10);
+        if (Number.isFinite(v) && v >= 1) {
+          _adminInventoryPage = v;
+          renderAdminInventory();
+        }
+      }
+    });
+    // Allow admin to select-all on focus for quick replacement
+    adminGoToPage.addEventListener('focus', () => adminGoToPage.select());
+  }
+
+  // Capsule switching
+  const adminCapsules = document.querySelectorAll('.admin-capsule');
+  adminCapsules.forEach(btn => {
+    btn.addEventListener('click', () => {
+      adminCapsules.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _activeCapsule = btn.getAttribute('data-capsule');
+      if (_activeCapsule === 'recent' && adminSortSelect) {
+        adminSortSelect.value = 'date_desc';
+      }
+      if (_activeCapsule === 'add-product') {
+        resetCapsuleAddForm();
+      }
+      _adminInventoryPage = 1;
+      renderAdminInventory();
+    });
+  });
+
+  // Capsule add-product form submit / reset
+  const capsuleForm = document.getElementById('form-admin-capsule-add');
+  if (capsuleForm) {
+    capsuleForm.addEventListener('submit', handleCapsuleAddSubmit);
+  }
+  const capsuleResetBtn = document.querySelector('.btn-capsule-reset-form');
+  if (capsuleResetBtn) {
+    capsuleResetBtn.addEventListener('click', resetCapsuleAddForm);
+  }
+
+  // Capsule add-weight row
+  const capsuleAddWeight = document.querySelector('.btn-capsule-add-weight');
+  if (capsuleAddWeight) {
+    capsuleAddWeight.addEventListener('click', () => {
+      const wc = document.getElementById('admin-capsule-weight-container');
+      if (!wc) return;
+      const row = document.createElement('div');
+      row.className = 'admin-weight-pricing-row';
+      row.innerHTML = `
+        <select class="admin-weight-select admin-capsule-weight-select">
+          <option value="">Select weight</option>
+          <option value="100g">100 g</option>
+          <option value="200g">200 g</option>
+          <option value="250g">250 g</option>
+          <option value="400g">400 g</option>
+          <option value="500g">500 g</option>
+          <option value="1kg">1 kg</option>
+          <option value="2kg">2 kg</option>
+          <option value="5kg">5 kg</option>
+        </select>
+        <div class="awp-fields">
+          <div class="awp-field">
+            <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
+            <input type="number" step="0.01" class="admin-weight-price admin-capsule-weight-price" placeholder="Price" />
+          </div>
+          <div class="awp-field">
+            <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
+            <input type="number" step="0.01" class="admin-weight-mrp admin-capsule-weight-mrp" placeholder="MRP" />
+          </div>
+          <div class="awp-field awp-field-stock">
+            <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
+            <input type="number" class="admin-weight-stock admin-capsule-weight-stock" placeholder="Stock" min="0" />
+          </div>
+        </div>
+        <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
+      `;
+      wc.appendChild(row);
+      row.querySelector('.btn-weight-remove').addEventListener('click', () => {
+        if (wc.querySelectorAll('.admin-weight-pricing-row').length > 1) {
+          row.remove();
+          updateCapsuleTotalStock();
+        }
+      });
+      updateCapsuleTotalStock();
+    });
+  }
+  // Delegate remove for existing weight rows
+  document.addEventListener('click', (ev) => {
+    const rm = ev.target.closest('.btn-weight-remove');
+    if (rm && rm.closest('#admin-capsule-weight-container')) {
+      const wc = document.getElementById('admin-capsule-weight-container');
+      if (wc && wc.querySelectorAll('.admin-weight-pricing-row').length > 1) {
+        rm.closest('.admin-weight-pricing-row').remove();
+        updateCapsuleTotalStock();
+      }
+    }
+  });
+
+  // Capsule image preview
+  const capsuleBrowseBtn = document.querySelector('.admin-capsule-image-browse');
+  const capsuleImageFile = document.querySelector('.admin-capsule-image-file');
+  if (capsuleBrowseBtn && capsuleImageFile) {
+    capsuleBrowseBtn.addEventListener('click', () => capsuleImageFile.click());
+    capsuleImageFile.addEventListener('change', () => {
+      const file = capsuleImageFile.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev2) => {
+        const preview = document.getElementById('admin-capsule-img-preview');
+        if (preview) preview.innerHTML = `<img src="${ev2.target.result}" alt="Preview">`;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  // Capsule image URL preview
+  const capsuleImageUrl = document.getElementById('admin-capsule-prod-image-url');
+  if (capsuleImageUrl) {
+    capsuleImageUrl.addEventListener('input', () => {
+      const preview = document.getElementById('admin-capsule-img-preview');
+      if (preview && capsuleImageUrl.value.trim()) {
+        preview.innerHTML = `<img src="${capsuleImageUrl.value.trim()}" alt="Preview" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-image\\\\\\'></i><span>Image preview</span>'">`;
+      } else if (preview) {
+        preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+      }
+    });
+  }
+
+  // Mobile filter toggle
+  const filterToggle = document.getElementById('admin-filter-toggle');
+  const filterDropdowns = document.getElementById('admin-filter-dropdowns');
+  if (filterToggle && filterDropdowns) {
+    filterToggle.addEventListener('click', () => {
+      filterDropdowns.classList.toggle('open');
+      filterToggle.classList.toggle('open');
+    });
+  }
+
+  // Close mobile filter dropdowns when selecting an option
+  if (filterDropdowns) {
+    filterDropdowns.querySelectorAll('select').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        if (window.innerWidth <= 640) {
+          filterDropdowns.classList.remove('open');
+          filterToggle?.classList.remove('open');
+        }
+      });
+    });
+  }
 
   const adminHistoryFilterType = document.getElementById('admin-history-filter-type');
   const adminHistorySort = document.getElementById('admin-history-sort');
@@ -2634,6 +3969,12 @@ function setupAdminEventHandlers() {
   if (adminHistorySort) adminHistorySort.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistory(); });
   if (adminHistoryPageSize) adminHistoryPageSize.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistory(); });
   if (adminHistoryClear) adminHistoryClear.addEventListener('click', clearAdminHistoryFilters);
+
+  // Current orders filter bar
+  const adminFilterType = document.getElementById('admin-filter-type');
+  const adminFilterClear = document.getElementById('admin-filter-clear');
+  if (adminFilterType) adminFilterType.addEventListener('change', () => renderAdminFilterValueControl(adminFilterType.value));
+  if (adminFilterClear) adminFilterClear.addEventListener('click', clearAdminOrderFilters);
 
   // changes to ordershipment page modifications-pravara
   // Shipping sub-tabs
@@ -2658,13 +3999,13 @@ function setupAdminEventHandlers() {
         renderAdminOrders(adminOrdersCache);
         return;
       }
-    const statusMap = {
-      placed: ['placed'],
-      processing: ['processing'],
-      shipped: ['shipped', 'in_transit'],
-      delivered: ['delivered'],
-      cancelled: ['cancelled'],
-    };
+      const statusMap = {
+        placed: ['placed'],
+        processing: ['processing'],
+        shipped: ['shipped', 'in_transit'],
+        delivered: ['delivered'],
+        cancelled: ['cancelled'],
+      };
       const allowed = statusMap[status] || [status];
       const filtered = adminOrdersCache.filter((o) => allowed.includes(o.delivery_status));
       renderAdminOrders(filtered);
@@ -2692,8 +4033,98 @@ function setupAdminEventHandlers() {
   globalThis.adminEditBlog = adminEditBlog;
   globalThis.adminDeleteBlog = adminDeleteBlog;
   globalThis.fetchAdminBlogs = fetchAdminBlogs;
+  globalThis.loadRefundsDashboard = loadRefundsDashboard;
+
+  // Refunds dashboard filter & search controls
+  const refundsSearch = document.getElementById('admin-refunds-search');
+  const refundsStatusFilter = document.getElementById('admin-refunds-filter-status');
+  const refundsRefreshBtn = document.getElementById('admin-refunds-refresh-btn');
+
+  let refundsSearchDebounce = null;
+  if (refundsSearch) {
+    refundsSearch.addEventListener('input', () => {
+      clearTimeout(refundsSearchDebounce);
+      refundsSearchDebounce = setTimeout(() => loadRefundsDashboard(), 380);
+    });
+  }
+  if (refundsStatusFilter) {
+    refundsStatusFilter.addEventListener('change', () => loadRefundsDashboard());
+  }
+  if (refundsRefreshBtn) {
+    refundsRefreshBtn.addEventListener('click', () => loadRefundsDashboard());
+  }
+
   globalThis.copyInvoiceLink = copyInvoiceLink;
+
+  function shareInvoiceWhatsApp(orderId) {
+    const order = adminOrdersCache.find((o) => o.id === orderId);
+    if (!order) {
+      showErrorToast('Order not found.');
+      return;
+    }
+
+    const items = Array.isArray(order.items) ? order.items : [];
+    const itemsList = items
+      .map((item) => `• ${item.name} × ${item.quantity}`)
+      .join('\n');
+
+    const deliveryDate = order.expected_delivery_date
+      ? `Expected delivery: ${new Date(order.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${order.delivery_days_text ? ` (${order.delivery_days_text})` : ''}`
+      : '';
+
+    const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${order.invoice_token}`;
+
+    const lines = [
+      `🧾 *Invoice from Sporekart*`,
+      ``,
+      `Order: ${order.id}`,
+      `Date: ${new Date(order.created_at).toLocaleDateString('en-IN')}`,
+      `Customer: ${order.customer_name || order.user_email || 'Customer'}`,
+      `Total: ₹${Number(order.total || 0).toFixed(2)}`,
+      `Status: ${order.delivery_status}`,
+      ``,
+      `*Items:*`,
+      itemsList || `-`,
+    ];
+
+    if (deliveryDate) {
+      lines.push(``);
+      lines.push(deliveryDate);
+    }
+
+    lines.push(``);
+    lines.push(`View full invoice:`);
+    lines.push(invoiceUrl);
+    lines.push(``);
+    lines.push(`Thank you for shopping with Sporekart! 🍄`);
+
+    const text = encodeURIComponent(lines.join('\n'));
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  }
+  globalThis.shareInvoiceWhatsApp = shareInvoiceWhatsApp;
   globalThis.renderAdminOrders = renderAdminOrders;
+
+  // Initialize gallery grids
+  initGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge', 'btn-gallery-add-main', 'main');
+  initGallery('capsule-gallery-grid', 'capsule-gallery-preview', 'capsule-gallery-count-badge', 'btn-gallery-add-capsule', 'capsule');
+
+  // Gallery upload buttons
+  const uploadMainBtn = document.getElementById('btn-gallery-upload-main');
+  const galleryFileMain = document.getElementById('gallery-file-main');
+  if (uploadMainBtn && galleryFileMain) {
+    uploadMainBtn.addEventListener('click', () => galleryFileMain.click());
+    galleryFileMain.addEventListener('change', () => {
+      handleGalleryFiles('gallery-file-main', 'admin-gallery-grid', 'gallery-preview', 'main');
+    });
+  }
+  const uploadCapsuleBtn = document.getElementById('btn-gallery-upload-capsule');
+  const galleryFileCapsule = document.getElementById('gallery-file-capsule');
+  if (uploadCapsuleBtn && galleryFileCapsule) {
+    uploadCapsuleBtn.addEventListener('click', () => galleryFileCapsule.click());
+    galleryFileCapsule.addEventListener('change', () => {
+      handleGalleryFiles('gallery-file-capsule', 'capsule-gallery-grid', 'capsule-gallery-preview', 'capsule');
+    });
+  }
 
   // Initialize weight pricing with one empty row
   if (weightPricingContainer && !weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
@@ -2705,15 +4136,17 @@ async function initAdminPage() {
   setupAdminEventHandlers();
   // Initialize UI state — only show dashboard if the logged-in user is an admin
   if (state.token && state.user && state.user.role === 'admin') {
+    const tokenAtStart = state.token;
     try {
       const user = await authApi.getMe();
+      if (state.token !== tokenAtStart) return;
       if (user && user.role === 'admin') {
         state.user = user;
         showDashboard();
         return;
       }
     } catch (_err) {
-      // Token is invalid/expired — clear and show login
+      if (state.token !== tokenAtStart) return;
     }
     clearAuth();
     showLoginPanel();

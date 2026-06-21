@@ -192,6 +192,7 @@ const mockStore = {
   ],
 
   refunds: [],
+  refund_audits: [],
   settings: [
     {
       key: "shipping_charge",
@@ -493,6 +494,12 @@ class MockQueryBuilder {
           created_at: new Date().toISOString(),
           ...row,
         };
+        if (this.table === "orders") {
+          newRow.payment_status = newRow.payment_status || "pending";
+          newRow.refund_status = newRow.refund_status || "none";
+          newRow.refund_id = newRow.refund_id || null;
+          newRow.total_refunded_amount = newRow.total_refunded_amount || 0.00;
+        }
         mockStore[this.table].push(newRow);
         return newRow;
       });
@@ -576,6 +583,26 @@ class MockQueryBuilder {
     return this;
   }
 
+  or(filterString) {
+    // filterString format: "col1.ilike.%val%,col2.ilike.%val%"
+    const conditions = filterString.split(",");
+    this.data = this.data.filter((item) =>
+      conditions.some((cond) => {
+        const parts = cond.split(".");
+        if (parts.length < 3) return false;
+        const column = parts[0];
+        const op = parts[1];
+        const pattern = parts.slice(2).join(".");
+        if (op === "ilike") {
+          const regex = new RegExp(pattern.replace(/%/g, ".*"), "i");
+          return regex.test(item[column] || "");
+        }
+        return false;
+      }),
+    );
+    return this;
+  }
+
   ilike(column, pattern) {
     const regex = new RegExp(pattern.replace(/%/g, ".*"), "i");
     this.data = this.data.filter((item) => regex.test(item[column] || ""));
@@ -621,8 +648,8 @@ class SupabaseQueryBuilderWrapper {
     this.hasMutated = false;
   }
 
-  select(fields = "*") {
-    this.builder = this.builder.select(fields);
+  select(fields = "*", opts = {}) {
+    this.builder = this.builder.select(fields, opts);
     return this;
   }
 
@@ -666,6 +693,11 @@ class SupabaseQueryBuilderWrapper {
 
   ilike(column, pattern) {
     this.builder = this.builder.ilike(column, pattern);
+    return this;
+  }
+
+  or(filterString) {
+    this.builder = this.builder.or(filterString);
     return this;
   }
 

@@ -7,6 +7,7 @@ const razorpay = require("../config/razorpay");
 const authMiddleware = require("../middleware/auth");
 const { validateBody, Joi } = require("../middleware/validate");
 const { success, error: respondError } = require("../lib/response");
+const { validatePromoCode } = require("../services/promoService");
 const jwt = require("jsonwebtoken");
 const { supabaseAdmin } = require("../config/supabase");
 const { sendInvoiceWhatsApp } = require("../services/notificationService");
@@ -69,7 +70,7 @@ function buildInvoiceData(order, user) {
     buyer: {
       name:
         order.customer_name || (user ? user.full_name : "Valued Cultivator"),
-      email: user ? user.email : "",
+      email: order.customer_email || (user ? user.email : ""),
       phone: order.delivery_phone || (user ? user.whatsapp_number : ""),
       address: order.delivery_address || "Not Specified",
     },
@@ -134,6 +135,8 @@ const checkoutSchema = Joi.object({
       "any.required": "Items are required.",
     }),
   promoCode: Joi.string().allow("", null).optional(),
+  customer_name: Joi.string().allow("").max(100).optional(),
+  customer_email: Joi.string().email().allow("").optional(),
   delivery_phone: Joi.string().allow("").optional(),
   delivery_address: Joi.string().allow("").optional(),
   address_line1: Joi.string().allow("").optional(),
@@ -158,6 +161,7 @@ router.post(
       const {
         items,
         promoCode,
+        customer_email,
         delivery_phone,
         address_line1,
         address_line2,
@@ -215,8 +219,10 @@ router.post(
 
       // Determine discount percentage
       let discountPercent = 0;
-      if (promoCode === "SPORE10") discountPercent = 0.1;
-      if (promoCode === "SHROOM20") discountPercent = 0.2;
+      if (promoCode) {
+        const result = validatePromoCode(promoCode);
+        if (result.valid) discountPercent = result.discountPercent;
+      }
 
       let subtotal = 0;
       let discountAmount = 0;
@@ -318,12 +324,11 @@ router.post(
 
       // Insert order in 'pending' status
       const invoiceToken = crypto.randomBytes(12).toString("hex");
-      const { data: newOrder, error: dbError } = await db
-        .from("orders")
-        .insert({
+      const insertPayload = {
           id: generatedOrderId,
           user_id: req.user.userId,
-          customer_name: req.user.fullName || req.user.email || "Customer",
+          customer_name: req.body.customer_name || req.user.fullName || req.user.email || "Customer",
+          customer_email: req.body.customer_email || req.user.email || "",
           delivery_address: rawAddress,
           delivery_phone: deliveryPhone,
           items: orderItems,
@@ -336,8 +341,16 @@ router.post(
           status: "pending",
           delivery_status: "placed",
           invoice_token: invoiceToken,
-        })
+      };
+      const { data: newOrder, error: dbError } = await db
+        .from("orders")
+        .insert(insertPayload)
         .single();
+
+      if (dbError || !newOrder) {
+        logger.error('[checkout] DB insert failed:', { dbError: dbError?.message, insertPayload });
+        return respondError(res, dbError?.message || 'Failed to create order', 500);
+      }
 
       // Call Razorpay API to generate order
       // Razorpay amount is in paise (1 INR = 100 paise)
@@ -399,6 +412,97 @@ const verifyPaymentSchema = Joi.object({
     .required()
     .messages({ "any.required": "Razorpay signature is required." }),
 });
+
+// POST /api/orders/confirm-upi-payment
+// Called when user pays directly via UPI QR (no Razorpay payment ID generated).
+// In mock mode  → marks order as paid immediately.
+// In live mode  → marks order as pending_upi_verification for admin to confirm.
+router.post(
+  "/confirm-upi-payment",
+  authMiddleware,
+  validateBody(
+    Joi.object({
+      razorpay_order_id: Joi.string().required(),
+      upi_ref: Joi.string().allow('', null).optional(),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const { razorpay_order_id, upi_ref } = req.body;
+
+      // In mock mode: mark as fully paid so the order completes normally.
+      // In live mode: mark as pending_upi_verification so admin can confirm.
+      const isMockMode = razorpay.isMock;
+      const newStatus = isMockMode ? "paid" : "pending_upi_verification";
+      const deliveryStatus = isMockMode ? "placed" : "pending";
+      const paymentId = upi_ref || `UPI-${Date.now()}`;
+      const transactionId = `TXN-${paymentId}`;
+
+      const { data: existingOrder } = await db
+        .from("orders")
+        .select("invoice_token")
+        .eq("razorpay_order_id", razorpay_order_id)
+        .single();
+
+      const invoiceToken =
+        existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
+
+      const { data: updatedOrder, error } = await db
+        .from("orders")
+        .update({
+          status: newStatus,
+          delivery_status: deliveryStatus,
+          payment_method: "UPI QR",
+          razorpay_payment_id: paymentId,
+          transaction_id: transactionId,
+          invoice_token: invoiceToken,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("razorpay_order_id", razorpay_order_id)
+        .single();
+
+      if (error) {
+        return respondError(res, error.message || "Failed to update order", 500);
+      }
+
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: updatedOrder },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === updatedOrder.user_id),
+        );
+      } catch (e) { /* ignore SSE errors */ }
+
+      // Send WhatsApp invoice on order placement (mock mode only)
+      if (isMockMode) {
+        try {
+          const { data: user } = await db
+            .from("users")
+            .select("*")
+            .eq("id", updatedOrder.user_id)
+            .single();
+          if (user) {
+            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
+          }
+        } catch (e) {
+          // ignore WhatsApp errors
+        }
+      }
+
+      return success(res, {
+        message: isMockMode
+          ? "UPI payment confirmed successfully."
+          : "UPI payment submitted. We will verify and confirm your order shortly.",
+        status: newStatus,
+        order: updatedOrder,
+      });
+    } catch (err) {
+      return respondError(res, err.message || "Failed to confirm UPI payment", 500);
+    }
+  },
+);
 
 // POST /api/orders/verify-payment
 // Confirm signature & finalize order
@@ -464,6 +568,20 @@ router.post(
           );
         } catch (e) {
           // ignore SSE errors
+        }
+
+        // Send WhatsApp invoice on order placement
+        try {
+          const { data: user } = await db
+            .from("users")
+            .select("*")
+            .eq("id", updatedOrder.user_id)
+            .single();
+          if (user) {
+            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
+          }
+        } catch (e) {
+          // ignore WhatsApp errors
         }
 
         return success(res, {
@@ -760,8 +878,14 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       // ignore SSE errors
     }
 
-    // Send invoice via WhatsApp when order is shipped
-    if (delivery_status === "shipped" && !order.whatsapp_sent) {
+    // Send invoice via WhatsApp when order is shipped or first confirmed
+    const shouldSendWhatsApp =
+      (delivery_status === "shipped" && !order.whatsapp_sent) ||
+      (["placed", "processing"].includes(delivery_status) &&
+       ["pending", "pending_upi_verification"].includes(order.delivery_status) &&
+       !order.whatsapp_sent);
+
+    if (shouldSendWhatsApp) {
       try {
         const { data: user } = await db
           .from("users")
@@ -1131,12 +1255,12 @@ router.get("/share/:token", async (req, res) => {
     }
 
     if (
-      !["shipped", "in_transit", "delivered"].includes(order.delivery_status)
+      !["placed", "processing", "shipped", "in_transit", "delivered"].includes(order.delivery_status)
     ) {
       return res
         .status(403)
         .send(
-          "Invoice is not yet available for this order. It will be generated once shipped.",
+          "Invoice is not yet available for this order.",
         );
     }
 
@@ -1147,6 +1271,7 @@ router.get("/share/:token", async (req, res) => {
       .single();
     const inv = buildInvoiceData(order, user);
     const shareUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+    const isDownload = req.query.download === "1";
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1167,8 +1292,10 @@ router.get("/share/:token", async (req, res) => {
     .summary { margin-top: 16px; display: grid; grid-template-columns: 1fr auto; gap: 12px; }
     .summary div { padding: 12px; background: #f8fafc; border-radius: 10px; }
     .invoice-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
-    .invoice-actions a { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; text-decoration: none; background: #0f766e; color: #fff; border-radius: 8px; }
+    .invoice-actions a { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; text-decoration: none; background: #0f766e; color: #fff; border-radius: 8px; cursor: pointer; }
     .invoice-actions a.secondary { background: #1d4ed8; }
+    .invoice-actions a.download { background: #7c3aed; }
+    @media print { .invoice-actions { display: none; } }
   </style>
 </head>
 <body>
@@ -1197,6 +1324,7 @@ router.get("/share/:token", async (req, res) => {
       <div>
         <h3>Delivery</h3>
         <p>${escapeHtml(inv.buyer.address || "N/A")}</p>
+        ${order.expected_delivery_date ? `<p style="margin-top:8px;"><strong>Expected delivery:</strong> ${new Date(order.expected_delivery_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}${order.delivery_days_text ? ` (${order.delivery_days_text})` : ""}</p>` : ""}
       </div>
     </div>
 
@@ -1246,10 +1374,14 @@ router.get("/share/:token", async (req, res) => {
     </div>
 
     <div class="invoice-actions">
-      <a href="javascript:window.print()">Print Invoice</a>
-      <a class="secondary" href="${escapeHtml(shareUrl)}">Reload Share Link</a>
+      <a href="javascript:window.print()">🖨️ Print Invoice</a>
+      <a class="secondary" href="${escapeHtml(shareUrl)}">🔄 Reload Share Link</a>
+      <a class="download" href="${escapeHtml(shareUrl)}?download=1">⬇️ Download Invoice</a>
     </div>
   </div>
+  <script>
+    ${isDownload ? "window.onload = function () { setTimeout(function () { window.print(); }, 500); };" : ""}
+  </script>
 </body>
 </html>`;
 
@@ -1512,6 +1644,31 @@ router.post(
   },
 );
 
+// POST /api/orders/:id/request-cancel
+// Customer requests order cancellation before shipment
+router.post(
+  "/:id/request-cancel",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const { reason } = req.body;
+      if (!reason || typeof reason !== "string" || !reason.trim()) {
+        return respondError(res, "Cancellation reason is required.", 400);
+      }
+
+      const { requestCustomerCancellation } = require("../modules/refunds/RefundService");
+      const updatedOrder = await requestCustomerCancellation(req.params.id, req.user.userId, reason);
+
+      return success(res, {
+        message: "Cancellation request submitted. Pending admin approval.",
+        order: updatedOrder
+      });
+    } catch (err) {
+      return respondError(res, err.message, 400);
+    }
+  }
+);
+
 //razorpay webhook refund -pravara
 // POST /api/orders/webhook/razorpay
 // Razorpay webhook — updates refund status when processed/failed
@@ -1527,79 +1684,27 @@ router.post(
 
       // Always verify signature in production
       if (secret && signature) {
+        const bodyToVerify = req.rawBody || req.body;
         const expected = crypto
           .createHmac("sha256", secret)
-          .update(req.body)
+          .update(bodyToVerify)
           .digest("hex");
         if (expected !== signature) {
           return res.status(400).json({ error: "Invalid webhook signature" });
         }
       }
 
-      const event = JSON.parse(req.body);
-      const refundEntity = event?.payload?.refund?.entity;
-
-      if (!refundEntity) return res.json({ received: true });
-
-      const { id: razorpayRefundId } = refundEntity;
-
-      if (event.event === "refund.processed") {
-        const { data: refund } = await db
-          .from("refunds")
-          .update({
-            status: "processed",
-            processed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("razorpay_refund_id", razorpayRefundId)
-          .select()
-          .single();
-
-        if (refund) {
-          await db
-            .from("orders")
-            .update({
-              refund_status: "processed",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", refund.order_id);
-
-          // SSE notify user + admin
-          sendSseEvent(
-            "refund:updated",
-            { refund },
-            (sub) =>
-              (sub.user && sub.user.role === "admin") ||
-              (sub.user && sub.user.userId === refund.user_id),
-          );
-        }
-      }
-
-      if (event.event === "refund.failed") {
-        const { data: refund } = await db
-          .from("refunds")
-          .update({ status: "failed", updated_at: new Date().toISOString() })
-          .eq("razorpay_refund_id", razorpayRefundId)
-          .select()
-          .single();
-
-        if (refund) {
-          await db
-            .from("orders")
-            .update({
-              refund_status: "failed",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", refund.order_id);
-        }
-      }
+      const event = JSON.parse(req.rawBody ? req.rawBody.toString() : req.body);
+      
+      const { handleWebhookEvent } = require("../modules/refunds/RefundWebhookHandler");
+      await handleWebhookEvent(event);
 
       return res.json({ received: true });
     } catch (err) {
       logger.error("Webhook error:", err.message);
       return res.status(500).json({ error: "Webhook processing failed" });
     }
-  },
+  }
 );
 
 module.exports = router;

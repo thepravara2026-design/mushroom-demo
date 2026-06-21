@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS products (
   price NUMERIC(10, 2),
   mrp_price NUMERIC(10, 2),
   image_url TEXT,
+  image_urls JSONB DEFAULT '[]'::JSONB,
   category TEXT REFERENCES categories(id) ON DELETE SET NULL,
   difficulty TEXT,
   gst_rate INTEGER DEFAULT 5 NOT NULL,

@@ -77,10 +77,17 @@ export const authApi = {
     body: JSON.stringify({ email, otpCode, ...opts }),
   }),
 
-  adminLogin: async (email, password) => {
+  adminLogin: async (email) => {
     return fetchWithAuth('/auth/admin-login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  adminVerifyOtp: async (email, otpCode) => {
+    return fetchWithAuth('/auth/admin-verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otpCode }),
     });
   },
 

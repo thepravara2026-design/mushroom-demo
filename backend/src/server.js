@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -16,7 +16,11 @@ const categoryRoutes = require("./routes/categories");
 const trainingRoutes = require("./routes/trainings");
 const traineeRoutes = require("./routes/trainee");
 const blogRoutes = require("./routes/blogs");
+const searchRoutes = require("./routes/search");
+const promoRoutes = require("./routes/promo");
+const locationRoutes = require("./routes/locations");
 const { startBlogLockScheduler } = require("./services/blogService");
+const refundRoutes = require("./modules/refunds/RefundController");
 const logger = require("./utils/logger");
 
 const app = express();
@@ -78,7 +82,15 @@ app.use("/api/auth/admin-login", otpLimiter);
 app.use("/api/auth", authLimiter);
 
 // Increase JSON body size limit to allow large image data URLs (base64) from admin uploads
-app.use(express.json({ limit: "10mb" }));
+// Capture raw body for webhook signature verification
+app.use(express.json({
+  limit: "10mb",
+  verify: (req, res, buf) => {
+    if (req.originalUrl && req.originalUrl.includes("webhook")) {
+      req.rawBody = buf;
+    }
+  }
+}));
 // Also support large URL-encoded payloads if used
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
@@ -101,6 +113,10 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/trainings", trainingRoutes);
 app.use("/api/trainee", traineeRoutes);
 app.use("/api/blogs", blogRoutes);
+app.use("/api/search", searchRoutes);
+app.use("/api/promo", promoRoutes);
+app.use("/api/locations", locationRoutes);
+app.use("/api/refunds", refundRoutes);
 
 // Health Check
 app.get("/api/health", (req, res) => {
@@ -141,6 +157,14 @@ function startServer(port, attempts = 0) {
     if (!db.isMock) {
       startBlogLockScheduler();
     }
+    
+    // Start background Auto-Refund Engine sweep
+    const { runAutoRefundSweep } = require("./modules/refunds/RefundService");
+    runAutoRefundSweep().catch(err => logger.error(`[Server] Initial Auto-refund sweep error: ${err.message}`));
+    setInterval(() => {
+      runAutoRefundSweep().catch(err => logger.error(`[Server] Auto-refund sweep error: ${err.message}`));
+    }, 5 * 60 * 1000);
+
     logger.info("==================================================");
   });
 

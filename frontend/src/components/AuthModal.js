@@ -1,6 +1,6 @@
 import { authApi } from '../api/authApi.js';
 import { saveAuth, clearAuth, state } from '../utils/state.js';
-import { showErrorToast, showPopupModal } from '../utils/notify.js';
+import { showErrorToast, showSuccessToast, showPopupModal } from '../utils/notify.js';
 import { isValidIndianPhone, isValidEmail, isValidOtp, getFieldError } from '../utils/validation.js';
 
 export class AuthModal {
@@ -31,7 +31,7 @@ export class AuthModal {
     this.phoneCountry = document.getElementById('auth-phone-country');
     this.phoneNameField = document.getElementById('auth-phone-name-field');
     this.adminEmailInput = document.getElementById('admin-email');
-    this.adminPasswordInput = document.getElementById('admin-password');
+    this.adminOtpInput = document.getElementById('admin-otp');
 
     // Error containers
     this.requestError = document.getElementById('request-error');
@@ -42,7 +42,7 @@ export class AuthModal {
     // Gating state
     this.currentRole = 'buyer';
     this.onSuccessCallback = null;
-    this.activeMethod = 'email'; // 'email' | 'phone' | 'google'
+    this.activeMethod = 'email'; // 'email' | 'phone'
     this._pendingContact = null; // email or phone used for verify step
 
     this.bindEvents();
@@ -55,9 +55,6 @@ export class AuthModal {
       ?.addEventListener('click', () => this.close());
 
     // Method selector buttons
-    document
-      .getElementById('btn-auth-google')
-      ?.addEventListener('click', () => this.handleGoogleLogin());
     document
       .getElementById('btn-auth-phone')
       ?.addEventListener('click', () => this.showPhoneView());
@@ -78,6 +75,21 @@ export class AuthModal {
       ?.addEventListener('click', (e) => {
         e.preventDefault();
         this.showMethodView();
+      });
+
+    document
+      .getElementById('admin-change-email')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const otpField = document.getElementById('admin-otp-field');
+        const emailField = document.getElementById('admin-email-field');
+        const subtitleEl = document.getElementById('admin-subtitle');
+        const btn = document.getElementById('admin-login-btn');
+        if (otpField) otpField.classList.add('hidden');
+        if (emailField) emailField.classList.remove('hidden');
+        if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
+        if (btn) btn.textContent = 'Send OTP';
+        this.adminLoginError?.classList.add('hidden');
       });
 
     // Back navigation
@@ -192,9 +204,9 @@ export class AuthModal {
       });
     }
 
-    if (this.adminPasswordInput) {
-      this.adminPasswordInput.addEventListener('blur', () => {
-        const err = getFieldError('password', this.adminPasswordInput.value);
+    if (this.adminOtpInput) {
+      this.adminOtpInput.addEventListener('blur', () => {
+        const err = getFieldError('otp', this.adminOtpInput.value);
         if (this.adminLoginError) {
           this.adminLoginError.textContent = err;
           this.adminLoginError.classList.toggle('hidden', !err);
@@ -273,13 +285,36 @@ export class AuthModal {
     this.verifyError?.classList.add('hidden');
     this.phoneError?.classList.add('hidden');
     this.adminLoginError?.classList.add('hidden');
+
+    const emailField = document.getElementById('admin-email-field');
+    const otpField = document.getElementById('admin-otp-field');
+    const subtitleEl = document.getElementById('admin-subtitle');
+    const btn = document.getElementById('admin-login-btn');
+    if (emailField) emailField.classList.remove('hidden');
+    if (otpField) otpField.classList.add('hidden');
+    if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
+    if (btn) btn.textContent = 'Send OTP';
+    if (this.adminOtpInput) this.adminOtpInput.value = '';
   }
 
   showMethodView() {
     this._hide(this.phoneView);
     this._hide(this.requestView);
     this._hide(this.verifyView);
+    this._hide(this.adminPasswordView);
     this._show(this.methodView);
+
+    const emailField = document.getElementById('admin-email-field');
+    const otpField = document.getElementById('admin-otp-field');
+    const subtitleEl = document.getElementById('admin-subtitle');
+    const btn = document.getElementById('admin-login-btn');
+    if (emailField) emailField.classList.remove('hidden');
+    if (otpField) otpField.classList.add('hidden');
+    if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
+    if (btn) btn.textContent = 'Send OTP';
+    if (this.adminOtpInput) this.adminOtpInput.value = '';
+    this.adminLoginError?.classList.add('hidden');
+    this.formAdminLogin?.reset();
   }
 
   showPhoneView() {
@@ -336,86 +371,19 @@ export class AuthModal {
     this._hide(this.requestView);
     this._hide(this.verifyView);
     this._show(this.adminPasswordView);
+
+    const emailField = document.getElementById('admin-email-field');
+    const otpField = document.getElementById('admin-otp-field');
+    const subtitleEl = document.getElementById('admin-subtitle');
+    const btn = document.getElementById('admin-login-btn');
+    if (emailField) emailField.classList.remove('hidden');
+    if (otpField) otpField.classList.add('hidden');
+    if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
+    if (btn) btn.textContent = 'Send OTP';
+
+    this.adminLoginError?.classList.add('hidden');
     this.adminEmailInput?.focus();
-  }
-
-  async handleGoogleLogin() {
-    // Mock Google OAuth - simulate the flow
-    if (!this.methodView) return;
-
-    // Create a temporary processing overlay instead of replacing the full method view.
-    const overlay = document.createElement('div');
-    overlay.className = 'auth-google-processing-overlay';
-    overlay.innerHTML = `
-      <div class="auth-google-processing">
-        <i class="fa-brands fa-google fa-spin" style="color:#ea4335; animation: spin 1s linear infinite;"></i>
-        <strong>Connecting to Google…</strong>
-        <p>Please wait while we authenticate you securely</p>
-      </div>
-    `;
-    this.methodView.appendChild(overlay);
-
-    // Add spin keyframe once
-    if (!document.getElementById('spin-kf')) {
-      const s = document.createElement('style');
-      s.id = 'spin-kf';
-      s.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
-      document.head.appendChild(s);
-    }
-
-    // Use a faster mock OAuth response time for better UX
-    await new Promise((r) => setTimeout(r, 800));
-
-    // Mock Google OAuth login
-    const timestamp = Date.now();
-    const mockGoogleUser = {
-      email: `googleuser${timestamp}@gmail.com`,
-      fullName: 'Google User',
-      role: this.currentRole,
-    };
-
-    try {
-      clearAuth();
-      // Request OTP for the Google email (creates user if new)
-      const otpResult = await authApi.requestOtp(
-        mockGoogleUser.email,
-        mockGoogleUser.role,
-        mockGoogleUser.fullName,
-      );
-
-      // In mock mode, the OTP is returned in the response
-      if (otpResult.otp) {
-        const data = await authApi.verifyOtp(mockGoogleUser.email, otpResult.otp, {
-          loginMethod: 'google',
-        });
-        data.user = data.user || {};
-        data.user.loginMethod = 'google';
-        saveAuth(data.token, data.user);
-        this.removeGoogleOverlay(overlay);
-        this.close();
-        // saveAuth already dispatches auth:changed
-        if (this.onSuccessCallback) this.onSuccessCallback();
-        const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
-        showPopupModal({
-          title: '🎉 Welcome!',
-          message: `Hello ${userName}, glad to see you again!`,
-          duration: 2000,
-          refreshOnClose: true,
-        });
-      } else {
-        throw new Error('OTP not available. Use Email OTP instead.');
-      }
-    } catch (err) {
-      this.removeGoogleOverlay(overlay);
-      this.showMethodView();
-      showErrorToast(err.message || 'Google login failed. Use Email OTP instead.');
-    }
-  }
-
-  removeGoogleOverlay(overlay) {
-    if (overlay && overlay.parentElement) {
-      overlay.parentElement.removeChild(overlay);
-    }
+    if (this.adminOtpInput) this.adminOtpInput.value = '';
   }
 
   async handleRequestPhoneOtp() {
@@ -518,7 +486,6 @@ export class AuthModal {
 
   async handleAdminPasswordLogin() {
     const email = this.adminEmailInput?.value.trim();
-    const password = this.adminPasswordInput?.value.trim();
 
     const emailErr = getFieldError('email', email);
     if (emailErr) {
@@ -529,37 +496,84 @@ export class AuthModal {
       return;
     }
 
-    const pwErr = getFieldError('password', password);
-    if (pwErr) {
-      if (this.adminLoginError) {
-        this.adminLoginError.textContent = pwErr;
-        this.adminLoginError.classList.remove('hidden');
+    const btn = document.getElementById('admin-login-btn');
+    const otpField = document.getElementById('admin-otp-field');
+    const emailField = document.getElementById('admin-email-field');
+    const subtitleEl = document.getElementById('admin-subtitle');
+    const sentToEl = document.getElementById('admin-otp-sent-to');
+
+    // Check if we are in the OTP verification step
+    if (otpField && !otpField.classList.contains('hidden')) {
+      const otpCode = this.adminOtpInput?.value.trim();
+      const otpErr = getFieldError('otp', otpCode);
+      if (otpErr) {
+        if (this.adminLoginError) {
+          this.adminLoginError.textContent = otpErr;
+          this.adminLoginError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Verifying…';
+      }
+
+      try {
+        clearAuth();
+        const data = await authApi.adminVerifyOtp(email, otpCode);
+        this.adminLoginError?.classList.add('hidden');
+        this.close();
+        saveAuth(data.token, data.user);
+        window.location.href = '/admin.html';
+      } catch (err) {
+        if (this.adminLoginError) {
+          this.adminLoginError.textContent = err.message || 'OTP verification failed.';
+          this.adminLoginError.classList.remove('hidden');
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Verify & Login';
+        }
       }
       return;
     }
 
-    const btn = this.formAdminLogin?.querySelector('button');
+    // Step 1: Send OTP
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Logging in…';
+      btn.textContent = 'Sending OTP…';
     }
 
     try {
-      clearAuth();
-      const data = await authApi.adminLogin(email, password);
+      const result = await authApi.adminLogin(email);
       this.adminLoginError?.classList.add('hidden');
-      this.close();
-      saveAuth(data.token, data.user);
-      window.location.href = '/admin.html';
+
+      // Switch to OTP step
+      if (emailField) emailField.classList.add('hidden');
+      if (otpField) otpField.classList.remove('hidden');
+      if (subtitleEl) subtitleEl.textContent = 'Enter the 6-digit OTP sent to your registered mobile';
+      if (btn) btn.textContent = 'Verify & Login';
+      showSuccessToast('OTP sent to registered mobile');
+
+      if (result && result.otp) {
+        if (sentToEl) sentToEl.textContent = `Demo OTP: ${result.otp}`;
+        if (this.adminOtpInput) this.adminOtpInput.value = result.otp;
+      } else if (sentToEl) {
+        sentToEl.textContent = 'OTP sent to registered mobile';
+      }
+
+      this.adminOtpInput?.focus();
+      this.adminOtpInput?.select();
     } catch (err) {
       if (this.adminLoginError) {
-        this.adminLoginError.textContent = err.message || 'Login failed. Please check your credentials.';
+        this.adminLoginError.textContent = err.message || 'Failed to send OTP.';
         this.adminLoginError.classList.remove('hidden');
       }
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Login';
       }
     }
   }

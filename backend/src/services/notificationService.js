@@ -7,6 +7,15 @@ const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || "";
 const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN || "";
 
 function buildInvoiceMessage(order, user, shareUrl) {
+  const items = Array.isArray(order.items) ? order.items : [];
+  const itemsList = items
+    .map((item) => `• ${item.name} × ${item.quantity}`)
+    .join("\n");
+
+  const deliveryLine = order.expected_delivery_date
+    ? `Expected delivery: ${new Date(order.expected_delivery_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+    : "";
+
   const lines = [
     `🧾 *Invoice from Sporekart*`,
     ``,
@@ -15,11 +24,21 @@ function buildInvoiceMessage(order, user, shareUrl) {
     `Total: ₹${Number(order.total || 0).toFixed(2)}`,
     `Status: ${order.delivery_status}`,
     ``,
-    `View your full invoice here:`,
-    shareUrl,
+    `*Items:*`,
+    itemsList || `-`,
     ``,
-    `Thank you for shopping with Sporekart! 🍄`,
   ];
+
+  if (deliveryLine) {
+    lines.push(deliveryLine);
+    lines.push(``);
+  }
+
+  lines.push(`View your full invoice:`);
+  lines.push(shareUrl);
+  lines.push(``);
+  lines.push(`Thank you for shopping with Sporekart! 🍄`);
+
   return lines.join("\n");
 }
 

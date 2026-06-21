@@ -37,6 +37,7 @@ router.post(
       category_id: Joi.string().optional(),
       name: Joi.string().required(),
       description: Joi.string().allow("", null),
+      image_url: Joi.string().allow("", null),
     }),
   ),
   async (req, res) => {

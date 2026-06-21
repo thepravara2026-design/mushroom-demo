@@ -11,7 +11,7 @@ async function findById(id) {
     .select("*")
     .eq("id", id)
     .single();
-  if (error && error.message === "No rows found") {
+  if (error && (error.message === "No rows found" || error.code === "PGRST116")) {
     return { data: null, error: null };
   }
   return { data, error };

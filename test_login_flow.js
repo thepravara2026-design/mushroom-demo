@@ -214,13 +214,24 @@ async function openAuthModal(page) {
       await screenshot(page, '17-admin-login-view');
 
       await typeText(page, 'admin-email', 'admin@sporekart.com', 'Admin email');
-      await typeText(page, 'admin-password', 'admin123', 'Admin password');
       await sleep(300);
-      await screenshot(page, '18-admin-filled');
+      await screenshot(page, '18-admin-email-filled');
 
-      await clickById(page, 'form-admin-login', 'Admin Login form');
+      await clickById(page, 'form-admin-login', 'Admin Send OTP form');
+      await sleep(2000);
+      await screenshot(page, '19-admin-otp-view');
+
+      // Read OTP from the pre-filled hint or use fallback
+      const adminOtpVal = await page.evaluate(() => document.getElementById('admin-otp')?.value || '');
+      if (!adminOtpVal) {
+        await typeText(page, 'admin-otp', '123456', 'Admin OTP (fallback)');
+      }
+      await sleep(300);
+      await screenshot(page, '20-admin-otp-filled');
+
+      await clickById(page, 'form-admin-login', 'Admin Verify form');
       await sleep(5000);
-      await screenshot(page, '19-admin-redirect');
+      await screenshot(page, '21-admin-redirect');
 
       const url = page.url();
       console.log(`  Final URL: ${url}`);

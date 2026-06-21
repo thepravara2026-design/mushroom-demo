@@ -6,7 +6,7 @@ async function findByEmail(email) {
     .select("*")
     .eq("email", email)
     .single();
-  if (error && error.message === "No rows found") {
+  if (error && (error.message === "No rows found" || error.code === "PGRST116")) {
     return { data: null, error: null };
   }
   return { data, error };
@@ -18,7 +18,7 @@ async function findByPhone(phone) {
     .select("*")
     .eq("whatsapp_number", phone.replace(/^\+91/, "").replace(/\s/g, "").trim())
     .single();
-  if (error && error.message === "No rows found") {
+  if (error && (error.message === "No rows found" || error.code === "PGRST116")) {
     return { data: null, error: null };
   }
   return { data, error };
@@ -30,7 +30,7 @@ async function findById(id) {
     .select("*")
     .eq("id", id)
     .single();
-  if (error && error.message === "No rows found") {
+  if (error && (error.message === "No rows found" || error.code === "PGRST116")) {
     return { data: null, error: null };
   }
   return { data, error };
