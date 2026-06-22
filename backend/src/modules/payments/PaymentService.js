@@ -9,8 +9,8 @@ const logger = require("../../utils/logger");
  * @param {number} amount 
  * @returns {string} UUIDv4 format compatible string
  */
-function generateRefundIdempotencyKey(orderId, paymentId, amount) {
-  const input = `${orderId}:${paymentId}:${Number(amount).toFixed(2)}`;
+function generateRefundIdempotencyKey(orderId, paymentId, amount, attempt = 0) {
+  const input = `${orderId}:${paymentId}:${Number(amount).toFixed(2)}:${attempt}`;
   const hash = crypto.createHash("sha256").update(input).digest("hex");
   
   // Format as a UUID (8-4-4-4-12)

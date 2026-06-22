@@ -27,18 +27,12 @@ const adminApproveRejectSchema = Joi.object({
 const adminCancelSchema = Joi.object({
   reason: Joi.string()
     .trim()
-    .valid(
-      "inventory_shortage",
-      "out_of_stock",
-      "supplier_issues",
-      "pricing_errors",
-      "fraud_detection",
-      "delivery_restrictions",
-      "other"
-    )
+    .min(1)
+    .max(255)
     .required()
     .messages({
-      "any.only": "Valid cancellation reason is required."
+      "string.empty": "Cancellation reason is required.",
+      "any.required": "Cancellation reason is required."
     }),
   adminNote: Joi.string()
     .trim()

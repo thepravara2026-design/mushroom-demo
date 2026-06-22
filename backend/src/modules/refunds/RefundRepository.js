@@ -18,7 +18,11 @@ async function findOrderById(orderId) {
 }
 
 /**
- * Update order fields
+ * Update order fields.
+ * Resilient: if Supabase rejects the update because a refund/payment column is not yet
+ * in the schema cache (migration pending), falls back to updating only the core
+ * columns (status, delivery_status, updated_at) so orders are never left in a
+ * broken state while the schema is being migrated.
  */
 async function updateOrder(orderId, updates) {
   const { data, error } = await db
@@ -31,6 +35,44 @@ async function updateOrder(orderId, updates) {
     .single();
 
   if (error) {
+    // Detect schema-cache errors for refund/payment columns not yet migrated
+    const isSchemaMiss = error.message && (
+      error.message.includes("refund_status") ||
+      error.message.includes("refund_id") ||
+      error.message.includes("total_refunded_amount") ||
+      error.message.includes("payment_status") ||
+      error.message.includes("customer_email") ||
+      error.message.includes("schema cache")
+    );
+
+    if (isSchemaMiss) {
+      logger.warn(`[RefundRepository] Schema cache miss for updateOrder on ${orderId} — retrying with core fields only. Error: ${error.message}`);
+
+      // Retry with only the columns guaranteed to exist in the schema
+      const safeFields = ["status", "delivery_status", "cancel_reason", "cancelled_by", "cancelled_at",
+        "razorpay_order_id", "razorpay_payment_id", "payment_method", "transaction_id",
+        "whatsapp_sent", "rating", "review_text", "expected_delivery_date", "delivery_days_text"];
+
+      const safeUpdate = { updated_at: new Date().toISOString() };
+      for (const key of safeFields) {
+        if (key in updates) safeUpdate[key] = updates[key];
+      }
+
+      const { data: fallbackData, error: fallbackError } = await db
+        .from("orders")
+        .update(safeUpdate)
+        .eq("id", orderId)
+        .single();
+
+      if (fallbackError) {
+        logger.error(`[RefundRepository] updateOrder fallback also failed for ${orderId}: ${fallbackError.message}`);
+        throw fallbackError;
+      }
+
+      logger.warn(`[RefundRepository] updateOrder completed with core fields only for ${orderId}. Run DB migration to persist refund columns.`);
+      return fallbackData;
+    }
+
     logger.error(`[RefundRepository] updateOrder error for ${orderId}: ${error.message}`);
     throw error;
   }
@@ -51,6 +93,22 @@ async function findRefundById(refundId) {
     logger.error(`[RefundRepository] findRefundById error for ${refundId}: ${error.message}`);
   }
   return data;
+}
+
+/**
+ * Find all refunds by Order ID
+ */
+async function findRefundsByOrderId(orderId) {
+  const { data, error } = await db
+    .from("refunds")
+    .select("*")
+    .eq("order_id", orderId);
+
+  if (error) {
+    logger.error(`[RefundRepository] findRefundsByOrderId error for ${orderId}: ${error.message}`);
+    throw error;
+  }
+  return data || [];
 }
 
 /**
@@ -170,6 +228,7 @@ module.exports = {
   findOrderById,
   updateOrder,
   findRefundById,
+  findRefundsByOrderId,
   findRefundByRazorpayRefundId,
   createRefund,
   updateRefund,

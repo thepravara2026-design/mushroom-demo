@@ -88,6 +88,15 @@ class AuthService {
         if (liveUser) {
           user = liveUser;
         } else {
+          // Phone uniqueness check: ensure no existing user has this phone
+          if (whatsappNumber) {
+            const { data: phoneUser } = await userRepo.findByPhone(whatsappNumber);
+            if (phoneUser) {
+              const err = new Error("This phone number is already registered to another account.");
+              err.status = 409;
+              throw err;
+            }
+          }
           // Try creating in live DB
           const insertPayload = {
             email: emailLower,
@@ -110,6 +119,16 @@ class AuthService {
       const mockUsers = require("../config/db").mockStore?.users || [];
       user = mockUsers.find(u => u.email === emailLower);
       if (!user) {
+        // Phone uniqueness check: if whatsappNumber provided, ensure no other user has it
+        if (whatsappNumber) {
+          const cleanPhone = whatsappNumber.replace(/^\+91/, "").replace(/\s/g, "").trim();
+          const phoneConflict = mockUsers.find(u =>
+            u.whatsapp_number && u.whatsapp_number.replace(/^\+91/, "").replace(/\s/g, "").trim() === cleanPhone
+          );
+          if (phoneConflict) {
+            throw new Error("This phone number is already registered to another account.");
+          }
+        }
         const newUser = {
           id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           email: emailLower,
@@ -297,6 +316,26 @@ class AuthService {
       const err = new Error("Email cannot be changed for email-verified accounts.");
       err.status = 400;
       throw err;
+    }
+
+    // Uniqueness guard: ensure new email is not already taken by another user
+    if (payload.email && payload.email !== current.email) {
+      const { data: emailOwner } = await userRepo.findByEmail(payload.email);
+      if (emailOwner && emailOwner.id !== userId) {
+        const err = new Error("This email address is already registered to another account.");
+        err.status = 409;
+        throw err;
+      }
+    }
+
+    // Uniqueness guard: ensure new phone is not already taken by another user
+    if (payload.whatsapp_number && payload.whatsapp_number !== current.whatsapp_number) {
+      const { data: phoneOwner } = await userRepo.findByPhone(payload.whatsapp_number);
+      if (phoneOwner && phoneOwner.id !== userId) {
+        const err = new Error("This phone number is already registered to another account.");
+        err.status = 409;
+        throw err;
+      }
     }
 
     if (!Object.keys(payload).length) {

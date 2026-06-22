@@ -160,9 +160,11 @@ router.get(
 
       const enrichedRefunds = refunds.map(r => {
         const user = userMap[r.user_id] || { email: "N/A", name: "N/A" };
-        const order = orderMap[r.order_id] || { total: r.refund_amount, status: "unknown" };
+        const order = orderMap[r.order_id] || { total: r.amount || r.refund_amount, status: "unknown" };
         return {
           ...r,
+          refund_status: r.status || r.refund_status,
+          refund_amount: r.amount || r.refund_amount,
           user_email: user.email,
           user_name: user.name,
           order_total: order.total,
@@ -192,9 +194,9 @@ router.get(
 
       // Compute statistics
       const stats = {
-        totalRefunded: refunds.filter(r => r.status === "processed").reduce((acc, r) => acc + Number(r.refund_amount), 0),
-        pendingCount: refunds.filter(r => r.status === "initiated").length,
-        failedCount: refunds.filter(r => r.status === "failed").length,
+        totalRefunded: refunds.filter(r => r.status === "processed" || r.refund_status === "processed").reduce((acc, r) => acc + Number(r.amount || r.refund_amount || 0), 0),
+        pendingCount: refunds.filter(r => r.status === "initiated" || r.status === "pending" || r.refund_status === "initiated" || r.refund_status === "pending").length,
+        failedCount: refunds.filter(r => r.status === "failed" || r.refund_status === "failed").length,
         totalCount: refunds.length
       };
 

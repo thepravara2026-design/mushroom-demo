@@ -74,8 +74,24 @@ module.exports = async (req, res, next) => {
         .eq("email", supaUser.email)
         .single();
 
+      // Use the public users.id (not supaUser.id from auth.users) so FK
+      // constraints on orders / refunds etc. resolve correctly.
+      const effectiveUserId = dbUser ? dbUser.id : supaUser.id;
+
+      // If the user exists in Supabase Auth but not in the public users
+      // table, sync them so FK references work.
+      if (!dbUser) {
+        await db.from("users").insert({
+          id: supaUser.id,
+          email: supaUser.email,
+          full_name: supaUser.user_metadata?.name || supaUser.email?.split("@")[0] || "User",
+          role: supaUser.app_metadata?.role || "buyer",
+          whatsapp_number: supaUser.phone || "",
+        }).single().catch(() => {});
+      }
+
       req.user = {
-        userId: supaUser.id,
+        userId: effectiveUserId,
         email: supaUser.email,
         role: supaUser.app_metadata?.role || (dbUser ? dbUser.role : "buyer"),
         fullName: dbUser

@@ -56,11 +56,11 @@ async function handleWebhookEvent(event) {
           orderId: order.id,
           action: "REFUND_COMPLETED",
           performedBy: "SYSTEM",
-          metadata: { rzpRefundId, amount: refund.refund_amount, isFullRefund }
+          metadata: { rzpRefundId, amount: refund.amount || refund.refund_amount, isFullRefund }
         });
 
         // Notify user
-        await sendRefundNotification(updatedOrder, "REFUND_COMPLETED", { rzpRefundId, amount: refund.refund_amount });
+        await sendRefundNotification(updatedOrder, "REFUND_COMPLETED", { rzpRefundId, amount: refund.amount || refund.refund_amount });
       }
       break;
     }
@@ -103,7 +103,7 @@ async function handleWebhookEvent(event) {
         });
 
         // Notify user
-        await sendRefundNotification(updatedOrder, "REFUND_FAILED", { amount: refund.refund_amount });
+        await sendRefundNotification(updatedOrder, "REFUND_FAILED", { amount: refund.amount || refund.refund_amount });
       }
       break;
     }
@@ -144,13 +144,12 @@ async function handleWebhookEvent(event) {
         });
 
         // Trigger refund process asynchronously to return fast from webhook response
-        const { initiatePartialRefund, approveCancellation, adminDirectCancellation } = require("./RefundService");
+        const { executeRefundProcess } = require("./RefundService");
         
         // Notify customer
         await sendRefundNotification(order, "TECHNICAL_RECOVERY", { amount: order.total });
 
         // Trigger automatic refund process
-        const { executeRefundProcess } = require("./RefundService");
         executeRefundProcess(order, order.total, "system", "Technical recovery refund for orphaned payment webhook")
           .then(() => logger.info(`[RefundWebhookHandler] Technical recovery refund processed for order ${order.id}`))
           .catch(err => logger.error(`[RefundWebhookHandler] Technical recovery refund execution failed for order ${order.id}: ${err.message}`));
@@ -173,8 +172,7 @@ async function handleWebhookRequest(req, res) {
 
     // Signature verification (only if secret is configured)
     if (secret && signature) {
-      // In Express raw body parser middleware may pass the raw body as buffer on req.body
-      const rawBody = Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body);
+      const rawBody = req.rawBody || (Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body));
       const isValid = verifyWebhookSignature(rawBody, signature, secret);
 
       if (!isValid) {

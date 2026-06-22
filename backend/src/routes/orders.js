@@ -324,11 +324,12 @@ router.post(
 
       // Insert order in 'pending' status
       const invoiceToken = crypto.randomBytes(12).toString("hex");
+      const customerEmail = req.body.customer_email || req.user.email || "";
       const insertPayload = {
           id: generatedOrderId,
           user_id: req.user.userId,
           customer_name: req.body.customer_name || req.user.fullName || req.user.email || "Customer",
-          customer_email: req.body.customer_email || req.user.email || "",
+          customer_email: customerEmail,
           delivery_address: rawAddress,
           delivery_phone: deliveryPhone,
           items: orderItems,
@@ -342,14 +343,55 @@ router.post(
           delivery_status: "placed",
           invoice_token: invoiceToken,
       };
-      const { data: newOrder, error: dbError } = await db
+
+      let newOrder, dbError;
+
+      // First attempt: insert with customer_email
+      ({ data: newOrder, error: dbError } = await db
         .from("orders")
         .insert(insertPayload)
-        .single();
+        .single());
+
+      // If the column doesn't exist yet in the DB schema cache, retry without it
+      // and schedule an async migration to add it so future inserts succeed
+      if (dbError && dbError.message && dbError.message.includes("customer_email")) {
+        logger.warn('[checkout] customer_email column missing in DB — retrying without it and triggering migration');
+
+        // Retry without the missing column
+        const { customer_email: _omit, ...payloadWithoutEmail } = insertPayload;
+        ({ data: newOrder, error: dbError } = await db
+          .from("orders")
+          .insert(payloadWithoutEmail)
+          .single());
+
+        // Auto-apply the migration in the background so next inserts work
+        setImmediate(async () => {
+          try {
+            const { createClient } = require("@supabase/supabase-js");
+            const adminClient = createClient(
+              process.env.SUPABASE_URL,
+              process.env.SUPABASE_SERVICE_ROLE_KEY,
+              { auth: { autoRefreshToken: false, persistSession: false } }
+            );
+            await adminClient.rpc("exec_sql", {
+              sql: "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email TEXT;"
+            }).catch(() => {}); // rpc may not exist — that's fine, column will be added next startup
+          } catch (_) {}
+        });
+      }
 
       if (dbError || !newOrder) {
         logger.error('[checkout] DB insert failed:', { dbError: dbError?.message, insertPayload });
         return respondError(res, dbError?.message || 'Failed to create order', 500);
+      }
+
+      // Backfill customer_email via an immediate UPDATE if the column now exists
+      if (customerEmail && newOrder && newOrder.id) {
+        db.from("orders")
+          .update({ customer_email: customerEmail })
+          .eq("id", newOrder.id)
+          .then(() => {})
+          .catch(() => {});
       }
 
       // Call Razorpay API to generate order
@@ -924,9 +966,17 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
     );
   }
 });
+const cancelSchema = Joi.object({
+  reason: Joi.string().trim().min(1).max(255).required().messages({
+    "string.empty": "Cancellation reason is required.",
+    "any.required": "Cancellation reason is required."
+  }),
+  adminNote: Joi.string().trim().max(500).optional()
+});
+
 // PUT /api/orders/:id/cancel
 // Allow buyers and admins to cancel an order + auto-initiate refund if paid
-router.put("/:id/cancel", authMiddleware, async (req, res) => {
+router.put("/:id/cancel", authMiddleware, validateBody(cancelSchema), async (req, res) => {
   try {
     const { data: order, error: orderErr } = await db
       .from("orders")
@@ -949,16 +999,16 @@ router.put("/:id/cancel", authMiddleware, async (req, res) => {
       );
     }
 
-    // Users can only cancel during 'processing'; admins can cancel anytime before shipped
-    if (!isAdmin && order.delivery_status !== "processing") {
+    // Users can only cancel during 'placed' or 'processing'; admins can cancel anytime before shipped
+    if (!isAdmin && order.delivery_status !== "placed" && order.delivery_status !== "processing" && order.delivery_status !== "inoculating") {
       return respondError(
         res,
-        "Order can be cancelled only when the order is in processing stage.",
+        "Order can be cancelled only when the order is in placed or processing stage.",
         400,
       );
     }
 
-    if (["shipped", "delivered", "cancelled"].includes(order.delivery_status)) {
+    if (["shipped", "in_transit", "delivered", "cancelled"].includes(order.delivery_status)) {
       return respondError(res, "Order cannot be cancelled at this stage.", 400);
     }
 
@@ -975,9 +1025,6 @@ router.put("/:id/cancel", authMiddleware, async (req, res) => {
     }
 
     const { reason, adminNote } = req.body;
-    if (!reason || typeof reason !== "string" || !reason.trim()) {
-      return respondError(res, "Cancellation reason is required.", 400);
-    }
 
     // ── Refund logic (only if payment was confirmed) ──────────────────────
     let refundRecord = null;
@@ -1644,20 +1691,38 @@ router.post(
   },
 );
 
+const requestCancelSchema = Joi.object({
+  reason: Joi.string().trim().min(1).required().messages({
+    "any.required": "Cancellation reason is required.",
+    "string.empty": "Cancellation reason is required.",
+  }),
+});
+
 // POST /api/orders/:id/request-cancel
 // Customer requests order cancellation before shipment
 router.post(
   "/:id/request-cancel",
   authMiddleware,
+  validateBody(requestCancelSchema),
   async (req, res) => {
     try {
       const { reason } = req.body;
-      if (!reason || typeof reason !== "string" || !reason.trim()) {
-        return respondError(res, "Cancellation reason is required.", 400);
-      }
 
       const { requestCustomerCancellation } = require("../modules/refunds/RefundService");
       const updatedOrder = await requestCustomerCancellation(req.params.id, req.user.userId, reason);
+
+      // Emit SSE event for updated order (admins + order owner)
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: updatedOrder },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === updatedOrder.user_id),
+        );
+      } catch (e) {
+        // ignore SSE errors
+      }
 
       return success(res, {
         message: "Cancellation request submitted. Pending admin approval.",

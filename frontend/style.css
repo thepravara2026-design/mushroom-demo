@@ -2940,6 +2940,63 @@ button {
   font-size: 0.82rem;
 }
 
+/* Refund pill */
+.pm-refund-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  margin-top: 6px;
+  border: 1px solid transparent;
+}
+
+.pm-refund-pill.warning {
+  background: #fff8eb;
+  color: #b25e00;
+  border-color: #ffd085;
+}
+
+.pm-refund-pill.info {
+  background: #f0f7ff;
+  color: #0055b3;
+  border-color: #a3cfff;
+}
+
+.pm-refund-pill.success {
+  background: #f0faf0;
+  color: #1a6b2e;
+  border-color: #a3e0a3;
+}
+
+.pm-refund-pill.danger {
+  background: #fdf2f2;
+  color: #b91c1c;
+  border-color: #f8b4b4;
+}
+
+/* Admin nav badge for pending cancellation requests */
+.admin-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.admin-nav-badge.hidden {
+  display: none;
+}
+
 /* Order actions */
 .pm-order-actions {
   display: flex;

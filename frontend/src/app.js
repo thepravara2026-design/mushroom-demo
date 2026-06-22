@@ -1605,54 +1605,14 @@ async function updateSearchSuggestions(query) {
     return;
   }
 
-  const { products = [], categories = [], trainings = [] } = result || {};
-  const hasProducts = Array.isArray(products) && products.length > 0;
-  const hasCategories = Array.isArray(categories) && categories.length > 0;
+  const { trainings = [] } = result || {};
   const hasTrainings = Array.isArray(trainings) && trainings.length > 0;
 
-  if (!hasProducts && !hasCategories && !hasTrainings) {
+  if (!hasTrainings) {
     dd.innerHTML = `<div class="suggestions-empty"><i class="fa-solid fa-magnifying-glass"></i> No results found for "${query}"</div>`;
     dd.classList.remove('hidden');
     return;
   }
-
-  const productItems = products
-    .slice(0, 4)
-    .map((p) => {
-      const hasWeights = Array.isArray(p.weight_pricing) && p.weight_pricing.length > 0;
-      const fallbackP = p.price || 0;
-      const displayPrice = hasWeights ? p.weight_pricing[0].price : fallbackP;
-      const displayMrp = hasWeights && p.weight_pricing[0].mrp_price && p.weight_pricing[0].mrp_price > p.weight_pricing[0].price
-        ? p.weight_pricing[0].mrp_price : (p.mrp_price && p.mrp_price > fallbackP ? p.mrp_price : null);
-      return `
-      <div class="suggestion-item" data-type="product" data-id="${p.id}">
-        <img src="${p.image_url}" alt="${p.name}">
-        <div class="suggestion-item-info">
-          <div class="suggestion-item-name">${p.name}</div>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <span class="suggestion-item-price">₹${displayPrice.toFixed(2)}</span>
-            ${displayMrp ? `<span class="suggestion-item-mrp">₹${displayMrp.toFixed(2)}</span>` : ''}
-          </div>
-        </div>
-        <span class="suggestion-item-cat">Product</span>
-      </div>
-    `;
-    })
-    .join('');
-
-  const categoryItems = categories
-    .slice(0, 4)
-    .map((c) => `
-      <div class="suggestion-item" data-type="category" data-id="${c.id}">
-        <div class="suggestion-item-icon"><i class="fa-solid fa-layer-group"></i></div>
-        <div class="suggestion-item-info">
-          <div class="suggestion-item-name">${c.name}</div>
-          <div class="suggestion-item-sub">${c.description || ''}</div>
-        </div>
-        <span class="suggestion-item-cat">Category</span>
-      </div>
-    `)
-    .join('');
 
   const trainingItems = trainings
     .slice(0, 4)
@@ -1674,12 +1634,6 @@ async function updateSearchSuggestions(query) {
     .join('');
 
   let html = '';
-  if (productItems) {
-    html += `<div class="suggestions-group-label"><i class="fa-solid fa-bag-shopping"></i> Products</div>${productItems}`;
-  }
-  if (categoryItems) {
-    html += `<div class="suggestions-group-label"><i class="fa-solid fa-layer-group"></i> Categories</div>${categoryItems}`;
-  }
   if (trainingItems) {
     html += `<div class="suggestions-group-label"><i class="fa-solid fa-graduation-cap"></i> Training & Courses</div>${trainingItems}`;
   }
@@ -1695,13 +1649,7 @@ async function updateSearchSuggestions(query) {
       dd.classList.add('hidden');
       document.getElementById('shop-search').value = '';
 
-      if (type === 'product') {
-        _shopInventoryPage = 1;
-        fetchProducts();
-        openProductDetails(id);
-      } else if (type === 'category') {
-        navigateToCategory(id);
-      } else if (type === 'training') {
+      if (type === 'training') {
         window.location.hash = '#training-section';
       }
     });
@@ -3118,7 +3066,7 @@ function renderCheckoutPage() {
 
   renderCheckoutOrderSummary(summaryContainer);
 
-  if (!state.token || !state.user) {
+  if (!state.token || !state.user || state.user.role !== 'buyer') {
     renderCheckoutLoginSection();
   } else {
     renderCheckoutDeliveryForm();
@@ -3450,7 +3398,9 @@ function renderCheckoutDeliveryForm() {
   }
 
   const uEmail = user.email || '';
-  if (emailInput && !emailInput.value && uEmail) emailInput.value = uEmail;
+  // Do NOT pre-fill synthetic phone-login emails (phone-XXXXXX@sporekart.com)
+  const isSyntheticPhoneEmail = /^phone-\d+@sporekart\.com$/.test(uEmail);
+  if (emailInput && !emailInput.value && uEmail && !isSyntheticPhoneEmail) emailInput.value = uEmail;
 
   const uPincode = user.defaultPincode || user.default_pincode || '';
   if (pincodeInput && !pincodeInput.value && uPincode) pincodeInput.value = uPincode;
@@ -3591,6 +3541,8 @@ async function handlePaymentContinue() {
   const stateVal = document.getElementById('checkout-state')?.value.trim() || '';
   const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
 
+  const feedback = document.getElementById('checkout-page-feedback');
+
   function clearFieldErrors() {
     document.querySelectorAll('.checkout-page .input-error').forEach(el => el.classList.remove('input-error'));
     document.querySelectorAll('.checkout-page .input-error-msg').forEach(el => { el.textContent = ''; el.classList.remove('visible'); });
@@ -3648,7 +3600,6 @@ async function handlePaymentContinue() {
   }
 
   if (hasError) {
-    const feedback = document.getElementById('checkout-page-feedback');
     if (feedback) {
       feedback.textContent = 'Please fix the highlighted fields above.';
       feedback.classList.remove('hidden');
@@ -3658,7 +3609,15 @@ async function handlePaymentContinue() {
     return;
   }
 
+  const btnContinue = document.getElementById('btn-payment-continue');
+  const originalBtnText = btnContinue ? btnContinue.innerHTML : '';
+
   try {
+    if (btnContinue) {
+      btnContinue.disabled = true;
+      btnContinue.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing Payment...';
+    }
+
     const data = await fetchWithAuth('/orders/checkout', {
       method: 'POST',
       body: JSON.stringify({
@@ -3699,6 +3658,11 @@ async function handlePaymentContinue() {
     if (feedback) {
       feedback.textContent = 'Unable to connect to payment service. Please try again later.';
       feedback.classList.remove('hidden');
+    }
+  } finally {
+    if (btnContinue) {
+      btnContinue.disabled = false;
+      btnContinue.innerHTML = originalBtnText;
     }
   }
 }
@@ -3867,31 +3831,72 @@ function showUpiIdModal(rzpDetails, orderRecord) {
     }
   });
 
-  // Pay button — open Razorpay with UPI pre-selected
-  document.getElementById('upi-id-pay-btn')?.addEventListener('click', () => {
+  // Pay button — call confirm-upi-payment directly (no Razorpay SDK redirect)
+  document.getElementById('upi-id-pay-btn')?.addEventListener('click', async () => {
     const upiId = document.getElementById('upi-id-input').value.trim();
+    const statusEl = document.getElementById('upi-id-status');
     if (!upiId || !upiId.includes('@')) {
-      const status = document.getElementById('upi-id-status');
-      status.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color:#f87171;"></i> <span style="color:#f87171;">Please enter a valid UPI ID first</span>';
+      if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color:#f87171;"></i> <span style="color:#f87171;">Please enter a valid UPI ID first</span>';
       return;
     }
-    modal.remove();
-    const opts = {
-      key: rzpDetails.keyId,
-      amount: rzpDetails.amount,
-      currency: rzpDetails.currency,
-      name: 'Sporekart',
-      description: 'UPI Payment',
-      order_id: rzpDetails.orderId,
-      async handler(response) {
-        await completeOrderPayment(response.razorpay_order_id, response.razorpay_payment_id, response.razorpay_signature);
-      },
-      prefill: { name: state.user?.fullName || '', email: state.user?.email || '', contact: state.user?.whatsappNumber || '', vpa: upiId },
-      method: 'upi',
-      theme: { color: '#f59e0b' },
-    };
-    const rzp = new Razorpay(opts);
-    rzp.open();
+
+    const btn = document.getElementById('upi-id-pay-btn');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...'; btn.disabled = true; }
+
+    try {
+      const res = await fetch(`${API_BASE}/orders/confirm-upi-payment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+        },
+        body: JSON.stringify({ razorpay_order_id: rzpDetails.orderId, upi_ref: upiId }),
+      });
+      const data = await res.json();
+      modal.remove();
+
+      if (res.ok) {
+        // Clear cart after successful UPI ID payment
+        clearCart();
+        updateCartUI();
+        state.activePromo = null;
+        state.promoDiscountPct = 0;
+        const promoInput = document.getElementById('promo-input');
+        if (promoInput) promoInput.value = '';
+        const promoMsg = document.getElementById('promo-message');
+        if (promoMsg) promoMsg.classList.add('hidden');
+
+        await fetchProducts();
+        await loadUser();
+
+        const isPending = (data.data?.status || data.status) === 'pending_upi_verification';
+        const userName = state.user?.fullName || state.user?.full_name || 'Valued Cultivator';
+
+        // Notify other tabs (admin) that orders have been updated
+        try {
+          const bcOrders = new BroadcastChannel('spore-orders');
+          bcOrders.postMessage({ type: 'orders:updated', orderId: orderRecord?.id || null });
+        } catch (e) {
+          // ignore if BroadcastChannel isn't available
+        }
+
+        showPopupModal({
+          title: isPending ? '📋 UPI Payment Submitted' : '🎉 Payment Successful!',
+          message: isPending
+            ? `${userName}, your UPI payment has been submitted via ${upiId}. We will verify and confirm your order within 24 hours.`
+            : `${userName}, your payment is confirmed. Your order has been placed successfully.`,
+          duration: 1500,
+          redirectHash: '#shop',
+        });
+      } else {
+        if (btn) { btn.innerHTML = orig; btn.disabled = false; }
+        showErrorToast(data.error || 'Could not process UPI payment. Please contact support.');
+      }
+    } catch (err) {
+      if (btn) { btn.innerHTML = orig; btn.disabled = false; }
+      showErrorToast('Network error. Please try again or contact support.');
+    }
   });
 
   document.getElementById('upi-id-back-btn')?.addEventListener('click', () => { modal.remove(); showPaymentChoiceModal(rzpDetails, orderRecord); });
@@ -4990,7 +4995,7 @@ function renderTrackingDetails(track) {
   const displayStatus = refundStates.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus;
   const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-  const canCancel = track.deliveryStatus === "processing" && track.paymentStatus === "paid";
+  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && ["pending", "paid"].includes(track.paymentStatus);
   const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `

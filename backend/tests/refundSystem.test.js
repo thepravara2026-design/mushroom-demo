@@ -207,9 +207,9 @@ describe('Refund Management System', () => {
         user_id: 'user-buyer',
         razorpay_payment_id: 'pay_test_payment_123',
         razorpay_refund_id: 'rfnd_test_refund_123',
-        refund_amount: 350.0,
-        refund_status: 'initiated',
-        initiated_by: 'admin'
+        amount: 350.0,
+        status: 'initiated',
+        cancelled_by: 'admin'
       }).single();
 
       // Mock webhook event payload
@@ -239,8 +239,8 @@ describe('Refund Management System', () => {
       expect(res.status).toBe(200);
 
       // Verify refund record is updated to processed
-      const { data: updatedRefund } = await db.from('refunds').select('refund_status').eq('id', refundRecord.id).single();
-      expect(updatedRefund.refund_status).toBe('processed');
+      const { data: updatedRefund } = await db.from('refunds').select('status').eq('id', refundRecord.id).single();
+      expect(updatedRefund.status).toBe('processed');
 
       // Verify order is updated to REFUND_COMPLETED
       const { data: updatedOrder } = await db.from('orders').select('status').eq('id', testOrderId).single();

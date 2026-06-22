@@ -421,7 +421,25 @@ class ProfileModal {
     const cancelNote = o.delivery_status === 'cancelled' && o.cancel_reason
       ? `<div class="pm-cancel-note"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
       : '';
-    const canCancel = o.delivery_status === 'processing';
+    const canCancel = (status === 'placed' || status === 'processing' || status === 'paid' || status === 'inoculating') &&
+      o.status !== 'CANCEL_REQUESTED' &&
+      o.status !== 'CANCEL_APPROVED' &&
+      o.status !== 'CANCEL_REJECTED' &&
+      !o.status.startsWith('REFUND_');
+
+    let refundPill = '';
+    if (o.status === 'CANCEL_REQUESTED') {
+      refundPill = `<div class="pm-refund-pill warning"><i class="fa-solid fa-clock"></i> Cancellation pending admin approval</div>`;
+    } else if (o.status === 'REFUND_INITIATED' || o.status === 'REFUND_PROCESSING') {
+      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-arrows-rotate fa-spin"></i> Refund in progress</div>`;
+    } else if (o.status === 'REFUND_COMPLETED' || o.status === 'refunded') {
+      refundPill = `<div class="pm-refund-pill success"><i class="fa-solid fa-circle-check"></i> Refund processed</div>`;
+    } else if (o.status === 'REFUND_FAILED') {
+      refundPill = `<div class="pm-refund-pill danger"><i class="fa-solid fa-circle-exclamation"></i> Refund failed</div>`;
+    } else if (o.status === 'CANCEL_REJECTED') {
+      refundPill = `<div class="pm-refund-pill danger"><i class="fa-solid fa-circle-xmark"></i> Cancellation request rejected</div>`;
+    }
+
     const items = Array.isArray(o.items) ? o.items : [];
     const itemsHtmlV2 = items.length
       ? `<div class="pm-order-items">${items
@@ -443,6 +461,7 @@ class ProfileModal {
       </div>
       ${itemsHtmlV2}
       ${trackingHtml}
+      ${refundPill}
       ${cancelNote}
       <div class="pm-order-actions">
         ${['shipped', 'in_transit', 'delivered'].includes(status) ? `
@@ -477,11 +496,25 @@ class ProfileModal {
         done: status !== 'pending',
       });
     }
-    if (status === 'paid' || status === 'processing') {
+    if (status === 'paid' || status === 'processing' || status === 'CANCEL_REQUESTED' || status.startsWith('REFUND_') || status === 'CANCEL_APPROVED' || status === 'CANCEL_REJECTED') {
       lines.push({
         label: 'Payment confirmed',
         time: updatedAt ? new Date(updatedAt).toLocaleString() : '',
-        done: ['paid', 'processing'].includes(status),
+        done: true,
+      });
+    }
+    if (status === 'CANCEL_REQUESTED') {
+      lines.push({
+        label: 'Cancellation requested',
+        time: updatedAt ? new Date(updatedAt).toLocaleString() : '',
+        done: true,
+      });
+    }
+    if (status === 'CANCEL_REJECTED') {
+      lines.push({
+        label: 'Cancellation rejected',
+        time: updatedAt ? new Date(updatedAt).toLocaleString() : '',
+        done: true,
       });
     }
     if (status === 'shipped' || status === 'in_transit') {
@@ -509,9 +542,9 @@ class ProfileModal {
         done: true,
       });
     }
-    if (status === 'cancelled') {
+    if (status === 'cancelled' || status === 'CANCEL_APPROVED' || status === 'refunded' || status.startsWith('REFUND_')) {
       lines.push({
-        label: 'Cancelled',
+        label: status.startsWith('REFUND_') || status === 'refunded' ? 'Refunded' : 'Cancelled',
         time: cancelledAt
           ? new Date(cancelledAt).toLocaleString()
           : updatedAt
@@ -733,8 +766,8 @@ class ProfileModal {
     const order = (state.orders || []).find((o) => String(o.id) === String(orderId));
     const status = order?.delivery_status || order?.status || 'unknown';
 
-    if (status !== 'processing') {
-      showErrorToast('Order can be cancelled only when the order is in processing stage.');
+    if (status !== 'pending' && status !== 'placed' && status !== 'processing' && status !== 'paid' && status !== 'inoculating') {
+      showErrorToast('Order can be cancelled only when the order is in placed or processing stage.');
       return;
     }
 
@@ -752,10 +785,10 @@ class ProfileModal {
       <div class="modal-card" style="max-width:460px;">
         <button class="modal-close" id="cancel-modal-close" type="button">&times;</button>
         <h3 style="margin:0 0 8px;font-size:1.2rem;color:#b91c1c;">
-          <i class="fa-solid fa-ban"></i> Cancel Order
+          <i class="fa-solid fa-ban"></i> Request Cancellation
         </h3>
         <p style="margin:0 0 18px;color:var(--text-mid);font-size:0.92rem;">
-          This will stop processing and cannot be undone. Please tell us why you are cancelling.
+          This will request a cancellation for this order. It will need to be approved by an administrator, and any payments will be refunded.
         </p>
         <div class="input-field">
           <label for="cancel-reason-select">Cancellation reason</label>
@@ -775,7 +808,7 @@ class ProfileModal {
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
           <button class="btn btn-secondary" id="cancel-modal-keep-btn" type="button">Keep order</button>
           <button class="btn btn-cancel" id="cancel-modal-confirm-btn" type="button">
-            <i class="fa-solid fa-ban"></i> Confirm cancellation
+            <i class="fa-solid fa-ban"></i> Submit Request
           </button>
         </div>
       </div>
@@ -814,29 +847,24 @@ class ProfileModal {
       modal.remove();
 
       try {
-        const cancelResult = await fetchWithAuth(`/orders/${orderId}/cancel`, {
-          method: 'PUT',
+        const cancelResult = await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
+          method: 'POST',
           body: JSON.stringify({ reason }),
         });
-        showSuccessToast('✅ Order cancelled successfully.');
-
-        const hasRefund = cancelResult && cancelResult.refund;
-        if (hasRefund) {
-          showSuccessToast('💰 Refund initiated — expect 5–7 business days.');
-        }
+        showSuccessToast('✅ Cancellation request submitted. Pending admin review.');
 
         await this.renderOrders(true);
-        this.activeTab = 'recent';
+        this.activeTab = 'orders';
         this.renderTabContent();
 
         const tabsContainer = this.modal?.querySelector('.pm-tabs');
         if (tabsContainer) {
           tabsContainer.querySelectorAll('.pm-tab').forEach(b => b.classList.remove('active'));
-          const recentBtn = tabsContainer.querySelector('[data-tab="recent"]');
-          if (recentBtn) recentBtn.classList.add('active');
+          const ordersBtn = tabsContainer.querySelector('[data-tab="orders"]');
+          if (ordersBtn) ordersBtn.classList.add('active');
         }
       } catch (err) {
-        showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
+        showErrorToast(getApiErrorMessage(err) || 'Failed to submit cancellation request.');
       }
     });
   }

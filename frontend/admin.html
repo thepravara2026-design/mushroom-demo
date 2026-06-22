@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
     crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/admin-premium.css" />
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>" />
 </head>
@@ -138,6 +139,7 @@
           </button>
           <button class="admin-tab" data-tab="orders">
             <i class="fa-solid fa-truck-fast"></i> Orders &amp; Shipping
+            <span id="admin-orders-cancel-badge" class="admin-nav-badge hidden">0</span>
           </button>
           <button class="admin-tab" data-tab="add-product">
             <i class="fa-solid fa-plus-circle"></i> Add Product
@@ -335,7 +337,7 @@
               </form>
             </div>
           </div>
-      </div>
+        </div>
 
       <!--
           <div class="admin-tab-content" id="admin-content-orders">
@@ -492,11 +494,11 @@
                 </div>
               </div>
             </div>
-          </div> 
+          </div>
         -->
 
-  <!-- update for admin ordershipping tabs-pravara -->
-  <div id="admin-content-orders" class="admin-tab-content">
+        <!-- update for admin ordershipping tabs-pravara -->
+        <div id="admin-content-orders" class="admin-tab-content">
     <div class="admin-content-inner">
 
       <!-- Sub-tab bar -->
@@ -601,11 +603,11 @@
       </div>
 
     </div>
-  </div>
+        </div>
 
 
 
-  <div class="admin-tab-content" id="admin-content-categories">
+        <div class="admin-tab-content" id="admin-content-categories">
     <div class="admin-content-inner">
       <div class="admin-section-header">
         <h3><i class="fa-solid fa-folder-tree"></i> Category Management</h3>
@@ -664,9 +666,9 @@
         </div>
       </div>
     </div>
-  </div>
+        </div>
 
-  <div class="admin-tab-content" id="admin-content-trainings">
+        <div class="admin-tab-content" id="admin-content-trainings">
     <div class="admin-content-inner">
       <div class="admin-section-header">
         <h3>
@@ -776,10 +778,9 @@
         </div>
       </div>
     </div>
-  </div>
-  </div>
+        </div>
 
-  <div class="admin-tab-content" id="admin-content-blogs">
+        <div class="admin-tab-content" id="admin-content-blogs">
     <div class="admin-content-inner">
       <div class="admin-section-header">
         <h3><i class="fa-solid fa-newspaper"></i> Blog Management</h3>
@@ -937,9 +938,9 @@
         </div>
       </div>
     </div>
-  </div>
+        </div>
 
-  <div class="admin-tab-content" id="admin-content-refunds">
+        <div class="admin-tab-content" id="admin-content-refunds">
     <div class="admin-content-inner">
       <div class="admin-section-header">
         <h3>
@@ -1001,9 +1002,9 @@
         </div>
       </div>
     </div>
-  </div>
+        </div>
 
-  <div class="admin-tab-content" id="admin-content-add-product">
+        <div class="admin-tab-content" id="admin-content-add-product">
     <div class="admin-content-inner">
       <div class="admin-section-header">
         <h3>
@@ -1140,9 +1141,10 @@
         </form>
       </div>
     </div>
-  </div>
-  </section>
-  </main>
+        </div>
+
+      </section>
+    </main>
   </div>
 
   <!-- WhatsApp Floating Icon -->

@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   customer_name TEXT,
+  customer_email TEXT,
   delivery_address TEXT,
   delivery_phone TEXT,
   items JSONB NOT NULL,
@@ -76,6 +77,10 @@ CREATE TABLE IF NOT EXISTS orders (
   total NUMERIC(10, 2) NOT NULL,
   promo_code TEXT,
   status TEXT DEFAULT 'pending' NOT NULL,
+  payment_status TEXT DEFAULT 'pending' NOT NULL,
+  refund_status TEXT DEFAULT 'none' NOT NULL,
+  refund_id TEXT,
+  total_refunded_amount NUMERIC(10, 2) DEFAULT 0.00 NOT NULL,
   razorpay_order_id TEXT,
   razorpay_payment_id TEXT,
   payment_method TEXT,
@@ -156,12 +161,12 @@ CREATE TABLE IF NOT EXISTS enrollments (
 );
 
 -- Add database-level constraints for data integrity
-ALTER TABLE products ADD CONSTRAINT IF NOT EXISTS products_stock_check CHECK (stock >= 0);
-ALTER TABLE products ADD CONSTRAINT IF NOT EXISTS products_gst_rate_check CHECK (gst_rate IN (0, 5, 12, 18, 28));
-ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_total_check CHECK (total >= 0);
-ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_subtotal_check CHECK (subtotal >= 0);
-ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_shipping_charge_check CHECK (shipping_charge >= 0);
-ALTER TABLE orders ADD CONSTRAINT IF NOT EXISTS orders_discount_amount_check CHECK (discount_amount >= 0);
+ALTER TABLE products ADD CONSTRAINT products_stock_check CHECK (stock >= 0);
+ALTER TABLE products ADD CONSTRAINT products_gst_rate_check CHECK (gst_rate IN (0, 5, 12, 18, 28));
+ALTER TABLE orders ADD CONSTRAINT orders_total_check CHECK (total >= 0);
+ALTER TABLE orders ADD CONSTRAINT orders_subtotal_check CHECK (subtotal >= 0);
+ALTER TABLE orders ADD CONSTRAINT orders_shipping_charge_check CHECK (shipping_charge >= 0);
+ALTER TABLE orders ADD CONSTRAINT orders_discount_amount_check CHECK (discount_amount >= 0);
 
 -- 3. SEED INITIAL DATABASE DATA
 

@@ -18,7 +18,7 @@ const OrderStates = {
 };
 
 const VALID_TRANSITIONS = {
-  [OrderStates.PENDING]: [OrderStates.PAID, OrderStates.FAILED, OrderStates.CANCELLED],
+  [OrderStates.PENDING]: [OrderStates.PAID, OrderStates.FAILED, OrderStates.CANCELLED, OrderStates.CANCEL_REQUESTED],
   [OrderStates.PAID]: [OrderStates.CANCEL_REQUESTED, OrderStates.REFUND_PENDING, OrderStates.CANCELLED],
   [OrderStates.CANCEL_REQUESTED]: [OrderStates.CANCEL_APPROVED, OrderStates.CANCEL_REJECTED],
   [OrderStates.CANCEL_REJECTED]: [OrderStates.PAID], // Return to operational state

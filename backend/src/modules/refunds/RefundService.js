@@ -62,11 +62,11 @@ async function requestCustomerCancellation(orderId, userId, reason) {
     throw new Error("Unauthorized to cancel this order");
   }
 
-  if (order.status !== "paid") {
-    throw new Error("Only paid orders can be cancelled with refund flow");
+  if (order.status !== "paid" && order.status !== "pending") {
+    throw new Error("Only unpaid or paid orders can be cancelled");
   }
 
-  if (order.delivery_status !== "processing" && order.delivery_status !== "placed") {
+  if (order.delivery_status !== "processing" && order.delivery_status !== "placed" && order.delivery_status !== "pending" && order.delivery_status !== "inoculating") {
     throw new Error("Order can only be cancelled before it is shipped");
   }
 
@@ -105,8 +105,12 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
     throw new Error("Order has no transaction/payment ID to refund");
   }
 
+  // Get number of refund records for this order to use as attempt count
+  const existingRefunds = await repo.findRefundsByOrderId(order.id);
+  const attemptCount = (existingRefunds || []).length;
+
   // Generate deterministic idempotency key
-  const idempotencyKey = generateRefundIdempotencyKey(order.id, order.razorpay_payment_id, refundAmount);
+  const idempotencyKey = generateRefundIdempotencyKey(order.id, order.razorpay_payment_id, refundAmount, attemptCount);
 
   // Transition to REFUND_PENDING
   await repo.updateOrder(order.id, {
@@ -141,10 +145,10 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       user_id: order.user_id,
       razorpay_payment_id: order.razorpay_payment_id,
       razorpay_refund_id: rzpRefund.id,
-      refund_amount: refundAmount,
+      amount: refundAmount,
       refund_reason: reason,
-      refund_status: "initiated",
-      initiated_by: initiatedBy,
+      status: "initiated",
+      cancelled_by: initiatedBy,
       admin_note: adminNote
     });
 
@@ -182,10 +186,10 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       user_id: order.user_id,
       razorpay_payment_id: order.razorpay_payment_id,
       razorpay_refund_id: `FAILED_${Date.now()}`,
-      refund_amount: refundAmount,
+      amount: refundAmount,
       refund_reason: reason,
-      refund_status: "failed",
-      initiated_by: initiatedBy,
+      status: "failed",
+      cancelled_by: initiatedBy,
       admin_note: adminNote,
       failure_reason: err.message
     });
@@ -241,6 +245,16 @@ async function approveCancellation(orderId, adminNote = "") {
 
   // Notify cancellation approval
   await sendRefundNotification(order, "APPROVED", { amount: order.total });
+
+  // If order is not paid, cancel it directly without gateway refund
+  if (order.status !== "paid" || !order.razorpay_payment_id) {
+    await repo.updateOrder(orderId, {
+      status: OrderStates.CANCELLED,
+      refund_status: "none"
+    });
+    await restockOrderItems(order);
+    return { success: true, order, refund: null };
+  }
 
   // Initiate full refund
   return executeRefundProcess(order, order.total, "admin", order.cancel_reason || "User Cancelled", adminNote);
@@ -358,7 +372,7 @@ async function retryFailedRefund(refundId) {
   if (!order) throw new Error("Associated order not found");
 
   // Re-run executeRefundProcess
-  return executeRefundProcess(order, refund.amount, refund.initiated_by, refund.refund_reason || "Retry Refund", refund.admin_note);
+  return executeRefundProcess(order, refund.amount, refund.cancelled_by || refund.initiated_by || "admin", refund.refund_reason || "Retry Refund", refund.admin_note);
 }
 
 /**
@@ -445,5 +459,6 @@ module.exports = {
   initiatePartialRefund,
   retryFailedRefund,
   runAutoRefundSweep,
-  sendRefundNotification
+  sendRefundNotification,
+  executeRefundProcess
 };

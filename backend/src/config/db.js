@@ -500,6 +500,13 @@ class MockQueryBuilder {
           newRow.refund_id = newRow.refund_id || null;
           newRow.total_refunded_amount = newRow.total_refunded_amount || 0.00;
         }
+        if (this.table === "refunds") {
+          newRow.status = newRow.status || newRow.refund_status || "initiated";
+          newRow.amount = newRow.amount !== undefined ? newRow.amount : newRow.refund_amount;
+          newRow.refund_status = newRow.status;
+          newRow.refund_amount = newRow.amount;
+          newRow.cancelled_by = newRow.cancelled_by || newRow.initiated_by;
+        }
         mockStore[this.table].push(newRow);
         return newRow;
       });
@@ -509,7 +516,12 @@ class MockQueryBuilder {
     }
 
     if (this.updateData) {
-      const updates = this.updateData;
+      let updates = { ...this.updateData };
+      if (this.table === "refunds") {
+        if (updates.status !== undefined) updates.refund_status = updates.status;
+        if (updates.amount !== undefined) updates.refund_amount = updates.amount;
+        if (updates.cancelled_by !== undefined) updates.initiated_by = updates.cancelled_by;
+      }
       const targetIds = new Set(this.data.map((item) => item.id));
       mockStore[this.table] = mockStore[this.table].map((item) => {
         if (targetIds.has(item.id)) {
