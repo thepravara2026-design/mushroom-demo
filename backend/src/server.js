@@ -175,6 +175,9 @@ async function runMigrations() {
         metadata JSONB
       )`,
       `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS refund_reason TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS admin_note TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS initiated_at TIMESTAMP WITH TIME ZONE`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP WITH TIME ZONE`,
       `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS failure_reason TEXT`,
     ];
 

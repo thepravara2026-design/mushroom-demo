@@ -5013,6 +5013,8 @@ function renderTrackingDetails(track) {
         <div class="tracker-payment-line"><strong>Method:</strong> ${track.paymentMethod || 'Pending'}</div>
         <div class="tracker-payment-line"><strong>Txn ID:</strong> ${track.paymentId || 'Pending confirmation'}</div>
         <div class="tracker-payment-line"><strong>Status:</strong> ${track.paymentStatus || 'pending'}</div>
+        ${(track.refundStatus && track.refundStatus !== 'none') ? `<div class="tracker-payment-line"><strong>Refund Status:</strong> ${track.refundStatus}</div>` : ''}
+        ${(track.refundAmount && track.refundAmount > 0) ? `<div class="tracker-payment-line"><strong>Refunded Amount:</strong> ₹${Number(track.refundAmount).toFixed(2)}</div>` : ''}
       </div>
       <div class="tracker-payment-card">
         <div class="tracker-payment-header">Delivery Summary</div>
@@ -5042,7 +5044,31 @@ function renderTrackingDetails(track) {
       ${track.paymentStatus === "CANCEL_REQUESTED"
       ? `
         <div class="tracker-status-box" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); color:#fbbf24; border-radius:10px; padding:12px; margin-bottom:15px;">
-          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Cancellation Requested</strong>: Your cancellation request is pending administrator approval.
+          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Cancellation Requested</strong>: Your cancellation request is pending administrator approval. You will be notified once it is reviewed.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "CANCEL_APPROVED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-check-circle"></i> <strong>Cancellation Approved</strong>: Your cancellation has been approved. Refund is being initiated and will reflect within 5-7 business days.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "CANCEL_REJECTED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#ef4444; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-times-circle"></i> <strong>Cancellation Rejected</strong>: Your cancellation request was not approved. Your order is being processed normally. Contact support for more details.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "REFUND_PENDING" || track.paymentStatus === "REFUND_INITIATED" || track.paymentStatus === "REFUND_PROCESSING"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.2); color:#a78bfa; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-rotate-right fa-spin"></i> <strong>Refund in Progress</strong>: Your refund is being processed. It typically takes 5-7 business days to reflect in your account.
         </div>
       `
       : ""
@@ -5050,7 +5076,15 @@ function renderTrackingDetails(track) {
       ${track.paymentStatus === "REFUND_COMPLETED"
       ? `
         <div class="tracker-status-box" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; border-radius:10px; padding:12px; margin-bottom:15px;">
-          <i class="fa-solid fa-circle-check"></i> <strong>Refund Processed</strong>: Refund of transaction was successfully completed. Ref: ${track.transactionId || track.paymentId || "N/A"}.
+          <i class="fa-solid fa-circle-check"></i> <strong>Refund Successful</strong>: Your refund has been successfully completed. Ref: ${track.transactionId || track.paymentId || "N/A"}. Please allow 1-2 business days for the amount to reflect in your account.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "REFUND_FAILED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#ef4444; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Refund Failed</strong>: We encountered an issue processing your refund. Our support team has been notified and will resolve this manually. Contact us for assistance.
         </div>
       `
       : ""

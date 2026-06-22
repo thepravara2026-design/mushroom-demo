@@ -3412,6 +3412,7 @@ function renderRefundQueue(refunds) {
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             ${isPending ? `<button class="btn btn-secondary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminApproveRefund('${r.order_id}')"><i class="fa-solid fa-circle-check"></i> Approve</button>` : ''}
             ${isRetryable ? `<button class="btn btn-primary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminRetryRefund('${r.order_id}')"><i class="fa-solid fa-rotate-right"></i> Retry</button>` : ''}
+            ${['paid', 'REFUND_INITIATED', 'REFUND_PROCESSING'].includes(r.order_status) ? `<button class="btn btn-secondary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminPartialRefundModal('${r.order_id}')"><i class="fa-solid fa-hand-holding-dollar"></i> Partial</button>` : ''}
             <button class="btn btn-secondary" style="font-size:0.7rem;padding:4px 10px;" onclick="adminViewRefundDetails('${r.order_id}')"><i class="fa-solid fa-eye"></i></button>
           </div>
         </td>
@@ -3595,6 +3596,66 @@ async function adminRetryRefund(orderId) {
 }
 globalThis.adminRetryRefund = adminRetryRefund;
 
+async function adminPartialRefundModal(orderId) {
+  const existing = document.getElementById('admin-partial-refund-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'admin-partial-refund-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML = `
+    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.3);border-radius:16px;max-width:480px;width:100%;padding:28px;color:#e2e8f0;box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+        <h3 style="margin:0;font-size:1.15rem;color:#f59e0b;"><i class="fa-solid fa-hand-holding-dollar"></i> Partial Refund</h3>
+        <button onclick="document.getElementById('admin-partial-refund-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
+      </div>
+      <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
+        Process a partial refund for Order #<strong style="color:#38b17b;">${orderId}</strong>. Enter the amount to refund.
+      </p>
+      <div class="input-field" style="margin-bottom:14px;">
+        <label style="color:#f59e0b;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Refund Amount (₹) *</label>
+        <input type="number" id="admin-partial-refund-amount" min="1" step="0.01" placeholder="Enter amount" style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;" />
+      </div>
+      <div class="input-field" style="margin-bottom:14px;">
+        <label style="color:#e2e8f0;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Reason *</label>
+        <textarea id="admin-partial-refund-reason" rows="2" placeholder="Reason for partial refund" style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div class="input-field" style="margin-bottom:20px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
+        <textarea id="admin-partial-refund-note" rows="2" placeholder="Internal notes..." style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('admin-partial-refund-modal').remove()">Cancel</button>
+        <button class="btn btn-primary" id="admin-partial-refund-confirm" style="background:#f59e0b;border:none;color:#0d1f1a;font-weight:700;">Process Refund</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#admin-partial-refund-confirm').addEventListener('click', async () => {
+    const refundAmount = parseFloat(modal.querySelector('#admin-partial-refund-amount').value);
+    const reason = modal.querySelector('#admin-partial-refund-reason').value.trim();
+    const adminNote = modal.querySelector('#admin-partial-refund-note').value.trim();
+
+    if (!refundAmount || refundAmount <= 0) { showErrorToast('Enter a valid refund amount.'); return; }
+    if (!reason) { showErrorToast('Reason is required.'); return; }
+
+    modal.remove();
+
+    try {
+      await fetchWithAuth(`/refunds/partial-refund/${orderId}`, {
+        method: 'POST',
+        body: JSON.stringify({ refundAmount, reason, adminNote }),
+      });
+      showSuccessToast(`✅ Partial refund of ₹${refundAmount.toFixed(2)} initiated.`);
+      loadRefundsDashboard();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Partial refund failed.');
+    }
+  });
+}
+globalThis.adminPartialRefundModal = adminPartialRefundModal;
+
 async function adminViewRefundDetails(orderId) {
   const existing = document.getElementById('admin-refund-detail-modal');
   if (existing) existing.remove();
@@ -3603,35 +3664,91 @@ async function adminViewRefundDetails(orderId) {
   modal.id = 'admin-refund-detail-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
   modal.innerHTML = `
-    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.2);border-radius:16px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;padding:28px;">
+    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.2);border-radius:16px;max-width:720px;width:100%;max-height:85vh;overflow-y:auto;padding:28px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
         <h3 style="margin:0;font-size:1.1rem;color:#e2e8f0;"><i class="fa-solid fa-hand-holding-dollar" style="color:#38b17b;"></i> Refund Details</h3>
         <button onclick="document.getElementById('admin-refund-detail-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.2rem;">&times;</button>
       </div>
-      <div style="text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin" style="color:#38b17b;font-size:1.5rem;"></i></div>
+      <div id="admin-refund-detail-body" style="text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin" style="color:#38b17b;font-size:1.5rem;"></i></div>
     </div>
   `;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 
   try {
-    const data = await fetchWithAuth(`/refunds/dashboard?search=${encodeURIComponent(orderId)}`);
-    const refund = (data.refunds || []).find(r => r.order_id === orderId) || data.refunds?.[0];
+    const [dashData, auditData] = await Promise.all([
+      fetchWithAuth(`/refunds/dashboard?search=${encodeURIComponent(orderId)}`),
+      fetchWithAuth(`/refunds/audit-logs?orderId=${encodeURIComponent(orderId)}`),
+    ]);
+
+    const refund = (dashData.refunds || []).find(r => r.order_id === orderId) || dashData.refunds?.[0];
     if (!refund) throw new Error('Refund record not found.');
 
-    const content = modal.querySelector('div > div:last-child');
-    content.innerHTML = `
+    // Fetch the full order for items breakdown
+    let orderData = null;
+    try {
+      const orderRes = await fetchWithAuth(`/orders/${orderId}`, { method: 'GET' });
+      orderData = orderRes;
+    } catch (e) { /* order fetch is optional */ }
+
+    const body = document.getElementById('admin-refund-detail-body');
+
+    // Build items breakdown if available
+    let itemsHtml = '';
+    if (orderData?.items && orderData.items.length) {
+      itemsHtml = `
+        <div style="margin-top:16px;">
+          <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;font-weight:600;margin-bottom:8px;">Order Items</div>
+          <div style="background:rgba(56,177,123,0.04);border:1px solid rgba(56,177,123,0.08);border-radius:8px;padding:8px 12px;">
+            ${orderData.items.map(item => `
+              <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.83rem;border-bottom:1px solid rgba(56,177,123,0.06);">
+                <span style="color:#e2e8f0;">${item.name} × ${item.quantity}</span>
+                <span style="color:#94a3b8;">₹${(item.price * item.quantity).toFixed(2)}</span>
+              </div>
+            `).join('')}
+            <div style="display:flex;justify-content:space-between;padding:6px 0 0;font-size:0.85rem;font-weight:700;color:#38b17b;">
+              <span>Total</span>
+              <span>₹${Number(orderData.total || 0).toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Build timeline from audit logs
+    let timelineHtml = '';
+    if (auditData && auditData.length) {
+      const orderAudits = auditData.filter(l => l.order_id === orderId).slice(0, 20);
+      if (orderAudits.length) {
+        timelineHtml = `
+          <div style="margin-top:16px;">
+            <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;font-weight:600;margin-bottom:8px;">Refund Timeline</div>
+            <div style="max-height:200px;overflow-y:auto;background:rgba(56,177,123,0.02);border:1px solid rgba(56,177,123,0.08);border-radius:8px;padding:8px;">
+              ${orderAudits.map(log => `
+                <div style="display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid rgba(56,177,123,0.04);font-size:0.78rem;">
+                  <span style="color:#64748b;white-space:nowrap;">${log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+                  <span style="color:#e2e8f0;font-weight:600;">${(log.action || '').replace(/_/g, ' ')}</span>
+                  <span style="color:#64748b;">by ${log.actor_role === 'admin' ? 'Admin' : log.performed_by ? (log.performed_by === 'SYSTEM' ? 'System' : log.performed_by.substring(0, 8)) : '-'}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    body.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         ${[
-        ['Order ID', `RUN-${(refund.order_id || '').substring(0, 8).toUpperCase()}`],
+        ['Order ID', `<a href="#" onclick="event.preventDefault();document.getElementById('admin-refund-detail-modal').remove();window.open('/admin.html#order-${refund.order_id}', '_blank');" style="color:#38b17b;text-decoration:underline;">RUN-${(refund.order_id || '').substring(0, 8).toUpperCase()}</a>`],
         ['Customer', refund.user_name || refund.user_email || '-'],
         ['Email', refund.user_email || '-'],
         ['Refund Amount', `\u20b9${Number(refund.refund_amount || 0).toFixed(2)}`],
         ['Order Total', `\u20b9${Number(refund.order_total || 0).toFixed(2)}`],
         ['Refund Status', refund.refund_status || refund.status || '-'],
         ['Order Status', refund.order_status || '-'],
-        ['Payment ID', refund.razorpay_payment_id || '-'],
-        ['Refund ID', refund.razorpay_refund_id || 'Pending'],
+        ['Payment ID', `<span style="font-family:monospace;font-size:0.75rem;">${(refund.razorpay_payment_id || '-').substring(0, 20)}</span>`],
+        ['Refund ID', refund.razorpay_refund_id ? `<span style="font-family:monospace;font-size:0.75rem;">${refund.razorpay_refund_id.substring(0, 20)}</span>` : '<span style="color:#f59e0b;">Pending</span>'],
         ['Initiated At', refund.created_at ? new Date(refund.created_at).toLocaleString('en-IN') : '-'],
         ['Processed At', refund.processed_at ? new Date(refund.processed_at).toLocaleString('en-IN') : '-'],
         ['Reason', refund.cancel_reason || refund.reason || '-'],
@@ -3642,14 +3759,18 @@ async function adminViewRefundDetails(orderId) {
           </div>
         `).join('')}
       </div>
+      ${itemsHtml}
+      ${timelineHtml}
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap;">
         ${(refund.refund_status === 'failed' || refund.status === 'failed') ? `<button class="btn btn-primary" onclick="adminRetryRefund('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-rotate-right"></i> Retry Refund</button>` : ''}
         ${(refund.order_status === 'CANCEL_REQUESTED') ? `<button class="btn btn-primary" onclick="adminApproveRefund('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-cancel" onclick="adminRejectRefund('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-xmark"></i> Reject</button>` : ''}
+        ${['paid', 'REFUND_INITIATED', 'REFUND_PROCESSING'].includes(refund.order_status) ? `<button class="btn btn-secondary" onclick="adminPartialRefundModal('${orderId}');document.getElementById('admin-refund-detail-modal').remove();"><i class="fa-solid fa-hand-holding-dollar"></i> Partial Refund</button>` : ''}
         <button class="btn btn-secondary" onclick="document.getElementById('admin-refund-detail-modal').remove();">Close</button>
       </div>
     `;
   } catch (err) {
-    modal.querySelector('div > div:last-child').innerHTML = `<p style="color:#ef4444;">Error: ${getApiErrorMessage(err)}</p>`;
+    const body = document.getElementById('admin-refund-detail-body');
+    if (body) body.innerHTML = `<p style="color:#ef4444;">Error: ${getApiErrorMessage(err)}</p>`;
   }
 }
 globalThis.adminViewRefundDetails = adminViewRefundDetails;

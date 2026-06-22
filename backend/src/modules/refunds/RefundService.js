@@ -43,10 +43,20 @@ async function sendRefundNotification(order, actionType, metadata = {}) {
   }
 
   if (message) {
-    try {
-      await sendWhatsAppMessage(phone, message);
-    } catch (err) {
-      logger.error(`[RefundService] Failed to send notification for order ${order.id}: ${err.message}`);
+    // Retry up to 3 times with exponential backoff
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await sendWhatsAppMessage(phone, message);
+        break; // Success — exit retry loop
+      } catch (err) {
+        if (attempt < 3) {
+          const delay = Math.pow(2, attempt) * 1000; // 2s, 4s, then final log
+          logger.warn(`[RefundService] WhatsApp send attempt ${attempt}/3 failed for order ${order.id}, retrying in ${delay}ms: ${err.message}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          logger.error(`[RefundService] All 3 WhatsApp attempts failed for order ${order.id}: ${err.message}`);
+        }
+      }
     }
   }
 }
@@ -100,7 +110,7 @@ async function requestCustomerCancellation(orderId, userId, reason) {
 /**
  * Helper to process refund gateway calls and update order/refund records
  */
-async function executeRefundProcess(order, refundAmount, initiatedBy, reason, adminNote = "") {
+async function executeRefundProcess(order, refundAmount, initiatedBy, reason, adminNote = "", adminUser = null) {
   if (!order.razorpay_payment_id) {
     throw new Error("Order has no transaction/payment ID to refund");
   }
@@ -118,11 +128,14 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
     refund_status: "pending"
   });
 
+  // Resolve the performer identity for audit logs
+  const auditPerformer = adminUser || (initiatedBy === "admin" ? "ADMIN" : "SYSTEM");
+
   // Log audit
   await logRefundAction({
     orderId: order.id,
     action: "REFUND_PENDING",
-    performedBy: initiatedBy === "admin" ? "ADMIN" : "SYSTEM",
+    performedBy: auditPerformer,
     metadata: { refundAmount, reason }
   });
 
@@ -130,6 +143,21 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
   let refundRecord = null;
 
   try {
+    // ── Create refund record BEFORE gateway call (compensating transaction) ──
+    // This ensures we always have a DB record even if the Razorpay call fails
+    // or if the DB update after a successful Razorpay call fails.
+    refundRecord = await repo.createRefund({
+      order_id: order.id,
+      user_id: order.user_id,
+      razorpay_payment_id: order.razorpay_payment_id,
+      razorpay_refund_id: null, // Will be set after successful gateway call
+      amount: refundAmount,
+      refund_reason: reason,
+      status: "pending", // Start as pending; updated to initiated or failed
+      cancelled_by: initiatedBy,
+      admin_note: adminNote
+    });
+
     const amountInPaise = Math.round(refundAmount * 100);
     
     // Call Razorpay API
@@ -139,17 +167,10 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       initiatedBy: initiatedBy
     });
 
-    // Create refund record
-    refundRecord = await repo.createRefund({
-      order_id: order.id,
-      user_id: order.user_id,
-      razorpay_payment_id: order.razorpay_payment_id,
+    // ── Gateway call succeeded — update refund record ──
+    refundRecord = await repo.updateRefund(refundRecord.id, {
       razorpay_refund_id: rzpRefund.id,
-      amount: refundAmount,
-      refund_reason: reason,
-      status: "initiated",
-      cancelled_by: initiatedBy,
-      admin_note: adminNote
+      status: "initiated"
     });
 
     // Update order
@@ -169,7 +190,7 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       refundId: refundRecord.id,
       orderId: order.id,
       action: "REFUND_INITIATED",
-      performedBy: initiatedBy === "admin" ? "ADMIN" : "SYSTEM",
+      performedBy: auditPerformer,
       metadata: { razorpayRefundId: rzpRefund.id, amount: refundAmount }
     });
 
@@ -180,19 +201,28 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
   } catch (err) {
     logger.error(`[RefundService] Refund execution failed for order ${order.id}: ${err.message}`);
 
-    // Create failed refund record in database
-    refundRecord = await repo.createRefund({
-      order_id: order.id,
-      user_id: order.user_id,
-      razorpay_payment_id: order.razorpay_payment_id,
-      razorpay_refund_id: `FAILED_${Date.now()}`,
-      amount: refundAmount,
-      refund_reason: reason,
-      status: "failed",
-      cancelled_by: initiatedBy,
-      admin_note: adminNote,
-      failure_reason: err.message
-    });
+    if (refundRecord) {
+      // We already have a refund record — update it to failed
+      await repo.updateRefund(refundRecord.id, {
+        razorpay_refund_id: rzpRefund ? rzpRefund.id : `FAILED_${Date.now()}`,
+        status: "failed",
+        failure_reason: err.message
+      });
+    } else {
+      // Refund record creation itself failed (rare) — create a failed record
+      refundRecord = await repo.createRefund({
+        order_id: order.id,
+        user_id: order.user_id,
+        razorpay_payment_id: order.razorpay_payment_id,
+        razorpay_refund_id: `FAILED_${Date.now()}`,
+        amount: refundAmount,
+        refund_reason: reason,
+        status: "failed",
+        cancelled_by: initiatedBy,
+        admin_note: adminNote,
+        failure_reason: err.message
+      });
+    }
 
     // Update order to REFUND_FAILED status
     const updatedOrder = await repo.updateOrder(order.id, {
@@ -209,9 +239,14 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       refundId: refundRecord.id,
       orderId: order.id,
       action: "REFUND_FAILED",
-      performedBy: initiatedBy === "admin" ? "ADMIN" : "SYSTEM",
-      metadata: { error: err.message }
+      performedBy: auditPerformer,
+      metadata: { error: err.message, partialRefundCreated: !!rzpRefund }
     });
+
+    // If Razorpay refund was created but DB update failed, log a critical warning
+    if (rzpRefund) {
+      logger.error(`[RefundService] CRITICAL: Razorpay refund ${rzpRefund.id} was created but DB state is failed. Order ${order.id}. Webhook should reconcile.`);
+    }
 
     // Notify user
     await sendRefundNotification(updatedOrder, "REFUND_FAILED", { amount: refundAmount });
@@ -223,7 +258,7 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
 /**
  * Admin approves user cancellation request
  */
-async function approveCancellation(orderId, adminNote = "") {
+async function approveCancellation(orderId, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
@@ -236,34 +271,37 @@ async function approveCancellation(orderId, adminNote = "") {
     status: OrderStates.CANCEL_APPROVED
   });
 
+  const auditPerformer = adminUser || "ADMIN";
+
   await logRefundAction({
     orderId,
     action: "CANCEL_APPROVED",
-    performedBy: "ADMIN",
+    performedBy: auditPerformer,
     metadata: { adminNote }
   });
 
   // Notify cancellation approval
   await sendRefundNotification(order, "APPROVED", { amount: order.total });
 
-  // If order is not paid, cancel it directly without gateway refund
-  if (order.status !== "paid" || !order.razorpay_payment_id) {
+  // If order has no payment ID, cancel it directly without gateway refund
+  if (!order.razorpay_payment_id) {
     await repo.updateOrder(orderId, {
       status: OrderStates.CANCELLED,
       refund_status: "none"
     });
     await restockOrderItems(order);
-    return { success: true, order, refund: null };
+    const cancelledOrder = await repo.findOrderById(orderId);
+    return { success: true, order: cancelledOrder, refund: null };
   }
 
   // Initiate full refund
-  return executeRefundProcess(order, order.total, "admin", order.cancel_reason || "User Cancelled", adminNote);
+  return executeRefundProcess(order, order.total, "admin", order.cancel_reason || "User Cancelled", adminNote, auditPerformer);
 }
 
 /**
  * Admin rejects user cancellation request
  */
-async function rejectCancellation(orderId, reason = "") {
+async function rejectCancellation(orderId, reason = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
@@ -281,7 +319,7 @@ async function rejectCancellation(orderId, reason = "") {
   await logRefundAction({
     orderId,
     action: "CANCEL_REJECTED",
-    performedBy: "ADMIN",
+    performedBy: adminUser || "ADMIN",
     metadata: { reason }
   });
 
@@ -294,7 +332,7 @@ async function rejectCancellation(orderId, reason = "") {
 /**
  * Admin cancels order directly (due to inventory, errors, etc.)
  */
-async function adminDirectCancellation(orderId, reason, adminNote = "") {
+async function adminDirectCancellation(orderId, reason, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
@@ -311,10 +349,12 @@ async function adminDirectCancellation(orderId, reason, adminNote = "") {
     cancelled_at: new Date().toISOString()
   });
 
+  const auditPerformer = adminUser || "ADMIN";
+
   await logRefundAction({
     orderId,
     action: "CANCEL_APPROVED",
-    performedBy: "ADMIN",
+    performedBy: auditPerformer,
     metadata: { reason, adminNote }
   });
 
@@ -333,13 +373,13 @@ async function adminDirectCancellation(orderId, reason, adminNote = "") {
   }
 
   // Initiate full refund
-  return executeRefundProcess(cancelledOrder, order.total, "admin", reason, adminNote);
+  return executeRefundProcess(cancelledOrder, order.total, "admin", reason, adminNote, auditPerformer);
 }
 
 /**
  * Admin triggers manual partial refund
  */
-async function initiatePartialRefund(orderId, refundAmount, reason, adminNote = "") {
+async function initiatePartialRefund(orderId, refundAmount, reason, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
@@ -354,7 +394,8 @@ async function initiatePartialRefund(orderId, refundAmount, reason, adminNote = 
     throw new Error(`Refund amount exceeds remaining order balance. Remaining: ₹${remaining}`);
   }
 
-  return executeRefundProcess(order, refundAmount, "admin", reason, adminNote);
+  const auditPerformer = adminUser || "ADMIN";
+  return executeRefundProcess(order, refundAmount, "admin", reason, adminNote, auditPerformer);
 }
 
 /**
@@ -371,8 +412,16 @@ async function retryFailedRefund(refundId) {
   const order = await repo.findOrderById(refund.order_id);
   if (!order) throw new Error("Associated order not found");
 
-  // Re-run executeRefundProcess
-  return executeRefundProcess(order, refund.amount, refund.cancelled_by || refund.initiated_by || "admin", refund.refund_reason || "Retry Refund", refund.admin_note);
+  // Re-run executeRefundProcess with the old refund's parameters
+  const result = await executeRefundProcess(order, refund.amount, refund.cancelled_by || "admin", refund.refund_reason || "Retry Refund", refund.admin_note);
+
+  // Mark the old failed refund as superseded so we know not to retry it again
+  await repo.updateRefund(refund.id, {
+    status: "superseded",
+    failure_reason: (refund.failure_reason || "") + " | Superseded by retry"
+  });
+
+  return result;
 }
 
 /**

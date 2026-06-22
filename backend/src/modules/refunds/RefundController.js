@@ -38,7 +38,7 @@ router.post(
   async (req, res) => {
     try {
       const { adminNote } = req.body;
-      const result = await service.approveCancellation(req.params.id, adminNote);
+      const result = await service.approveCancellation(req.params.id, adminNote, req.user);
       return success(res, {
         message: "Cancellation request approved. Refund initiated.",
         order: result.order,
@@ -60,7 +60,7 @@ router.post(
   async (req, res) => {
     try {
       const { reason } = req.body;
-      const updatedOrder = await service.rejectCancellation(req.params.id, reason);
+      const updatedOrder = await service.rejectCancellation(req.params.id, reason, req.user);
       return success(res, {
         message: "Cancellation request rejected. Order reverted to processing.",
         order: updatedOrder
@@ -81,7 +81,7 @@ router.post(
   async (req, res) => {
     try {
       const { reason, adminNote } = req.body;
-      const result = await service.adminDirectCancellation(req.params.id, reason, adminNote);
+      const result = await service.adminDirectCancellation(req.params.id, reason, adminNote, req.user);
       return success(res, {
         message: "Order cancelled by admin. Refund initiated.",
         order: result.order,
@@ -103,7 +103,7 @@ router.post(
   async (req, res) => {
     try {
       const { refundAmount, reason, adminNote } = req.body;
-      const result = await service.initiatePartialRefund(req.params.id, refundAmount, reason, adminNote);
+      const result = await service.initiatePartialRefund(req.params.id, refundAmount, reason, adminNote, req.user);
       return success(res, {
         message: `Partial refund of ₹${refundAmount} initiated successfully.`,
         order: result.order,
@@ -143,7 +143,21 @@ router.get(
   requireAdmin,
   async (req, res) => {
     try {
-      const refunds = await repo.listAllRefunds();
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+      const { status, search } = req.query;
+
+      const result = await repo.listAllRefunds(page, limit);
+      let refunds = result.data;
+      const totalCount = result.total;
+
+      // If filtering, fetch all (or more) for accurate filtered results
+      if (status || search) {
+        // For filtered views, fetch up to 1000 records
+        const allResult = await repo.listAllRefunds(1, 1000);
+        refunds = allResult.data;
+      }
+
       const { data: users } = await db.from("users").select("id, email, full_name");
       const { data: orders } = await db.from("orders").select("id, total, status, delivery_status");
 
@@ -159,7 +173,7 @@ router.get(
       });
 
       const enrichedRefunds = refunds.map(r => {
-        const user = userMap[r.user_id] || { email: "N/A", name: "N/A" };
+        const user = r.user_id ? (userMap[r.user_id] || { email: "N/A", name: "Deleted User" }) : { email: "N/A", name: "Deleted User" };
         const order = orderMap[r.order_id] || { total: r.amount || r.refund_amount, status: "unknown" };
         return {
           ...r,
@@ -173,14 +187,11 @@ router.get(
         };
       });
 
-      // Filter parsing
-      const { status, search } = req.query;
+      // Apply filters
       let filtered = enrichedRefunds;
-
       if (status) {
         filtered = filtered.filter(r => r.refund_status === status);
       }
-
       if (search) {
         const term = search.toLowerCase().trim();
         filtered = filtered.filter(r => 
@@ -192,17 +203,20 @@ router.get(
         );
       }
 
-      // Compute statistics
+      // Compute statistics from all matching records
+      const { data: allRefunds } = await db.from("refunds").select("*");
+      const allRefundList = allRefunds || [];
       const stats = {
-        totalRefunded: refunds.filter(r => r.status === "processed" || r.refund_status === "processed").reduce((acc, r) => acc + Number(r.amount || r.refund_amount || 0), 0),
-        pendingCount: refunds.filter(r => r.status === "initiated" || r.status === "pending" || r.refund_status === "initiated" || r.refund_status === "pending").length,
-        failedCount: refunds.filter(r => r.status === "failed" || r.refund_status === "failed").length,
-        totalCount: refunds.length
+        totalRefunded: allRefundList.filter(r => r.status === "processed").reduce((acc, r) => acc + Number(r.amount || 0), 0),
+        pendingCount: allRefundList.filter(r => r.status === "initiated" || r.status === "pending").length,
+        failedCount: allRefundList.filter(r => r.status === "failed").length,
+        totalCount: totalCount
       };
 
       return success(res, {
         refunds: filtered,
-        stats
+        stats,
+        pagination: { page, limit, total: totalCount }
       });
     } catch (err) {
       return respondError(res, err.message, 500);

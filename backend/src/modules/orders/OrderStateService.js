@@ -26,7 +26,7 @@ const VALID_TRANSITIONS = {
   [OrderStates.REFUND_PENDING]: [OrderStates.REFUND_INITIATED, OrderStates.REFUND_FAILED],
   [OrderStates.REFUND_INITIATED]: [OrderStates.REFUND_PROCESSING, OrderStates.REFUND_FAILED, OrderStates.REFUND_COMPLETED],
   [OrderStates.REFUND_PROCESSING]: [OrderStates.REFUND_COMPLETED, OrderStates.REFUND_FAILED],
-  [OrderStates.REFUND_FAILED]: [OrderStates.REFUND_PENDING], // Allow admin manual retry
+  [OrderStates.REFUND_FAILED]: [OrderStates.REFUND_PENDING, OrderStates.REFUND_INITIATED], // Allow admin manual retry and direct retry success
   [OrderStates.REFUND_COMPLETED]: [], // Terminal state
   [OrderStates.CANCELLED]: [],
   [OrderStates.REFUNDED]: []

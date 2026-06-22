@@ -12,6 +12,7 @@ const jwt = require("jsonwebtoken");
 const { supabaseAdmin } = require("../config/supabase");
 const { sendInvoiceWhatsApp } = require("../services/notificationService");
 const { JWT_SECRET } = require("../config/jwt");
+const refundService = require("../modules/refunds/RefundService");
 const logger = require("../utils/logger");
 
 // Simple in-memory SSE subscribers list. Each subscriber: { id, res, user }
@@ -975,173 +976,41 @@ const cancelSchema = Joi.object({
 });
 
 // PUT /api/orders/:id/cancel
-// Allow buyers and admins to cancel an order + auto-initiate refund if paid
+// Allow admins to cancel an order — delegates to RefundService
+// Customers should use POST /:id/request-cancel instead
 router.put("/:id/cancel", authMiddleware, validateBody(cancelSchema), async (req, res) => {
   try {
-    const { data: order, error: orderErr } = await db
-      .from("orders")
-      .select("*")
-      .eq("id", req.params.id)
-      .single();
-
-    if (orderErr || !order) {
-      return respondError(res, "Order not found.", 404);
-    }
-
     const isAdmin = req.user.role === "admin";
-    const isOwner = order.user_id === req.user.userId;
-
-    if (!isAdmin && !isOwner) {
+    if (!isAdmin) {
       return respondError(
         res,
-        "Access denied. You do not have permission to cancel this order.",
+        "Customers must use the 'Request Cancellation' option. Admins only for direct cancel.",
         403,
       );
     }
 
-    // Users can only cancel during 'placed' or 'processing'; admins can cancel anytime before shipped
-    if (!isAdmin && order.delivery_status !== "placed" && order.delivery_status !== "processing" && order.delivery_status !== "inoculating") {
-      return respondError(
-        res,
-        "Order can be cancelled only when the order is in placed or processing stage.",
-        400,
-      );
-    }
-
-    if (["shipped", "in_transit", "delivered", "cancelled"].includes(order.delivery_status)) {
-      return respondError(res, "Order cannot be cancelled at this stage.", 400);
-    }
-
-    // Prevent double-cancel
-    if (
-      order.refund_status === "initiated" ||
-      order.refund_status === "processed"
-    ) {
-      return respondError(
-        res,
-        "A refund has already been initiated for this order.",
-        400,
-      );
-    }
-
     const { reason, adminNote } = req.body;
+    const result = await refundService.adminDirectCancellation(req.params.id, reason, adminNote, req.user);
 
-    // ── Refund logic (only if payment was confirmed) ──────────────────────
-    let refundRecord = null;
-
-    if (order.status === "paid" && order.razorpay_payment_id) {
-      try {
-        const amountInPaise = Math.round(order.total * 100);
-
-        // Call Razorpay refund API
-        const rzpRefund = await razorpay.payments.refund(
-          order.razorpay_payment_id,
-          {
-            amount: amountInPaise,
-            speed: "normal",
-            notes: {
-              orderId: order.id,
-              reason: reason.trim(),
-              cancelledBy: isAdmin ? "admin" : "user",
-            },
-          },
-        );
-
-        // Save refund record to DB
-        const { data: newRefund, error: refundErr } = await db
-          .from("refunds")
-          .insert({
-            order_id: order.id,
-            user_id: order.user_id,
-            razorpay_payment_id: order.razorpay_payment_id,
-            razorpay_refund_id: rzpRefund.id,
-            amount: order.total,
-            status: "initiated",
-            cancelled_by: isAdmin ? "admin" : "user",
-            admin_note: isAdmin
-              ? (adminNote || reason).trim().slice(0, 500)
-              : null,
-            initiated_at: new Date().toISOString(),
-          })
-          .select()
-          .single();
-
-        if (refundErr) throw new Error(refundErr.message);
-        refundRecord = newRefund;
-      } catch (refundError) {
-        // Refund initiation failed — still cancel the order but flag it
-        logger.error("Razorpay refund initiation failed:", refundError.message);
-        // Continue with cancellation; admin can retry refund manually
-      }
-    }
-
-    // ── Cancel the order ──────────────────────────────────────────────────
-    const cancelPayload = {
-      status: "cancelled",
-      delivery_status: "cancelled",
-      cancel_reason: reason.trim().slice(0, 255),
-      cancelled_by: isAdmin ? "admin" : "user",
-      cancelled_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      refund_status: refundRecord
-        ? "initiated"
-        : order.status === "paid"
-          ? "failed"
-          : "none",
-      ...(refundRecord && { refund_id: refundRecord.id }),
-    };
-
-    const { data: cancelledOrder, error: cancelErr } = await db
-      .from("orders")
-      .update(cancelPayload)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (cancelErr) {
-      return respondError(
-        res,
-        cancelErr.message || "Failed to cancel order",
-        500,
-      );
-    }
-
-    // ── Restock items ─────────────────────────────────────────────────────
-    if (order.status === "paid" && Array.isArray(order.items)) {
-      for (const item of order.items) {
-        const { data: productData } = await db
-          .from("products")
-          .select("stock")
-          .eq("id", item.productId)
-          .single();
-
-        if (!productData) continue;
-        await db
-          .from("products")
-          .update({ stock: (productData.stock || 0) + item.quantity })
-          .eq("id", item.productId);
-      }
-    }
-
-    // ── SSE broadcast ─────────────────────────────────────────────────────
+    // SSE broadcast
     try {
       sendSseEvent(
         "order:updated",
-        { order: cancelledOrder, refund: refundRecord },
+        { order: result.order, refund: result.refund },
         (sub) =>
           (sub.user && sub.user.role === "admin") ||
-          (sub.user && sub.user.userId === cancelledOrder.user_id),
+          (sub.user && sub.user.userId === result.order.user_id),
       );
     } catch (e) {
       /* ignore */
     }
 
     return success(res, {
-      message: refundRecord
+      message: result.refund
         ? "Order cancelled. Refund initiated — expect 5–7 business days."
         : "Order cancelled successfully.",
-      order: cancelledOrder,
-      refund: refundRecord,
+      order: result.order,
+      refund: result.refund,
     });
   } catch (error) {
     return respondError(res, error.message || "Order cancellation failed", 500);
@@ -1597,6 +1466,8 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       orderId: order.id,
       paymentStatus: order.status,
       paymentMethod: order.razorpay_order_id ? "Razorpay" : "Pending",
+      refundStatus: order.refund_status || "none",
+      refundAmount: order.total_refunded_amount || 0,
       paymentId: order.razorpay_payment_id || "",
       transactionId: order.transaction_id || order.razorpay_payment_id || "",
       deliveryStatus: responseStatus,
@@ -1734,42 +1605,31 @@ router.post(
   }
 );
 
-//razorpay webhook refund -pravara
-// POST /api/orders/webhook/razorpay
-// Razorpay webhook — updates refund status when processed/failed
-// IMPORTANT: Register this URL in Razorpay dashboard > Webhooks
-// Use express.raw() — must be registered before express.json() in server.js
-router.post(
-  "/webhook/razorpay",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    try {
-      const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-      const signature = req.headers["x-razorpay-signature"];
+// Webhook consolidated in RefundController.js at POST /api/refunds/webhook
 
-      // Always verify signature in production
-      if (secret && signature) {
-        const bodyToVerify = req.rawBody || req.body;
-        const expected = crypto
-          .createHmac("sha256", secret)
-          .update(bodyToVerify)
-          .digest("hex");
-        if (expected !== signature) {
-          return res.status(400).json({ error: "Invalid webhook signature" });
-        }
-      }
+// GET /api/orders/:id
+// Fetch a single order by ID (owner or admin)
+router.get("/:id", authMiddleware, async (req, res) => {
+  try {
+    const { data: order, error } = await db
+      .from("orders")
+      .select("*")
+      .eq("id", req.params.id)
+      .single();
 
-      const event = JSON.parse(req.rawBody ? req.rawBody.toString() : req.body);
-      
-      const { handleWebhookEvent } = require("../modules/refunds/RefundWebhookHandler");
-      await handleWebhookEvent(event);
+    if (error || !order) return respondError(res, "Order not found.", 404);
 
-      return res.json({ received: true });
-    } catch (err) {
-      logger.error("Webhook error:", err.message);
-      return res.status(500).json({ error: "Webhook processing failed" });
+    const isAdmin = req.user.role === "admin";
+    const isOwner = order.user_id === req.user.userId;
+
+    if (!isAdmin && !isOwner) {
+      return respondError(res, "Access denied.", 403);
     }
+
+    return success(res, order);
+  } catch (error) {
+    return respondError(res, error.message || "Failed to fetch order", 500);
   }
-);
+});
 
 module.exports = router;

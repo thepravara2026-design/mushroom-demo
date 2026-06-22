@@ -12,16 +12,33 @@ const logger = require("../../utils/logger");
  */
 async function logRefundAction({ refundId = null, orderId, action, performedBy, metadata = {} }) {
   try {
-    logger.info(`[RefundAuditService] Logging action=${action} for order=${orderId} by=${performedBy}`);
-    
-    await db.from("refund_audits").insert({
+    // If performedBy is an object with id/role (from req.user), extract the actual ID
+    let actorId = performedBy;
+    let actorRole = null;
+    if (performedBy && typeof performedBy === "object") {
+      actorId = performedBy.userId || performedBy.id || "unknown";
+      actorRole = performedBy.role || null;
+    } else if (performedBy === "ADMIN" || performedBy === "admin") {
+      // Legacy fallback — use 'admin' as actorId with no specific user
+      actorId = "admin";
+      actorRole = "admin";
+    }
+
+    const auditRecord = {
       refund_id: refundId,
       order_id: orderId,
       action: action,
-      performed_by: performedBy,
-      metadata: metadata,
+      performed_by: actorId,
+      metadata: {
+        ...(metadata || {}),
+        ...(actorRole ? { actor_role: actorRole } : {})
+      },
       timestamp: new Date().toISOString()
-    });
+    };
+
+    logger.info(`[RefundAuditService] Logging action=${action} for order=${orderId} by=${actorId}${actorRole ? ` (${actorRole})` : ""}`);
+    
+    await db.from("refund_audits").insert(auditRecord);
   } catch (err) {
     logger.error(`[RefundAuditService] Failed to write audit log for order ${orderId}: ${err.message}`);
     // Do not crash the application if audit logging fails, but log the error prominently

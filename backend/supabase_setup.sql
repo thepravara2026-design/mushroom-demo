@@ -151,6 +151,17 @@ CREATE TABLE IF NOT EXISTS refunds (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
+-- Create Refund Audits Table
+CREATE TABLE IF NOT EXISTS refund_audits (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  refund_id TEXT,
+  order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  performed_by TEXT NOT NULL,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  metadata JSONB
+);
+
 -- Create Enrollments Table
 CREATE TABLE IF NOT EXISTS enrollments (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -387,6 +398,7 @@ ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE trainings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE blogs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE refunds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE refund_audits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE enrollments ENABLE ROW LEVEL SECURITY;
 
 -- ── PRODUCTS ─────────────────────────────────────────────────

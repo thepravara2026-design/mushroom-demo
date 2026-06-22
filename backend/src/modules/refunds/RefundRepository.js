@@ -170,17 +170,21 @@ async function updateRefund(refundId, updates) {
 /**
  * List all refunds in the system, descending by creation date
  */
-async function listAllRefunds() {
-  const { data, error } = await db
+async function listAllRefunds(page = 1, limit = 50) {
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  const { data, error, count } = await db
     .from("refunds")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select("*", { count: "exact" })
+    .order("created_at", { ascending: false })
+    .range(from, to);
 
   if (error) {
     logger.error(`[RefundRepository] listAllRefunds error: ${error.message}`);
     throw error;
   }
-  return data || [];
+  return { data: data || [], total: count || 0, page, limit };
 }
 
 /**

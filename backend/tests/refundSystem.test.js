@@ -21,38 +21,37 @@ describe('Refund Management System', () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = '';
     
     // Clear mock tables
-    db.from('orders').data = [];
-    db.from('refunds').data = [];
-    db.from('refund_audits').data = [];
+    const mockStore = db._getMockStore();
+    mockStore.products.length = 0;
+    mockStore.orders.length = 0;
+    mockStore.refunds.length = 0;
+    mockStore.refund_audits.length = 0;
 
-    // Reset modules to reload config
-    jest.resetModules();
+    // Load the app (avoid jest.resetModules to keep the same db singleton)
     app = require('../src/server');
 
     const secret = process.env.JWT_SECRET || 'mushroom-spore-secret-key-123';
     
     adminToken = jwt.sign(
-      { id: 'user-admin', role: 'admin', email: 'admin@sporekart.com' },
+      { userId: 'user-admin', role: 'admin', email: 'admin@sporekart.com' },
       secret,
       { expiresIn: '1h' }
     );
 
     buyerToken = jwt.sign(
-      { id: 'user-buyer', role: 'buyer', email: 'buyer@sporekart.com' },
+      { userId: 'user-buyer', role: 'buyer', email: 'buyer@sporekart.com' },
       secret,
       { expiresIn: '1h' }
     );
 
-    // Create a mock product with some stock
-    db.from('products').data = [
-      {
-        id: testProductId,
-        name: 'Pink Oyster Spore Syringe (10ml)',
-        stock: 100,
-        price: 350.0,
-        gst_rate: 5
-      }
-    ];
+    // Create a mock product with some stock (insert directly into mockStore)
+    mockStore.products.push({
+      id: testProductId,
+      name: 'Pink Oyster Spore Syringe (10ml)',
+      stock: 100,
+      price: 350.0,
+      gst_rate: 5
+    });
 
     // Create a mock order that is paid
     const orderData = {
@@ -113,7 +112,7 @@ describe('Refund Management System', () => {
 
     test('Admin can approve cancellation and trigger refund', async () => {
       // Setup order in CANCEL_REQUESTED status
-      await db.from('orders').update({ status: OrderStates.CANCEL_REQUESTED }).eq('id', testOrderId);
+      await db.from('orders').update({ status: OrderStates.CANCEL_REQUESTED }).eq('id', testOrderId).single();
 
       const res = await request(app)
         .post(`/api/refunds/cancel-requests/${testOrderId}/approve`)
@@ -122,7 +121,7 @@ describe('Refund Management System', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.order.status).toBe(OrderStates.REFUND_INITIATED);
-      expect(res.body.data.refund.refund_status).toBe('initiated');
+      expect(res.body.data.refund.status).toBe('initiated');
 
       // Check stock was restocked
       const { data: product } = await db.from('products').select('stock').eq('id', testProductId).single();
@@ -131,7 +130,7 @@ describe('Refund Management System', () => {
 
     test('Admin can reject cancellation request', async () => {
       // Setup order in CANCEL_REQUESTED status
-      await db.from('orders').update({ status: OrderStates.CANCEL_REQUESTED }).eq('id', testOrderId);
+      await db.from('orders').update({ status: OrderStates.CANCEL_REQUESTED }).eq('id', testOrderId).single();
 
       const res = await request(app)
         .post(`/api/refunds/cancel-requests/${testOrderId}/reject`)
@@ -157,7 +156,7 @@ describe('Refund Management System', () => {
 
       expect(res.status).toBe(200);
       expect(Number(res.body.data.order.total_refunded_amount)).toBe(150.0);
-      expect(res.body.data.refund.refund_status).toBe('initiated');
+      expect(res.body.data.refund.status).toBe('initiated');
     });
 
     test('Partial refund exceeding remaining balance should fail', async () => {
@@ -201,8 +200,11 @@ describe('Refund Management System', () => {
     });
 
     test('Webhook endpoint processes refund.processed events', async () => {
+      // Set order refunded amount to match this full refund
+      await db.from('orders').update({ total_refunded_amount: 350.0 }).eq('id', testOrderId).single();
+
       // Initiate refund record
-      const refundRecord = await db.from('refunds').insert({
+      const { data: refundRecord } = await db.from('refunds').insert({
         order_id: testOrderId,
         user_id: 'user-buyer',
         razorpay_payment_id: 'pay_test_payment_123',
@@ -232,7 +234,7 @@ describe('Refund Management System', () => {
       const signature = crypto.createHmac('sha256', secret).update(JSON.stringify(webhookPayload)).digest('hex');
 
       const res = await request(app)
-        .post('/api/orders/webhook/razorpay')
+        .post('/api/refunds/webhook')
         .set('x-razorpay-signature', signature)
         .send(webhookPayload);
 

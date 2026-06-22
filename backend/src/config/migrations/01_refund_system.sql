@@ -8,17 +8,20 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_refunded_amount NUMERIC(10, 2)
 UPDATE orders SET payment_status = status WHERE payment_status = 'pending' AND status != 'pending';
 UPDATE orders SET refund_status = 'processed' WHERE status = 'refunded';
 
--- 2. Ensure refunds table matches required schema
+-- 2. Ensure refunds table matches required schema (columns match supabase_setup.sql)
 CREATE TABLE IF NOT EXISTS refunds (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
   user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   razorpay_payment_id TEXT NOT NULL,
   razorpay_refund_id TEXT UNIQUE,
-  refund_amount NUMERIC(10, 2) NOT NULL,
+  amount NUMERIC(10, 2) NOT NULL,
   refund_reason TEXT,
-  refund_status TEXT DEFAULT 'initiated' NOT NULL, -- 'initiated', 'processed', 'failed'
-  initiated_by TEXT NOT NULL, -- 'user', 'admin', 'system'
+  status TEXT DEFAULT 'initiated' NOT NULL, -- 'initiated', 'processed', 'failed'
+  cancelled_by TEXT NOT NULL DEFAULT 'admin', -- 'user', 'admin', 'system'
+  admin_note TEXT,
+  initiated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  processed_at TIMESTAMP WITH TIME ZONE,
   failure_reason TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
