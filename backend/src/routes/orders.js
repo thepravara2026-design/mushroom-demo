@@ -5,6 +5,7 @@ const router = express.Router();
 const db = require("../config/db");
 const razorpay = require("../config/razorpay");
 const authMiddleware = require("../middleware/auth");
+const { requireRole } = require("../middleware/roles");
 const { validateBody, Joi } = require("../middleware/validate");
 const { success, error: respondError } = require("../lib/response");
 const { validatePromoCode } = require("../services/promoService");
@@ -95,6 +96,37 @@ function buildInvoiceData(order, user) {
 async function getShippingCharge() {
   // Delivery is always free
   return 0;
+}
+
+async function restoreStock(items) {
+  if (items.length === 0) return;
+  for (const { id, quantity } of items) {
+    if (db.isMock) {
+      const { data: freshProduct } = await db
+        .from("products")
+        .select("stock")
+        .eq("id", id)
+        .single();
+      if (freshProduct) {
+        await db
+          .from("products")
+          .update({ stock: (freshProduct.stock || 0) + quantity })
+          .eq("id", id);
+      }
+    } else {
+      const { data: product } = await supabaseAdmin
+        .from("products")
+        .select("stock")
+        .eq("id", id)
+        .single();
+      if (product) {
+        await supabaseAdmin
+          .from("products")
+          .update({ stock: (product.stock || 0) + quantity })
+          .eq("id", id);
+      }
+    }
+  }
 }
 
 const checkoutSchema = Joi.object({
@@ -209,9 +241,11 @@ router.post(
       const orderItems = [];
 
       // Calculate itemized details
+      const decrementedItems = [];
       for (const cartItem of items) {
         const product = dbProducts.find((p) => p.id === cartItem.id);
         if (!product) {
+          await restoreStock(decrementedItems);
           return respondError(
             res,
             `Product with id ${cartItem.id} not found.`,
@@ -220,24 +254,20 @@ router.post(
         }
 
         const quantity = parseInt(cartItem.quantity, 10) || 1;
-        if (product.stock !== undefined && quantity > product.stock) {
-          return respondError(
-            res,
-            `Insufficient stock for ${product.name}. Only ${product.stock} unit(s) available.`,
-            400,
-          );
-        }
 
         // Reserve stock immediately to prevent overselling
-        const newStock = (product.stock || 0) - quantity;
         if (!db.isMock) {
-          try {
-            await supabaseAdmin.rpc("decrement_stock", {
-              p_product_id: product.id,
-              p_quantity: quantity,
-            });
-          } catch (rpcErr) {
-            logger.error(`[orders] decrement_stock RPC failed for ${product.id}:`, rpcErr.message);
+          const { error: rpcError } = await supabaseAdmin.rpc("decrement_stock", {
+            p_product_id: product.id,
+            p_quantity: quantity,
+          });
+          if (rpcError) {
+            await restoreStock(decrementedItems);
+            return respondError(
+              res,
+              `Insufficient stock for ${product.name}. Please try again.`,
+              400,
+            );
           }
         } else {
           const { data: freshProduct } = await db
@@ -247,6 +277,7 @@ router.post(
             .single();
           const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
           if (quantity > currentStock) {
+            await restoreStock(decrementedItems);
             return respondError(
               res,
               `Insufficient stock for ${product.name}. Only ${currentStock} unit(s) available.`,
@@ -258,6 +289,7 @@ router.post(
             .update({ stock: currentStock - quantity })
             .eq("id", product.id);
         }
+        decrementedItems.push({ id: product.id, quantity });
 
         // Determine base price — use weight variant price if applicable
         let basePrice = product.price;
@@ -620,6 +652,15 @@ router.post(
           .eq("razorpay_order_id", razorpay_order_id)
           .single();
 
+        // Restore stock for the failed order so inventory isn't permanently drained
+        if (failedOrder && Array.isArray(failedOrder.items)) {
+          const itemsToRestore = failedOrder.items.map((item) => ({
+            id: item.productId,
+            quantity: item.quantity,
+          }));
+          await restoreStock(itemsToRestore);
+        }
+
         // Broadcast failure via SSE so frontends update in real-time
         try {
           if (failedOrder) {
@@ -667,20 +708,21 @@ router.get("/shipping-settings", async (req, res) => {
 
 // PUT /api/orders/shipping-settings
 // Admin updates global shipping charge
-router.put("/shipping-settings", authMiddleware, async (req, res) => {
-  try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
-    const shipping_charge = Number(req.body.shipping_charge);
-    if (Number.isNaN(shipping_charge) || shipping_charge < 0) {
-      return respondError(
-        res,
-        "Shipping charge must be a non-negative number.",
-        400,
-      );
-    }
+router.put(
+  "/shipping-settings",
+  authMiddleware,
+  requireRole("admin"),
+  validateBody(
+    Joi.object({
+      shipping_charge: Joi.number().min(0).required().messages({
+        "number.min": "Shipping charge must be a non-negative number.",
+        "any.required": "Shipping charge is required.",
+      }),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const shipping_charge = Number(req.body.shipping_charge);
 
     const { data: existingSetting, error: selectError } = await db
       .from("settings")
@@ -761,12 +803,8 @@ router.get("/my-orders", authMiddleware, async (req, res) => {
 
 // GET /api/orders/all-orders
 // Fetch all orders in the system (admin only)
-router.get("/all-orders", authMiddleware, async (req, res) => {
+router.get("/all-orders", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { data: orders, error: ordersErr } = await db
       .from("orders")
       .select("*");
@@ -813,16 +851,24 @@ router.get("/all-orders", authMiddleware, async (req, res) => {
 
 // PUT /api/orders/:id/status
 // Update delivery status of an order (admin only)
-router.put("/:id/status", authMiddleware, async (req, res) => {
-  try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
-    const { delivery_status, delivery_days_text } = req.body;
-    if (!delivery_status) {
-      return respondError(res, "Delivery status is required.", 400);
-    }
+router.put(
+  "/:id/status",
+  authMiddleware,
+  requireRole("admin"),
+  validateBody(
+    Joi.object({
+      delivery_status: Joi.string().valid(
+        "placed", "processing", "shipped", "in_transit", "delivered"
+      ).required().messages({
+        "any.only": "Delivery status must be one of: placed, processing, shipped, in_transit, delivered.",
+        "any.required": "Delivery status is required.",
+      }),
+      delivery_days_text: Joi.string().max(100).allow("").optional(),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const { delivery_status, delivery_days_text } = req.body;
 
     const { data: order, error: orderErr } = await db
       .from("orders")
@@ -1087,12 +1133,8 @@ router.get("/:id/refund", authMiddleware, async (req, res) => {
 
 // GET /api/orders/admin/refunds
 // Admin: list all refunds across all orders
-router.get("/admin/refunds", authMiddleware, async (req, res) => {
+router.get("/admin/refunds", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { data: refunds, error } = await db
       .from("refunds")
       .select("*")
@@ -1215,7 +1257,11 @@ router.get("/share/:token", async (req, res) => {
       .eq("id", order.user_id)
       .single();
     const inv = buildInvoiceData(order, user);
-    const shareUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+
+    // Sanitize host header to prevent Host header injection attacks
+    const rawHost = req.get("host") || "sporekart.com";
+    const safeHost = rawHost.replace(/[^a-zA-Z0-9.:\[\]-]/g, "").replace(/^\.+|\.+$/g, "").substring(0, 255);
+    const shareUrl = `${req.protocol}://${safeHost || "sporekart.com"}${req.originalUrl}`;
     const isDownload = req.query.download === "1";
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1333,7 +1379,8 @@ router.get("/share/:token", async (req, res) => {
     res.setHeader("Content-Type", "text/html");
     res.send(html);
   } catch (error) {
-    res.status(500).send(error.message);
+    logger.error(`[orders] Invoice share error: ${error.message}`);
+    res.status(500).send("An error occurred while generating the invoice.");
   }
 });
 
@@ -1673,14 +1720,19 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
 // POST /api/orders/admin/approve/:id
 // Admin approves a PENDING_APPROVAL order → PLACED
-router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
-  try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
-    const { adminNote } = req.body;
-    const updatedOrder = await refundService.approveOrder(req.params.id, adminNote || "", req.user);
+router.post(
+  "/admin/approve/:id",
+  authMiddleware,
+  requireRole("admin"),
+  validateBody(
+    Joi.object({
+      adminNote: Joi.string().max(500).allow("").optional(),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const { adminNote } = req.body;
+      const updatedOrder = await refundService.approveOrder(req.params.id, adminNote || "", req.user);
 
     // SSE broadcast
     try {
@@ -1712,12 +1764,8 @@ const rejectOrderSchema = Joi.object({
   adminNote: Joi.string().trim().max(500).optional()
 });
 
-router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema), async (req, res) => {
+router.post("/admin/reject/:id", authMiddleware, requireRole("admin"), validateBody(rejectOrderSchema), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { reason, adminNote } = req.body;
     const updatedOrder = await refundService.rejectOrder(req.params.id, reason, adminNote || "", req.user);
 
@@ -1743,12 +1791,8 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
 
 // GET /api/orders/admin/:id/audit-logs
 // Admin: get audit logs for a specific order
-router.get("/admin/:id/audit-logs", authMiddleware, async (req, res) => {
+router.get("/admin/:id/audit-logs", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { getAuditLogs } = require("../services/AuditLogService");
     const logs = await getAuditLogs(req.params.id);
     return success(res, logs || []);

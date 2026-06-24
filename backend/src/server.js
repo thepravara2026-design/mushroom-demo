@@ -154,17 +154,62 @@ async function runMigrations() {
     const ref = supabaseUrl.match(/https:\/\/(.+)\.supabase\.co/)?.[1];
     if (!ref || !serviceKey) return;
 
-    const pgConn = `postgresql://postgres:${encodeURIComponent(serviceKey)}@db.${ref}.supabase.co:5432/postgres`;
-    const pgClient = new Client({ connectionString: pgConn, ssl: { rejectUnauthorized: false } });
+    const pgClient = new Client({
+      host: `db.${ref}.supabase.co`,
+      port: 5432,
+      database: "postgres",
+      user: "postgres",
+      password: serviceKey,
+      ssl: { rejectUnauthorized: false },
+    });
     await pgClient.connect();
 
     // All columns the backend references that may be absent in older database setups
     const statements = [
+      // ── Existing columns (preserved) ──
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email TEXT`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending' NOT NULL`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_status TEXT DEFAULT 'none' NOT NULL`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_id TEXT`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS total_refunded_amount NUMERIC(10,2) DEFAULT 0.00 NOT NULL`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS manual_refund_payment_mode TEXT`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS manual_refund_payment_details TEXT`,
+      // ── New state-machine columns ──
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_approval_status VARCHAR(50) DEFAULT 'pending'`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason VARCHAR(100)`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason_text TEXT`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMP WITH TIME ZONE`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_type VARCHAR(20)`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_initiated_at TIMESTAMP WITH TIME ZONE`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_completed_at TIMESTAMP WITH TIME ZONE`,
+      // ── order_audit_logs (immutable audit trail) ──
+      `CREATE TABLE IF NOT EXISTS order_audit_logs (
+        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        action VARCHAR(50) NOT NULL,
+        performed_by VARCHAR(255) NOT NULL,
+        previous_state JSONB,
+        new_state JSONB,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_order ON order_audit_logs(order_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON order_audit_logs(action)`,
+      // ── notification_logs (delivery tracking) ──
+      `CREATE TABLE IF NOT EXISTS notification_logs (
+        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,
+        event_type VARCHAR(50) NOT NULL,
+        channel VARCHAR(20) NOT NULL,
+        recipient VARCHAR(255),
+        status VARCHAR(20) DEFAULT 'pending',
+        error TEXT,
+        sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_notification_logs_order ON notification_logs(order_id, sent_at DESC)`,
+      // ── Existing refund tables (preserved) ──
       `CREATE TABLE IF NOT EXISTS refund_audits (
         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
         refund_id TEXT,
@@ -179,6 +224,12 @@ async function runMigrations() {
       `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS initiated_at TIMESTAMP WITH TIME ZONE`,
       `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP WITH TIME ZONE`,
       `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS failure_reason TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS payment_mode TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS payment_details TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS refund_type VARCHAR(20) DEFAULT 'auto'`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS transaction_reference VARCHAR(255)`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS bank_reference VARCHAR(255)`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_restored BOOLEAN DEFAULT FALSE NOT NULL`,
     ];
 
     for (const sql of statements) {

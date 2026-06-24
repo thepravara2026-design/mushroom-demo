@@ -3276,7 +3276,8 @@ function bindCheckoutAuthEvents() {
         : contact;
 
       pendingContact = emailForOtp;
-      const result = await authApi.requestOtp(emailForOtp, 'buyer', '');
+      const phoneParam = activeMethod === 'phone' ? `+91${contact}` : '';
+      const result = await authApi.requestOtp(emailForOtp, 'buyer', '', phoneParam);
       mockOtp = (result && result.otp) ? result.otp : null;
 
       if (step1) step1.classList.add('hidden');
@@ -4857,6 +4858,16 @@ function getStatusBadgeHTML(status) {
       color = "#ef4444";
       label = "Refund Failed";
       break;
+    case "MANUAL_REFUND_INITIATED":
+      bg = "rgba(245,158,11,0.15)";
+      color = "#d97706";
+      label = "Manual Refund Initiated";
+      break;
+    case "MANUAL_REFUND_COMPLETED":
+      bg = "rgba(16,185,129,0.2)";
+      color = "#10b981";
+      label = "Manual Refund Completed";
+      break;
   }
 
   return `<span class="order-status-badge" style="background:${bg}; color:${color}; padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:600; text-transform:uppercase;">${label}</span>`;
@@ -4901,9 +4912,12 @@ function renderOrdersSidebar() {
         month: 'short',
         year: 'numeric',
       });
-      const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED"];
+      const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
       const displayStatus = refundStates.includes(order.status) ? order.status : order.delivery_status;
       const badgeHTML = getStatusBadgeHTML(displayStatus);
+
+      const cancelOrRefundReason = refundStates.includes(order.status) && order.cancel_reason ? order.cancel_reason : "";
+      const refundAmountStr = order.total_refunded_amount && Number(order.total_refunded_amount) > 0 ? `Refunded: ₹${Number(order.total_refunded_amount).toFixed(2)}` : "";
 
       return `
         <div class="order-sidebar-card ${activeClass}" data-id="${order.id}">
@@ -4915,6 +4929,8 @@ function renderOrdersSidebar() {
           <div class="order-card-total">₹${order.total.toFixed(2)} (${order.items.length} culture${order.items.length > 1 ? "s" : ""})</div>
           ${order.expected_delivery_date && ["shipped", "in_transit"].includes(order.delivery_status) ? `<div class="order-card-delivery">Expected: ${new Date(order.expected_delivery_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}${order.delivery_days_text ? " (" + order.delivery_days_text + ")" : ""}</div>` : ""}
           ${(order.delivery_status === "cancelled" || order.status === "cancelled") && order.cancel_reason ? `<div class="order-card-reason">Reason: ${order.cancel_reason}</div>` : ""}
+          ${cancelOrRefundReason ? `<div class="order-card-reason">Reason: ${cancelOrRefundReason}</div>` : ""}
+          ${refundAmountStr ? `<div class="order-card-reason" style="color:#8b5cf6;">${refundAmountStr}</div>` : ""}
         </div>
       `;
     })
@@ -4969,21 +4985,16 @@ function renderTrackingDetails(track) {
   const timelineHTML = track.timeline
     .map((checkpoint) => {
       const doneClass = checkpoint.done ? 'done' : '';
-      const icon = checkpoint.done
-        ? '<i class="fa-solid fa-circle-check" style="color:var(--color-primary);"></i>'
-        : '<i class="fa-regular fa-circle" style="color:var(--color-text-muted);"></i>';
-
       let timeLabel = '';
-      if (checkpoint.time && checkpoint.done) {
-        timeLabel = `<span style="font-size:0.7rem; color:var(--color-text-muted); margin-left: auto;">${new Date(checkpoint.time).toLocaleTimeString()}</span>`;
+      if (checkpoint.time) {
+        const d = new Date(checkpoint.time);
+        timeLabel = `<span class="checkpoint-time">${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
       }
-
       return `
       <div class="checkpoint ${doneClass}">
         <span class="checkpoint-node"></span>
-        <div style="display:flex; align-items:center; gap: 0.5rem; width:100%;">
+        <div class="checkpoint-body">
           <span class="checkpoint-title">${checkpoint.label}</span>
-          ${icon}
           ${timeLabel}
         </div>
       </div>
@@ -4991,11 +5002,11 @@ function renderTrackingDetails(track) {
     })
     .join('');
 
-  const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED"];
+  const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
   const displayStatus = refundStates.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus;
   const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && ["pending", "paid"].includes(track.paymentStatus);
+  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus);
   const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `
@@ -5084,7 +5095,23 @@ function renderTrackingDetails(track) {
       ${track.paymentStatus === "REFUND_FAILED"
       ? `
         <div class="tracker-status-box" style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#ef4444; border-radius:10px; padding:12px; margin-bottom:15px;">
-          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Refund Failed</strong>: We encountered an issue processing your refund. Our support team has been notified and will resolve this manually. Contact us for assistance.
+          <i class="fa-solid fa-triangle-exclamation"></i> <strong>Refund Failed</strong>: We encountered an issue processing your refund. Please contact us at <a href="mailto:support@sporekart.com" style="color:#ef4444;font-weight:600;">support@sporekart.com</a> for assistance.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "MANUAL_REFUND_INITIATED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); color:#f59e0b; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-hourglass-half"></i> <strong>Manual Refund Initiated</strong>: Your refund is being processed manually by our team. This will be completed within 5-7 business days.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "MANUAL_REFUND_COMPLETED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-circle-check"></i> <strong>Manual Refund Completed</strong>: Your refund has been processed manually. Please allow 1-2 business days for the amount to reflect in your account.
         </div>
       `
       : ""
@@ -5133,39 +5160,45 @@ function openCancelModal(orderId) {
   const existing = document.getElementById('cancel-order-modal');
   if (existing) existing.remove();
 
+  const cancelReasons = [
+    { value: 'ordered_by_mistake', label: 'Ordered by mistake' },
+    { value: 'wrong_address', label: 'Wrong address' },
+    { value: 'found_cheaper', label: 'Found cheaper elsewhere' },
+    { value: 'delivery_too_long', label: 'Delivery taking too long' },
+    { value: 'need_different_product', label: 'Need different product' },
+    { value: 'duplicate_order', label: 'Duplicate order' },
+    { value: 'other', label: 'Other' },
+  ];
+
   const modal = document.createElement('div');
   modal.id = 'cancel-order-modal';
   modal.className = 'modal-overlay open';
   modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
 
   modal.innerHTML = `
-    <div class="modal-card" style="max-width:460px;">
+    <div class="modal-card" style="max-width:480px;">
       <button class="modal-close" id="cancel-modal-close" type="button">&times;</button>
       <h3 style="margin:0 0 8px;font-size:1.2rem;color:#b91c1c;">
-        <i class="fa-solid fa-ban"></i> Cancel Order
+        <i class="fa-solid fa-ban"></i> Cancel Order #${orderId.substring(0, 8)}
       </h3>
       <p style="margin:0 0 18px;color:var(--text-mid);font-size:0.92rem;">
-        This will stop processing and cannot be undone. Please tell us why you are cancelling.
+        This will request a cancellation. An administrator will review your request and process any applicable refund.
       </p>
       <div class="input-field">
-        <label for="cancel-reason-select">Cancellation reason</label>
-        <select id="cancel-reason-select">
+        <label for="cancel-reason-select">Reason for cancellation</label>
+        <select id="cancel-reason-select" style="width:100%;padding:10px;border-radius:8px;border:1px solid #d1d5db;">
           <option value="">Select a reason</option>
-          <option value="Delivery cost is high">Delivery cost is high</option>
-          <option value="Not interested in product">Not interested in product</option>
-          <option value="Not available on the expected delivery date">Not available on the expected delivery date</option>
-          <option value="Taking too much time to deliver">Taking too much time to deliver</option>
-          <option value="Other">Other</option>
+          ${cancelReasons.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
         </select>
       </div>
-      <div class="input-field hidden" id="cancel-reason-other-wrap">
-        <label for="cancel-reason-other">Please specify your reason</label>
-        <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
+      <div class="input-field hidden" id="cancel-reason-other-wrap" style="display:none;margin-top:12px;">
+        <label for="cancel-reason-other">Additional details (optional)</label>
+        <textarea id="cancel-reason-other" rows="3" placeholder="Please provide more information..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #d1d5db;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
         <button class="btn btn-secondary" id="cancel-modal-keep-btn" type="button">Keep order</button>
         <button class="btn btn-cancel" id="cancel-modal-confirm-btn" type="button">
-          <i class="fa-solid fa-ban"></i> Confirm cancellation
+          <i class="fa-solid fa-ban"></i> Request Cancellation
         </button>
       </div>
     </div>
@@ -5178,7 +5211,7 @@ function openCancelModal(orderId) {
   const otherInput = modal.querySelector('#cancel-reason-other');
 
   reasonSelect.addEventListener('change', () => {
-    otherWrap.classList.toggle('hidden', reasonSelect.value !== 'Other');
+    otherWrap.style.display = reasonSelect.value === 'other' ? 'block' : 'none';
   });
 
   const closeModal = () => modal.remove();
@@ -5188,31 +5221,71 @@ function openCancelModal(orderId) {
   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
   modal.querySelector('#cancel-modal-confirm-btn').addEventListener('click', async () => {
-    let reason = reasonSelect.value;
-    if (!reason) {
+    const reasonVal = reasonSelect.value;
+    if (!reasonVal) {
       showErrorToast('Please select a cancellation reason.');
       return;
     }
-    if (reason === 'Other') {
-      reason = otherInput?.value.trim() || '';
-      if (!reason) {
-        showErrorToast('Please enter your cancellation reason.');
+
+    let reasonLabel = cancelReasons.find(r => r.value === reasonVal)?.label || reasonVal;
+    if (reasonVal === 'other') {
+      const text = otherInput?.value.trim() || '';
+      if (!text) {
+        showErrorToast('Please provide details for your cancellation reason.');
         return;
       }
+      reasonLabel = text;
     }
 
+    // Confirmation popup
     modal.remove();
 
-    try {
-      await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      });
-      showSuccessToast("✅ Cancellation request submitted successfully.");
-      await fetchOrders();
-    } catch (err) {
-      showErrorToast(getApiErrorMessage(err) || "Unable to request cancellation at this time.");
-    }
+    const confirmModal = document.createElement('div');
+    confirmModal.id = 'cancel-confirm-modal';
+    confirmModal.className = 'modal-overlay open';
+    confirmModal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10001;padding:18px;';
+
+    confirmModal.innerHTML = `
+      <div class="modal-card" style="max-width:420px;text-align:center;">
+        <div style="margin-bottom:16px;font-size:2.5rem;">⚠️</div>
+        <h3 style="margin:0 0 8px;font-size:1.1rem;color:#d97706;">Confirm Cancellation</h3>
+        <p style="margin:0 0 6px;color:var(--text-mid);font-size:0.9rem;">
+          Are you sure you want to cancel Order <strong>#${orderId.substring(0, 8)}</strong>?
+        </p>
+        <p style="margin:0 0 16px;color:#6b7280;font-size:0.85rem;font-style:italic;">
+          Reason: ${reasonLabel}
+        </p>
+        <p style="margin:0 0 18px;color:#ef4444;font-size:0.82rem;">
+          This cannot be undone.
+        </p>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button class="btn btn-secondary" id="cancel-confirm-keep-btn" type="button">No, Keep It</button>
+          <button class="btn btn-cancel" id="cancel-confirm-yes-btn" type="button">Yes, Cancel Order</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(confirmModal);
+
+    const closeConfirm = () => confirmModal.remove();
+
+    confirmModal.querySelector('#cancel-confirm-keep-btn').addEventListener('click', closeConfirm);
+    confirmModal.addEventListener('click', (e) => { if (e.target === confirmModal) closeConfirm(); });
+
+    confirmModal.querySelector('#cancel-confirm-yes-btn').addEventListener('click', async () => {
+      confirmModal.remove();
+
+      try {
+        await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
+          method: "POST",
+          body: JSON.stringify({ reason: reasonLabel }),
+        });
+        showSuccessToast("✅ Cancellation request submitted successfully.");
+        await fetchOrders();
+      } catch (err) {
+        showErrorToast(getApiErrorMessage(err) || "Unable to request cancellation at this time.");
+      }
+    });
   });
 }
 

@@ -170,17 +170,26 @@ async function handleWebhookRequest(req, res) {
     const signature = req.headers["x-razorpay-signature"];
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    // Signature verification (only if secret is configured)
-    if (secret && signature) {
-      const rawBody = req.rawBody || (Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body));
-      const isValid = verifyWebhookSignature(rawBody, signature, secret);
+    // Signature verification
+    if (!secret) {
+      logger.error("[RefundWebhookHandler] RAZORPAY_WEBHOOK_SECRET is not configured — rejecting all webhook requests.");
+      return res.status(500).json({ error: "Webhook secret not configured" });
+    }
+    if (!signature) {
+      logger.warn("[RefundWebhookHandler] Webhook signature header missing.");
+      return res.status(400).json({ error: "Missing webhook signature" });
+    }
 
-      if (!isValid) {
-        logger.warn("[RefundWebhookHandler] Webhook signature verification failed!");
-        return res.status(400).json({ error: "Invalid webhook signature" });
-      }
-    } else {
-      logger.warn("[RefundWebhookHandler] Webhook secret not configured or signature header missing. Bypassing signature verification.");
+    const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : (Buffer.isBuffer(req.body) ? req.body : null);
+    if (!rawBody) {
+      logger.error("[RefundWebhookHandler] Raw request body not available — signature verification impossible.");
+      return res.status(500).json({ error: "Raw body not available" });
+    }
+    const isValid = verifyWebhookSignature(rawBody, signature, secret);
+
+    if (!isValid) {
+      logger.warn("[RefundWebhookHandler] Webhook signature verification failed!");
+      return res.status(400).json({ error: "Invalid webhook signature" });
     }
 
     // Parse payload

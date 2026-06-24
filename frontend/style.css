@@ -2803,6 +2803,29 @@ button {
   gap: 8px;
 }
 
+.pm-order.pm-order-premium {
+  border-radius: 10px 10px 10px 0;
+}
+
+.pm-refund-progress {
+  background: #f0f7ff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+}
+
+.pm-refund-progress-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 4px;
+}
+
+.pm-refund-progress .pm-timeline {
+  padding: 2px 0 2px 12px;
+}
+
 .pm-order-top {
   display: flex;
   align-items: center;
@@ -2891,16 +2914,30 @@ button {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 6px 0;
+  padding: 4px 0 4px 12px;
+  position: relative;
+}
+
+.pm-timeline::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  background: #d1d5db;
+  border-radius: 2px;
 }
 
 .pm-timeline-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 0;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
   font-size: 0.8rem;
   color: #5a7a5a;
+  position: relative;
+  z-index: 1;
 }
 
 .pm-timeline-done {
@@ -2908,27 +2945,34 @@ button {
 }
 
 .pm-timeline-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 2px;
+  position: relative;
+  z-index: 2;
 }
 
 .pm-timeline-dot.done {
   background: #1a6b2e;
+  box-shadow: 0 0 0 3px rgba(26, 107, 46, 0.15);
 }
 
 .pm-timeline-dot.pending {
-  background: #c8d8c8;
+  background: #e5e7eb;
+  border: 2px solid #c8d8c8;
 }
 
 .pm-timeline-label {
   flex: 1;
+  font-weight: 500;
 }
 
 .pm-timeline-time {
   color: #7a8f7a;
   font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 /* Cancel note */
@@ -5482,6 +5526,21 @@ button {
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--text-dark);
+}
+
+.checkpoint-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-left: 4px;
+}
+
+.checkpoint-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .tracker-details-actions {
@@ -12900,4 +12959,338 @@ button {
   color: var(--white) !important;
   border-color: var(--green-dark) !important;
   box-shadow: 0 4px 12px rgba(26, 92, 56, 0.15) !important;
+}
+
+/* ============================================================
+   FAQ SECTION — PREMIUM ACCORDION
+   ============================================================ */
+.faq-section {
+  padding: 72px 24px;
+  background: var(--cream);
+  position: relative;
+}
+
+.faq-container {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.faq-header {
+  text-align: center;
+  margin-bottom: 44px;
+}
+
+.faq-title {
+  font-family: var(--font-head);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 700;
+  color: var(--text-dark);
+  margin-bottom: 10px;
+  line-height: 1.25;
+}
+
+.faq-subtitle {
+  font-size: 1rem;
+  color: var(--text-soft);
+  max-width: 600px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+/* ── Category Nav ─────────────────────────────── */
+.faq-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 36px;
+}
+
+.faq-nav-btn {
+  padding: 8px 18px;
+  border-radius: 30px;
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  color: var(--text-mid);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.faq-nav-btn:hover {
+  border-color: var(--green-light);
+  color: var(--green-dark);
+  background: var(--green-pale);
+}
+
+.faq-nav-btn.active {
+  background: var(--green-dark);
+  color: var(--white);
+  border-color: var(--green-dark);
+}
+
+/* ── Accordion ────────────────────────────────── */
+.faq-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.faq-category {
+  display: none;
+}
+
+.faq-category.active {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.faq-item {
+  background: var(--white);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: box-shadow var(--transition);
+}
+
+.faq-item:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.faq-question {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-head);
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  text-align: left;
+  transition: background var(--transition);
+  line-height: 1.4;
+}
+
+.faq-question:hover {
+  background: var(--green-pale);
+}
+
+.faq-q-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green-pale);
+  border-radius: 50%;
+  color: var(--green-mid);
+  font-size: 0.8rem;
+  transition: all var(--transition);
+}
+
+.faq-question[aria-expanded="true"] .faq-q-icon {
+  background: var(--green-mid);
+  color: var(--white);
+}
+
+.faq-question span:nth-child(2) {
+  flex: 1;
+}
+
+.faq-toggle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--green-pale);
+  color: var(--green-mid);
+  font-size: 0.75rem;
+  transition: all var(--transition);
+}
+
+.faq-question[aria-expanded="true"] .faq-toggle {
+  background: var(--green-mid);
+  color: var(--white);
+  transform: rotate(180deg);
+}
+
+.faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease, padding 0.35s ease;
+  padding: 0 22px;
+}
+
+.faq-answer.open {
+  max-height: 800px;
+  padding: 0 22px 20px;
+}
+
+.faq-answer p {
+  font-size: 0.93rem;
+  color: var(--text-mid);
+  line-height: 1.75;
+}
+
+.faq-answer strong {
+  color: var(--text-dark);
+  font-weight: 600;
+}
+
+.faq-answer a {
+  color: var(--green-mid);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--transition);
+}
+
+.faq-answer a:hover {
+  color: var(--green-dark);
+}
+
+/* ── CTA Strip ─────────────────────────────────── */
+.faq-cta {
+  margin-top: 44px;
+  padding: 32px 28px;
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.faq-cta-icon {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green-pale);
+  border-radius: 50%;
+  color: var(--green-mid);
+  font-size: 1.3rem;
+}
+
+.faq-cta-text h3 {
+  font-family: var(--font-head);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  margin-bottom: 6px;
+}
+
+.faq-cta-text p {
+  font-size: 0.9rem;
+  color: var(--text-soft);
+  max-width: 480px;
+}
+
+.faq-cta-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.btn-faq-whatsapp,
+.btn-faq-email {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 24px;
+  border-radius: 30px;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  border: none;
+  text-decoration: none;
+}
+
+.btn-faq-whatsapp {
+  background: #25d366;
+  color: var(--white);
+}
+
+.btn-faq-whatsapp:hover {
+  background: #20bd5a;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(37, 211, 102, 0.3);
+}
+
+.btn-faq-email {
+  background: var(--green-dark);
+  color: var(--white);
+}
+
+.btn-faq-email:hover {
+  background: var(--green-mid);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(26, 92, 56, 0.25);
+}
+
+/* ── Responsive ────────────────────────────────── */
+@media (max-width: 640px) {
+  .faq-section {
+    padding: 48px 16px;
+  }
+
+  .faq-nav {
+    gap: 6px;
+    margin-bottom: 28px;
+  }
+
+  .faq-nav-btn {
+    font-size: 0.75rem;
+    padding: 6px 14px;
+  }
+
+  .faq-question {
+    padding: 14px 16px;
+    font-size: 0.9rem;
+    gap: 10px;
+  }
+
+  .faq-q-icon {
+    width: 26px;
+    height: 26px;
+    font-size: 0.7rem;
+  }
+
+  .faq-answer p {
+    font-size: 0.87rem;
+  }
+
+  .faq-cta {
+    padding: 24px 18px;
+  }
+
+  .faq-cta-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .btn-faq-whatsapp,
+  .btn-faq-email {
+    width: 100%;
+    justify-content: center;
+  }
 }

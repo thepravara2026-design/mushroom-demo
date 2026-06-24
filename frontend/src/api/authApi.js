@@ -67,9 +67,9 @@ export const authApi = {
   },
 
   // ── OTP flow (preserved, unchanged) ──────────────────────────────────────
-  requestOtp: (email, role, fullName) => fetchWithAuth('/auth/request-otp', {
+  requestOtp: (email, role, fullName, phone) => fetchWithAuth('/auth/request-otp', {
     method: 'POST',
-    body: JSON.stringify({ email, role, fullName }),
+    body: JSON.stringify({ email, role, fullName, phone }),
   }),
 
   verifyOtp: (email, otpCode, opts = {}) => fetchWithAuth('/auth/verify-otp', {

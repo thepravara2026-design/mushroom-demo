@@ -26,8 +26,8 @@ describe('Backend API integration tests', () => {
       .send({ email: 'admin@sporekart.com' });
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveProperty('otp');
     expect(res.body.data.message).toContain('OTP sent');
+    expect(res.body.data).not.toHaveProperty('otp');
   });
 
   test('POST /api/auth/admin-login fails for non-admin user', async () => {
@@ -44,7 +44,12 @@ describe('Backend API integration tests', () => {
       .post('/api/auth/admin-login')
       .send({ email: 'admin@sporekart.com' });
     expect(otpRes.status).toBe(200);
-    const otpCode = otpRes.body.data.otp;
+
+    // Read OTP from exposed test store (OTP is never in the response for security)
+    const authService = require('../src/services/authService');
+    const otpRecord = authService.__adminOtpStore.get('admin@sporekart.com');
+    expect(otpRecord).toBeDefined();
+    const otpCode = otpRecord.otp;
 
     // Then verify with the OTP
     const verifyRes = await request(app)

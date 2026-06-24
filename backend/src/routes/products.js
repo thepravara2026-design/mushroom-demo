@@ -34,7 +34,7 @@ router.get("/", async (req, res) => {
 
 // GET /api/products/next-id
 // Compute the next available product ID for a given category (admin preview)
-router.get("/next-id", async (req, res) => {
+router.get("/next-id", authMiddleware, adminOnly, async (req, res) => {
   try {
     const { category } = req.query;
     const productId = await productService.getNextProductId(category || null);

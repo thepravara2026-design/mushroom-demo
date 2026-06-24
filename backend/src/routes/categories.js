@@ -73,21 +73,33 @@ async function generateNextCategoryUid() {
 
 // ADMIN ONLY - PUT /api/categories/:slug
 // Update category details
-router.put("/:slug", authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const updated = await categoryService.updateCategory(
-      req.params.slug,
-      req.body,
-    );
-    return success(res, updated);
-  } catch (error) {
-    return respondError(
-      res,
-      error.message || "Failed to update category",
-      error.status || 500,
-    );
-  }
-});
+router.put(
+  "/:slug",
+  authMiddleware,
+  adminOnly,
+  validateBody(
+    Joi.object({
+      name: Joi.string().optional(),
+      description: Joi.string().allow("", null).optional(),
+      image_url: Joi.string().allow("", null).optional(),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const updated = await categoryService.updateCategory(
+        req.params.slug,
+        req.body,
+      );
+      return success(res, updated);
+    } catch (error) {
+      return respondError(
+        res,
+        error.message || "Failed to update category",
+        error.status || 500,
+      );
+    }
+  },
+);
 
 // ADMIN ONLY - DELETE /api/categories/:slug
 // Delete a category and set related products category to 'uncategorized'

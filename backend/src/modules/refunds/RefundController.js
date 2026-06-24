@@ -2,6 +2,7 @@ const express = require("express");
 const authMiddleware = require("../../middleware/auth");
 const { validateBody } = require("../../middleware/validate");
 const { success, error: respondError } = require("../../lib/response");
+const { sendSseEvent } = require("../../lib/sse");
 const service = require("./RefundService");
 const repo = require("./RefundRepository");
 const validator = require("./RefundValidator");
@@ -37,8 +38,17 @@ router.post(
   validateBody(validator.adminApproveRejectSchema),
   async (req, res) => {
     try {
-      const { adminNote } = req.body;
-      const result = await service.approveCancellation(req.params.id, adminNote, req.user);
+      const { adminNote, refundType } = req.body;
+      const result = await service.approveCancellation(req.params.id, adminNote, req.user, refundType || 'auto');
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: result.order, refund: result.refund },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === result.order.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
       return success(res, {
         message: "Cancellation request approved. Refund initiated.",
         order: result.order,
@@ -61,6 +71,15 @@ router.post(
     try {
       const { reason } = req.body;
       const updatedOrder = await service.rejectCancellation(req.params.id, reason, req.user);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: updatedOrder },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === updatedOrder.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
       return success(res, {
         message: "Cancellation request rejected. Order reverted to processing.",
         order: updatedOrder
@@ -82,6 +101,15 @@ router.post(
     try {
       const { reason, adminNote } = req.body;
       const result = await service.adminDirectCancellation(req.params.id, reason, adminNote, req.user);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: result.order, refund: result.refund },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === result.order.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
       return success(res, {
         message: "Order cancelled by admin. Refund initiated.",
         order: result.order,
@@ -104,6 +132,15 @@ router.post(
     try {
       const { refundAmount, reason, adminNote } = req.body;
       const result = await service.initiatePartialRefund(req.params.id, refundAmount, reason, adminNote, req.user);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: result.order, refund: result.refund },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === result.order.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
       return success(res, {
         message: `Partial refund of ₹${refundAmount} initiated successfully.`,
         order: result.order,
@@ -124,10 +161,80 @@ router.post(
   async (req, res) => {
     try {
       const result = await service.retryFailedRefund(req.params.id);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: result.order, refund: result.refund },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === result.order.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
       return success(res, {
         message: "Refund retry initiated successfully.",
         order: result.order,
         refund: result.refund
+      });
+    } catch (err) {
+      return respondError(res, err.message, 500);
+    }
+  }
+);
+
+/**
+ * Admin: Initiate manual refund (bypass gateway)
+ */
+router.post(
+  "/manual-refund/:id/initiate",
+  requireAdmin,
+  validateBody(validator.manualRefundSchema),
+  async (req, res) => {
+    try {
+      const { paymentMode, paymentDetails, adminNote } = req.body;
+      const result = await service.manualRefundInitiate(req.params.id, paymentMode, paymentDetails, adminNote, req.user);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: result.order, refund: result.refund },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === result.order.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
+      return success(res, {
+        message: "Manual refund initiated. Complete the refund offline and confirm completion.",
+        order: result.order,
+        refund: result.refund
+      });
+    } catch (err) {
+      return respondError(res, err.message, 500);
+    }
+  }
+);
+
+/**
+ * Admin: Complete manual refund
+ */
+router.post(
+  "/manual-refund/:id/complete",
+  requireAdmin,
+  validateBody(validator.manualRefundSchema),
+  async (req, res) => {
+    try {
+      const { adminNote } = req.body;
+      const updatedOrder = await service.manualRefundComplete(req.params.id, adminNote, req.user);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: updatedOrder },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === updatedOrder.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
+      return success(res, {
+        message: "Manual refund completed successfully.",
+        order: updatedOrder
       });
     } catch (err) {
       return respondError(res, err.message, 500);

@@ -171,6 +171,7 @@ const otpRequestSchema = Joi.object({
   }),
   role: Joi.string().valid("buyer", "grower", "admin").optional(),
   fullName: Joi.string().min(2).max(100).optional().allow(""),
+  phone: Joi.string().optional().allow(""),
 });
 
 /**
@@ -182,11 +183,12 @@ router.post(
   validateBody(otpRequestSchema),
   async (req, res) => {
     try {
-      const { email, role, fullName } = req.body;
+      const { email, role, fullName, phone } = req.body;
       const result = await authService.generateAndSendOTP(
         email,
         role,
         fullName,
+        phone,
       );
       return success(res, result);
     } catch (error) {
@@ -319,13 +321,14 @@ router.put(
  * DELETE /api/auth/me
  * Deletes the current user's account (mock/local). Accepts optional reason.
  */
-router.delete("/me", authMiddleware, async (req, res) => {
+const deleteAccountSchema = Joi.object({
+  reason: Joi.string().max(500).allow("", null).optional(),
+});
+
+router.delete("/me", authMiddleware, validateBody(deleteAccountSchema), async (req, res) => {
   try {
     const { userId } = req.user;
-    const reason =
-      req.body && req.body.reason
-        ? String(req.body.reason).slice(0, 500)
-        : null;
+    const reason = req.body.reason || null;
     await authService.deleteAccount(userId, reason);
     return success(res, { message: "Account deleted." });
   } catch (err) {

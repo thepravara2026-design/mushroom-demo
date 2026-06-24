@@ -4,6 +4,8 @@ const db = require("../config/db");
 const userRepo = require("../repositories/userRepository");
 const { JWT_SECRET, JWT_EXPIRES_IN } = require("../config/jwt");
 const logger = require("../utils/logger");
+const { sendOtpEmail } = require('./emailService');
+const { sendOtpSms } = require('./smsService');
 
 // In-memory OTP store for simulation (email -> { otp, expiresAt, role, fullName })
 const otpStore = new Map();
@@ -27,7 +29,7 @@ setInterval(() => cleanupStore(adminOtpStore), 5 * 60 * 1000).unref();
 class AuthService {
   /**
    * Generates a 6-digit OTP and simulates sending it via Email/SMS.
-   */
+   
   async generateAndSendOTP(email, role, fullName) {
     const emailLower = email.toLowerCase();
 
@@ -42,11 +44,40 @@ class AuthService {
       fullName: fullName || "Mushroom Enthusiast",
     });
 
+    await sendOtpEmail(emailLower, generatedOtp);
+
     return {
       success: true,
       message: `OTP sent successfully to ${emailLower}`,
-      // Return OTP in response unless running in production (enables frontend pre-fill in dev/local)
-      ...(process.env.NODE_ENV !== 'production' ? { otp: generatedOtp } : {}),
+    };
+  } */
+
+
+  async generateAndSendOTP(email, role, fullName, phone = null) {
+    const emailLower = email.toLowerCase();
+
+    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + OTP_TTL_MS;
+
+    otpStore.set(emailLower, {
+      otp: generatedOtp,
+      expiresAt,
+      role: role || "buyer",
+      fullName: fullName || "Mushroom Enthusiast",
+    });
+
+    // Send via SMS if phone provided, otherwise email
+    if (phone) {
+      await sendOtpSms(phone, generatedOtp);
+    } else {
+      await sendOtpEmail(emailLower, generatedOtp);
+    }
+
+    return {
+      success: true,
+      message: phone
+        ? `OTP sent to registered mobile`
+        : `OTP sent to ${emailLower}`,
     };
   }
 
@@ -68,9 +99,7 @@ class AuthService {
       throw new Error("OTP has expired. Please request a new one.");
     }
 
-    // Allow magic test OTP '123456' in non-production environments
-    const isMagicOtp = process.env.NODE_ENV !== 'production' && otpCode === '123456';
-    if (!isMagicOtp && record.otp !== otpCode) {
+    if (record.otp !== otpCode) {
       throw new Error("Invalid OTP code.");
     }
 
@@ -194,10 +223,13 @@ class AuthService {
       phone: adminPhone,
     });
 
+    await sendOtpSms(adminPhone, generatedOtp);
+
+    const maskedPhone = `XXXXXX${adminPhone.slice(-4)}`;
+
     return {
       success: true,
-      message: `OTP sent to registered mobile ${adminPhone}`,
-      ...(process.env.NODE_ENV !== 'production' ? { otp: generatedOtp } : {}),
+      message: `OTP sent to registered mobile ${maskedPhone}`,
     };
   }
 
@@ -218,9 +250,7 @@ class AuthService {
       throw err;
     }
 
-    const isDemoPhone = record.phone === "9876543210";
-    const isMagicOtp = process.env.NODE_ENV !== 'production' && (otpCode === '123456' || isDemoPhone);
-    if (!isMagicOtp && record.otp !== otpCode) {
+    if (record.otp !== otpCode) {
       const err = new Error("Invalid OTP code.");
       err.status = 400;
       throw err;
@@ -364,4 +394,10 @@ class AuthService {
   }
 }
 
-module.exports = new AuthService();
+const authService = new AuthService();
+// Test helpers — exposed only when FORCE_MOCK is true
+if (process.env.FORCE_MOCK === "true") {
+  authService.__adminOtpStore = adminOtpStore;
+  authService.__otpStore = otpStore;
+}
+module.exports = authService;

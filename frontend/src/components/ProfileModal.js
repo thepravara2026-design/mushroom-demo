@@ -421,23 +421,39 @@ class ProfileModal {
     const cancelNote = o.delivery_status === 'cancelled' && o.cancel_reason
       ? `<div class="pm-cancel-note"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
       : '';
-    const canCancel = (status === 'placed' || status === 'processing' || status === 'paid' || status === 'inoculating') &&
-      o.status !== 'CANCEL_REQUESTED' &&
-      o.status !== 'CANCEL_APPROVED' &&
-      o.status !== 'CANCEL_REJECTED' &&
+    const terminalStates = ['CANCEL_REQUESTED', 'CANCEL_APPROVED', 'CANCEL_REJECTED', 'cancelled'];
+    const canCancelAlloweDelivery = ['placed', 'processing', 'paid', 'inoculating', 'pending', 'pending_upi_verification'];
+    const canCancel = canCancelAlloweDelivery.includes(status) &&
+      !terminalStates.includes(o.status) &&
       !o.status.startsWith('REFUND_');
+
+    const refundStates = ['CANCEL_REQUESTED', 'CANCEL_APPROVED', 'CANCEL_REJECTED', 'REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
+    const isRefundOrder = refundStates.includes(o.status);
 
     let refundPill = '';
     if (o.status === 'CANCEL_REQUESTED') {
       refundPill = `<div class="pm-refund-pill warning"><i class="fa-solid fa-clock"></i> Cancellation pending admin approval</div>`;
+    } else if (o.status === 'CANCEL_APPROVED') {
+      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-check-circle"></i> Cancellation approved — refund being initiated</div>`;
+    } else if (o.status === 'REFUND_PENDING') {
+      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-hourglass-half"></i> Refund pending</div>`;
     } else if (o.status === 'REFUND_INITIATED' || o.status === 'REFUND_PROCESSING') {
       refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-arrows-rotate fa-spin"></i> Refund in progress</div>`;
     } else if (o.status === 'REFUND_COMPLETED' || o.status === 'refunded') {
       refundPill = `<div class="pm-refund-pill success"><i class="fa-solid fa-circle-check"></i> Refund processed</div>`;
     } else if (o.status === 'REFUND_FAILED') {
-      refundPill = `<div class="pm-refund-pill danger"><i class="fa-solid fa-circle-exclamation"></i> Refund failed</div>`;
+      refundPill = `<div class="pm-refund-pill danger"><i class="fa-solid fa-circle-exclamation"></i> Refund failed — Contact <a href="mailto:support@sporekart.com" style="color:#ef4444;text-decoration:underline;">support@sporekart.com</a></div>`;
     } else if (o.status === 'CANCEL_REJECTED') {
       refundPill = `<div class="pm-refund-pill danger"><i class="fa-solid fa-circle-xmark"></i> Cancellation request rejected</div>`;
+    } else if (o.status === 'MANUAL_REFUND_INITIATED') {
+      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-hourglass-half"></i> Manual refund initiated — processing offline</div>`;
+    } else if (o.status === 'MANUAL_REFUND_COMPLETED') {
+      refundPill = `<div class="pm-refund-pill success"><i class="fa-solid fa-circle-check"></i> Manual refund completed</div>`;
+    }
+
+    let refundTimelineHtml = '';
+    if (isRefundOrder) {
+      refundTimelineHtml = this.renderRefundTimeline(o);
     }
 
     const items = Array.isArray(o.items) ? o.items : [];
@@ -447,7 +463,16 @@ class ProfileModal {
         .join('')}</div>`
       : '';
 
-    return `<div class="pm-order">
+    const barColor = o.status === 'CANCEL_REQUESTED' || o.status === 'CANCEL_APPROVED' || o.status === 'REFUND_PENDING' || o.status === 'REFUND_INITIATED' || o.status === 'REFUND_PROCESSING' || o.status === 'MANUAL_REFUND_INITIATED' ? '#f59e0b'
+      : o.status === 'REFUND_COMPLETED' || o.status === 'refunded' || o.status === 'MANUAL_REFUND_COMPLETED' ? '#10b981'
+      : o.status === 'REFUND_FAILED' || o.status === 'CANCEL_REJECTED' ? '#ef4444'
+      : o.status === 'cancelled' ? '#6b7280'
+      : o.status === 'delivered' ? '#059669'
+      : o.status === 'shipped' || o.status === 'in_transit' ? '#3b82f6'
+      : o.status === 'processing' || o.status === 'paid' ? '#8b5cf6'
+      : '#d1d5db';
+
+    return `<div class="pm-order pm-order-premium" style="border-left:4px solid ${barColor};">
       <div class="pm-order-top">
         <div class="pm-order-id">#${o.id || o.orderId}</div>
         <span class="pm-order-badge ${status}">${status}</span>
@@ -462,6 +487,7 @@ class ProfileModal {
       ${itemsHtmlV2}
       ${trackingHtml}
       ${refundPill}
+      ${refundTimelineHtml}
       ${cancelNote}
       <div class="pm-order-actions">
         ${['shipped', 'in_transit', 'delivered'].includes(status) ? `
@@ -473,6 +499,58 @@ class ProfileModal {
         ${isRecent ? `<button class="pm-action-btn-sm pm-action-btn-primary" onclick="window.orderAgainFromProfile('${o.id}')"><i class="fa-solid fa-rotate-right"></i> Reorder</button>` : ''}
       </div>
     </div>`;
+  }
+
+  renderRefundTimeline(o) {
+    const steps = [];
+
+    if (o.status === 'CANCEL_REQUESTED' || o.status === 'CANCEL_APPROVED' || o.status === 'CANCEL_REJECTED' || o.status.startsWith('REFUND_') || o.status.startsWith('MANUAL_REFUND_')) {
+      steps.push({ label: 'Cancellation Requested', done: o.status !== 'CANCEL_REJECTED' });
+    }
+    if (o.status === 'CANCEL_APPROVED' || o.status.startsWith('REFUND_') || o.status.startsWith('MANUAL_REFUND_')) {
+      steps.push({ label: 'Cancellation Approved', done: true });
+    }
+    if (o.status === 'REFUND_PENDING') {
+      steps.push({ label: 'Refund Pending', done: true });
+    }
+    if (o.status === 'REFUND_INITIATED' || o.status === 'REFUND_PROCESSING') {
+      steps.push({ label: 'Refund Pending', done: true });
+      steps.push({ label: 'Refund In Progress', done: true });
+    }
+    if (o.status === 'REFUND_COMPLETED' || o.status === 'refunded') {
+      steps.push({ label: 'Refund Pending', done: true });
+      steps.push({ label: 'Refund In Progress', done: true });
+      steps.push({ label: 'Refund Completed', done: true });
+    }
+    if (o.status === 'MANUAL_REFUND_INITIATED') {
+      steps.push({ label: 'Manual Refund Initiated', done: true });
+    }
+    if (o.status === 'MANUAL_REFUND_COMPLETED') {
+      steps.push({ label: 'Manual Refund Initiated', done: true });
+      steps.push({ label: 'Manual Refund Completed', done: true });
+    }
+    if (o.status === 'REFUND_FAILED') {
+      steps.push({ label: 'Refund Failed', done: false });
+    }
+    if (o.status === 'CANCEL_REJECTED') {
+      steps.push({ label: 'Cancellation Rejected', done: false });
+    }
+
+    if (!steps.length) return '';
+
+    const lines = steps.map(s => `
+      <div class="pm-timeline-row ${s.done ? 'pm-timeline-done' : ''}">
+        <div class="pm-timeline-dot ${s.done ? 'done' : 'pending'}"></div>
+        <div class="pm-timeline-label">${s.label}</div>
+      </div>
+    `).join('');
+
+    return `
+      <div class="pm-refund-progress">
+        <div class="pm-refund-progress-title"><i class="fa-solid fa-rotate-left"></i> Refund Progress</div>
+        <div class="pm-timeline">${lines}</div>
+      </div>
+    `;
   }
 
   renderTrackingTimeline(o) {
@@ -542,15 +620,15 @@ class ProfileModal {
         done: true,
       });
     }
-    if (status === 'cancelled' || status === 'CANCEL_APPROVED' || status === 'refunded' || status.startsWith('REFUND_')) {
+    if (status === 'cancelled' || status === 'CANCEL_APPROVED' || status === 'refunded' || status.startsWith('REFUND_') || status === 'MANUAL_REFUND_INITIATED' || status === 'MANUAL_REFUND_COMPLETED') {
       lines.push({
-        label: status.startsWith('REFUND_') || status === 'refunded' ? 'Refunded' : 'Cancelled',
+        label: status === 'REFUND_COMPLETED' || status === 'refunded' || status === 'MANUAL_REFUND_COMPLETED' ? 'Refund completed' : status.startsWith('REFUND_') || status === 'MANUAL_REFUND_INITIATED' ? 'Refund processing' : 'Cancelled',
         time: cancelledAt
           ? new Date(cancelledAt).toLocaleString()
           : updatedAt
             ? new Date(updatedAt).toLocaleString()
             : '',
-        done: true,
+        done: status === 'REFUND_COMPLETED' || status === 'refunded' || status === 'MANUAL_REFUND_COMPLETED',
       });
     }
 
@@ -766,15 +844,24 @@ class ProfileModal {
     const order = (state.orders || []).find((o) => String(o.id) === String(orderId));
     const status = order?.delivery_status || order?.status || 'unknown';
 
-    if (status !== 'pending' && status !== 'placed' && status !== 'processing' && status !== 'paid' && status !== 'inoculating') {
+    const cancellableStatuses = ['pending', 'placed', 'processing', 'paid', 'inoculating', 'pending_upi_verification', 'pending_approval'];
+    if (!cancellableStatuses.includes(status)) {
       showErrorToast('Order can be cancelled only when the order is in placed or processing stage.');
       return;
     }
 
-    const origRender = this.renderOrders.bind(this, true);
-
     const existing = document.getElementById('cancel-order-modal');
     if (existing) existing.remove();
+
+    const cancelReasons = [
+      { value: 'ordered_by_mistake', label: 'Ordered by mistake' },
+      { value: 'wrong_address', label: 'Wrong address' },
+      { value: 'found_cheaper', label: 'Found cheaper elsewhere' },
+      { value: 'delivery_too_long', label: 'Delivery taking too long' },
+      { value: 'need_different_product', label: 'Need different product' },
+      { value: 'duplicate_order', label: 'Duplicate order' },
+      { value: 'other', label: 'Other' },
+    ];
 
     const modal = document.createElement('div');
     modal.id = 'cancel-order-modal';
@@ -782,33 +869,29 @@ class ProfileModal {
     modal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10000;padding:18px;';
 
     modal.innerHTML = `
-      <div class="modal-card" style="max-width:460px;">
+      <div class="modal-card" style="max-width:480px;">
         <button class="modal-close" id="cancel-modal-close" type="button">&times;</button>
         <h3 style="margin:0 0 8px;font-size:1.2rem;color:#b91c1c;">
-          <i class="fa-solid fa-ban"></i> Request Cancellation
+          <i class="fa-solid fa-ban"></i> Cancel Order #${orderId.substring(0, 8)}
         </h3>
         <p style="margin:0 0 18px;color:var(--text-mid);font-size:0.92rem;">
-          This will request a cancellation for this order. It will need to be approved by an administrator, and any payments will be refunded.
+          This will request a cancellation. An administrator will review your request and process any applicable refund.
         </p>
         <div class="input-field">
-          <label for="cancel-reason-select">Cancellation reason</label>
-          <select id="cancel-reason-select">
+          <label for="cancel-reason-select">Reason for cancellation</label>
+          <select id="cancel-reason-select" style="width:100%;padding:10px;border-radius:8px;border:1px solid #d1d5db;">
             <option value="">Select a reason</option>
-            <option value="Delivery cost is high">Delivery cost is high</option>
-            <option value="Not interested in product">Not interested in product</option>
-            <option value="Not available on the expected delivery date">Not available on the expected delivery date</option>
-            <option value="Taking too much time to deliver">Taking too much time to deliver</option>
-            <option value="Other">Other</option>
+            ${cancelReasons.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
           </select>
         </div>
-        <div class="input-field hidden" id="cancel-reason-other-wrap">
-          <label for="cancel-reason-other">Please specify your reason</label>
-          <textarea id="cancel-reason-other" rows="3" placeholder="Enter your cancellation reason"></textarea>
+        <div class="input-field hidden" id="cancel-reason-other-wrap" style="display:none;margin-top:12px;">
+          <label for="cancel-reason-other">Additional details (optional)</label>
+          <textarea id="cancel-reason-other" rows="3" placeholder="Please provide more information..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #d1d5db;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
         </div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
           <button class="btn btn-secondary" id="cancel-modal-keep-btn" type="button">Keep order</button>
           <button class="btn btn-cancel" id="cancel-modal-confirm-btn" type="button">
-            <i class="fa-solid fa-ban"></i> Submit Request
+            <i class="fa-solid fa-ban"></i> Request Cancellation
           </button>
         </div>
       </div>
@@ -821,7 +904,7 @@ class ProfileModal {
     const otherInput = modal.querySelector('#cancel-reason-other');
 
     reasonSelect.addEventListener('change', () => {
-      otherWrap.classList.toggle('hidden', reasonSelect.value !== 'Other');
+      otherWrap.style.display = reasonSelect.value === 'other' ? 'block' : 'none';
     });
 
     const closeModal = () => modal.remove();
@@ -831,41 +914,82 @@ class ProfileModal {
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
     modal.querySelector('#cancel-modal-confirm-btn').addEventListener('click', async () => {
-      let reason = reasonSelect.value;
-      if (!reason) {
+      const reasonVal = reasonSelect.value;
+      if (!reasonVal) {
         showErrorToast('Please select a cancellation reason.');
         return;
       }
-      if (reason === 'Other') {
-        reason = otherInput?.value.trim() || '';
-        if (!reason) {
-          showErrorToast('Please enter your cancellation reason.');
+
+      let reasonLabel = cancelReasons.find(r => r.value === reasonVal)?.label || reasonVal;
+      let reasonText = '';
+      if (reasonVal === 'other') {
+        reasonText = otherInput?.value.trim() || '';
+        if (!reasonText) {
+          showErrorToast('Please provide details for your cancellation reason.');
           return;
         }
+        reasonLabel = reasonText;
       }
 
+      // Confirmation popup — step 2
       modal.remove();
 
-      try {
-        const cancelResult = await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
-          method: 'POST',
-          body: JSON.stringify({ reason }),
-        });
-        showSuccessToast('✅ Cancellation request submitted. Pending admin review.');
+      const confirmModal = document.createElement('div');
+      confirmModal.id = 'cancel-confirm-modal';
+      confirmModal.className = 'modal-overlay open';
+      confirmModal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10001;padding:18px;';
 
-        await this.renderOrders(true);
-        this.activeTab = 'orders';
-        this.renderTabContent();
+      confirmModal.innerHTML = `
+        <div class="modal-card" style="max-width:420px;text-align:center;">
+          <div style="margin-bottom:16px;font-size:2.5rem;">⚠️</div>
+          <h3 style="margin:0 0 8px;font-size:1.1rem;color:#d97706;">Confirm Cancellation</h3>
+          <p style="margin:0 0 6px;color:var(--text-mid);font-size:0.9rem;">
+            Are you sure you want to cancel Order <strong>#${orderId.substring(0, 8)}</strong>?
+          </p>
+          <p style="margin:0 0 16px;color:#6b7280;font-size:0.85rem;font-style:italic;">
+            Reason: ${reasonLabel}
+          </p>
+          <p style="margin:0 0 18px;color:#ef4444;font-size:0.82rem;">
+            This cannot be undone.
+          </p>
+          <div style="display:flex;gap:10px;justify-content:center;">
+            <button class="btn btn-secondary" id="cancel-confirm-keep-btn" type="button">No, Keep It</button>
+            <button class="btn btn-cancel" id="cancel-confirm-yes-btn" type="button">Yes, Cancel Order</button>
+          </div>
+        </div>
+      `;
 
-        const tabsContainer = this.modal?.querySelector('.pm-tabs');
-        if (tabsContainer) {
-          tabsContainer.querySelectorAll('.pm-tab').forEach(b => b.classList.remove('active'));
-          const ordersBtn = tabsContainer.querySelector('[data-tab="orders"]');
-          if (ordersBtn) ordersBtn.classList.add('active');
+      document.body.appendChild(confirmModal);
+
+      const closeConfirm = () => confirmModal.remove();
+
+      confirmModal.querySelector('#cancel-confirm-keep-btn').addEventListener('click', closeConfirm);
+      confirmModal.addEventListener('click', (e) => { if (e.target === confirmModal) closeConfirm(); });
+
+      confirmModal.querySelector('#cancel-confirm-yes-btn').addEventListener('click', async () => {
+        confirmModal.remove();
+
+        try {
+          await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reasonLabel }),
+          });
+          showSuccessToast('✅ Cancellation request submitted. Pending admin review.');
+
+          await this.renderOrders(true);
+          this.activeTab = 'orders';
+          this.renderTabContent();
+
+          const tabsContainer = this.modal?.querySelector('.pm-tabs');
+          if (tabsContainer) {
+            tabsContainer.querySelectorAll('.pm-tab').forEach(b => b.classList.remove('active'));
+            const ordersBtn = tabsContainer.querySelector('[data-tab="orders"]');
+            if (ordersBtn) ordersBtn.classList.add('active');
+          }
+        } catch (err) {
+          showErrorToast(getApiErrorMessage(err) || 'Failed to submit cancellation request.');
         }
-      } catch (err) {
-        showErrorToast(getApiErrorMessage(err) || 'Failed to submit cancellation request.');
-      }
+      });
     });
   }
 

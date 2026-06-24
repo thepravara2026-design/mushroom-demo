@@ -2,6 +2,7 @@ const { createClient } = require("@supabase/supabase-js");
 const bcrypt = require("bcryptjs");
 const { supabaseAdmin } = require("./supabase");
 const logger = require("../utils/logger");
+const escapeRegExp = require("../utils/escapeRegExp");
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -397,10 +398,10 @@ const mockStore = {
 };
 
 // Seed Users for Sporekart
-const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD || "admin123";
-if (!process.env.ADMIN_SEED_PASSWORD && process.env.NODE_ENV === "production") {
+const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD;
+if (!ADMIN_SEED_PASSWORD || ADMIN_SEED_PASSWORD === "admin123") {
   throw new Error(
-    "ADMIN_SEED_PASSWORD environment variable is required in production.",
+    'ADMIN_SEED_PASSWORD environment variable must be set to a secure value. The default "admin123" is not allowed in any environment.',
   );
 }
 const adminPasswordHash = bcrypt.hashSync(ADMIN_SEED_PASSWORD, 10);
@@ -523,16 +524,22 @@ class MockQueryBuilder {
         if (updates.cancelled_by !== undefined) updates.initiated_by = updates.cancelled_by;
       }
       const targetIds = new Set(this.data.map((item) => item.id));
+      const safeUpdates = Object.keys(updates).reduce((acc, key) => {
+        if (!["__proto__", "constructor", "prototype"].includes(key)) {
+          acc[key] = updates[key];
+        }
+        return acc;
+      }, {});
       mockStore[this.table] = mockStore[this.table].map((item) => {
         if (targetIds.has(item.id)) {
-          const updatedItem = { ...item, ...updates };
+          const updatedItem = { ...item, ...safeUpdates };
           return updatedItem;
         }
         return item;
       });
       this.data = this.data.map((item) => {
         if (targetIds.has(item.id)) {
-          return { ...item, ...updates };
+          return { ...item, ...safeUpdates };
         }
         return item;
       });
@@ -606,7 +613,8 @@ class MockQueryBuilder {
         const op = parts[1];
         const pattern = parts.slice(2).join(".");
         if (op === "ilike") {
-          const regex = new RegExp(pattern.replace(/%/g, ".*"), "i");
+          const escaped = pattern.split("%").map((p) => escapeRegExp(p)).join(".*");
+          const regex = new RegExp(escaped, "i");
           return regex.test(item[column] || "");
         }
         return false;
@@ -616,7 +624,8 @@ class MockQueryBuilder {
   }
 
   ilike(column, pattern) {
-    const regex = new RegExp(pattern.replace(/%/g, ".*"), "i");
+    const escaped = pattern.split("%").map((p) => escapeRegExp(p)).join(".*");
+    const regex = new RegExp(escaped, "i");
     this.data = this.data.filter((item) => regex.test(item[column] || ""));
     return this;
   }

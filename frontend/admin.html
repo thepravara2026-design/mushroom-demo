@@ -513,24 +513,55 @@
 
       <!-- CURRENT ORDERS PANEL -->
       <div class="ship-panel active" id="ship-panel-current">
-        <div class="ship-status-pills">
-          <button class="ship-status-pill active" data-status="all">All</button>
-          <button class="ship-status-pill" data-status="placed">
-            <i class="fa-solid fa-clock"></i> Placed
+
+        <!-- 12-Section Admin Pills -->
+        <div class="admin-section-pills">
+          <button class="admin-section-pill active" data-section="all">
+            <i class="fa-solid fa-list"></i> <span>All Orders</span>
           </button>
-          <button class="ship-status-pill" data-status="processing">
-            <i class="fa-solid fa-gear"></i> Processing
+          <button class="admin-section-pill" data-section="new_orders">
+            <i class="fa-solid fa-sparkles"></i> <span>New Orders</span>
+            <span class="section-count" id="sec-count-new_orders">0</span>
           </button>
-          <button class="ship-status-pill" data-status="shipped">
-            <i class="fa-solid fa-truck"></i> Shipping
+          <button class="admin-section-pill" data-section="placed">
+            <i class="fa-solid fa-clock"></i> <span>Placed</span>
+            <span class="section-count" id="sec-count-placed">0</span>
           </button>
-          <button class="ship-status-pill" data-status="delivered">
-            <i class="fa-solid fa-circle-check"></i> Delivered
+          <button class="admin-section-pill" data-section="processing">
+            <i class="fa-solid fa-gear"></i> <span>Processing</span>
+            <span class="section-count" id="sec-count-processing">0</span>
           </button>
-          <button class="ship-status-pill" data-status="cancelled">
-            <i class="fa-solid fa-ban"></i> Cancelled
+          <button class="admin-section-pill" data-section="shipping">
+            <i class="fa-solid fa-truck"></i> <span>Shipping</span>
+            <span class="section-count" id="sec-count-shipping">0</span>
+          </button>
+          <button class="admin-section-pill" data-section="delivered">
+            <i class="fa-solid fa-circle-check"></i> <span>Delivered</span>
+            <span class="section-count" id="sec-count-delivered">0</span>
+          </button>
+          <button class="admin-section-pill" data-section="cancel_requests">
+            <i class="fa-solid fa-triangle-exclamation"></i> <span>Cancel Requests</span>
+            <span class="section-count" id="sec-count-cancel_requests">0</span>
+          </button>
+          <button class="admin-section-pill" data-section="cancelled">
+            <i class="fa-solid fa-ban"></i> <span>Cancelled</span>
+            <span class="section-count" id="sec-count-cancelled">0</span>
           </button>
         </div>
+
+        <!-- Status pills (sub-filter within section) -->
+        <div class="ship-status-pills" id="section-status-pills" style="display:none;"></div>
+
+        <!-- Refund filter -->
+        <div class="ship-refund-filter-single" id="section-refund-filter" style="display:none;">
+          <span class="ship-refund-filter-icon"><i class="fa-solid fa-arrow-rotate-left"></i></span>
+          <select id="ship-refund-filter-select" class="ship-refund-filter-select">
+            <option value="all">All Refunds</option>
+            <option value="auto">🔄 Auto Refund</option>
+            <option value="manual">✋ Manual Refund</option>
+          </select>
+        </div>
+
         <div id="admin-orders-list">
           <div class="admin-loading">
             <i class="fa-solid fa-spinner fa-spin"></i> Loading orders...

@@ -2,28 +2,96 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../middleware/auth");
 const { success, error: respondError } = require("../lib/response");
+const { validateBody, Joi } = require("../middleware/validate");
 const db = require("../config/db");
 const jwt = require("jsonwebtoken");
 const userRepo = require("../repositories/userRepository");
 const { JWT_SECRET, JWT_EXPIRES_IN } = require("../config/jwt");
 const { setAuthCookie } = require("../lib/authCookie");
 
+const traineeSignupSchema = Joi.object({
+  fullName: Joi.string().trim().min(2).max(100).required().messages({
+    "string.min": "Full name must be at least 2 characters.",
+    "string.max": "Full name must not exceed 100 characters.",
+    "any.required": "Full name is required.",
+  }),
+  phone: Joi.string()
+    .pattern(/^(\+91)?[6-9]\d{9}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "Enter a valid Indian phone number.",
+      "any.required": "Phone number is required.",
+    }),
+  email: Joi.string().email().required().messages({
+    "string.email": "Enter a valid email address.",
+    "any.required": "Email is required.",
+  }),
+  roleType: Joi.string().trim().min(2).max(50).required().messages({
+    "string.min": "Role type must be at least 2 characters.",
+    "any.required": "Role type is required.",
+  }),
+  city: Joi.string().trim().min(2).max(100).required().messages({
+    "string.min": "City must be at least 2 characters.",
+    "any.required": "City is required.",
+  }),
+  state: Joi.string().trim().min(2).max(100).required().messages({
+    "string.min": "State must be at least 2 characters.",
+    "any.required": "State is required.",
+  }),
+});
+
+const traineeOtpRequestSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Enter a valid email address.",
+    "any.required": "Email is required.",
+  }),
+});
+
+const traineePhoneRequestSchema = Joi.object({
+  phone: Joi.string()
+    .pattern(/^(\+)?[\d\s-]{10,15}$/)
+    .required()
+    .messages({
+      "any.required": "Phone number is required.",
+    }),
+});
+
+const traineeGoogleLoginSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Enter a valid email address.",
+    "any.required": "Email from Google authentication is required.",
+  }),
+});
+
+const traineeVerifyPhoneOtpSchema = Joi.object({
+  phone: Joi.string().required().messages({
+    "any.required": "Phone number is required.",
+  }),
+  otpCode: Joi.string().pattern(/^\d{6}$/).required().messages({
+    "string.pattern.base": "OTP must be a 6-digit code.",
+    "any.required": "OTP is required.",
+  }),
+});
+
+const traineeVerifyOtpSchema = Joi.object({
+  email: Joi.string().email().required().messages({
+    "string.email": "Enter a valid email address.",
+    "any.required": "Email is required.",
+  }),
+  otpCode: Joi.string().pattern(/^\d{6}$/).required().messages({
+    "string.pattern.base": "OTP must be a 6-digit code.",
+    "any.required": "OTP is required.",
+  }),
+});
+
 /**
  * POST /api/trainee/signup
  * Trainee-specific registration with full profile details.
  * Creates user with role 'trainee' and profile fields (city, state, phone, role_type).
  */
-router.post("/signup", async (req, res) => {
+router.post("/signup", validateBody(traineeSignupSchema), async (req, res) => {
   try {
     const { fullName, phone, email, roleType, city, state } = req.body;
-
-    if (!fullName || !phone || !email || !roleType || !city || !state) {
-      return respondError(
-        res,
-        "All fields are required: name, phone, email, role, city, state",
-        400,
-      );
-    }
 
     const emailLower = email.toLowerCase().trim();
 
@@ -91,23 +159,19 @@ router.post("/signup", async (req, res) => {
  * Trainee-specific login via email. Only allows users with role 'trainee' to login.
  * Returns needsSignup: true if user doesn't exist.
  */
-router.post("/request-otp", async (req, res) => {
+router.post("/request-otp", validateBody(traineeOtpRequestSchema), async (req, res) => {
   try {
     const { email } = req.body;
 
-    if (!email) {
-      return respondError(res, "Email is required.", 400);
-    }
-
     const emailLower = email.toLowerCase().trim();
 
-    // Check if user exists with this email
+    // Look up user — do NOT reveal whether email is registered
     const { data: user } = await userRepo.findByEmail(emailLower);
 
     if (!user) {
       return success(res, {
-        needsSignup: true,
-        message: "No account found. Please register as a trainee first.",
+        message:
+          "If this email is registered with us, you will receive an OTP shortly.",
       });
     }
 
@@ -139,24 +203,19 @@ router.post("/request-otp", async (req, res) => {
  * POST /api/trainee/request-phone-otp
  * Trainee-specific login via phone number. Looks up user by whatsapp_number.
  */
-router.post("/request-phone-otp", async (req, res) => {
+router.post("/request-phone-otp", validateBody(traineePhoneRequestSchema), async (req, res) => {
   try {
     const { phone } = req.body;
 
-    if (!phone) {
-      return respondError(res, "Phone number is required.", 400);
-    }
-
     const cleanPhone = phone.replace(/\s/g, "").trim();
 
-    // Check if user exists with this phone number
+    // Look up user — do NOT reveal whether phone is registered
     const { data: user } = await userRepo.findByPhone(cleanPhone);
 
     if (!user) {
       return success(res, {
-        needsSignup: true,
         message:
-          "No account found with this phone number. Please register as a trainee first.",
+          "If this phone number is registered with us, you will receive an OTP shortly.",
       });
     }
 
@@ -194,17 +253,9 @@ router.post("/request-phone-otp", async (req, res) => {
  * Expects { googleToken } — looks up by the email extracted from token.
  * For mock: { email } directly.
  */
-router.post("/google-login", async (req, res) => {
+router.post("/google-login", validateBody(traineeGoogleLoginSchema), async (req, res) => {
   try {
     const { email } = req.body;
-
-    if (!email) {
-      return respondError(
-        res,
-        "Email from Google authentication is required.",
-        400,
-      );
-    }
 
     const emailLower = email.toLowerCase().trim();
 
@@ -258,13 +309,9 @@ router.post("/google-login", async (req, res) => {
  * POST /api/trainee/verify-phone-otp
  * Verifies OTP for phone-based login.
  */
-router.post("/verify-phone-otp", async (req, res) => {
+router.post("/verify-phone-otp", validateBody(traineeVerifyPhoneOtpSchema), async (req, res) => {
   try {
     const { phone, otpCode } = req.body;
-
-    if (!phone || !otpCode) {
-      return respondError(res, "Phone and OTP are required.", 400);
-    }
 
     const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
     const { data: user } = await userRepo.findByPhone(cleanPhone);
@@ -293,13 +340,9 @@ router.post("/verify-phone-otp", async (req, res) => {
  * POST /api/trainee/verify-otp
  * Verifies OTP and logs in as trainee.
  */
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", validateBody(traineeVerifyOtpSchema), async (req, res) => {
   try {
     const { email, otpCode } = req.body;
-
-    if (!email || !otpCode) {
-      return respondError(res, "Email and OTP are required.", 400);
-    }
 
     const emailLower = email.toLowerCase().trim();
     const authService = require("../services/authService");

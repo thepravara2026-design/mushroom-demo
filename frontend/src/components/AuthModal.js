@@ -419,6 +419,7 @@ export class AuthModal {
         mockEmail,
         this.currentRole,
         fullName || `User ${phone.slice(-4)}`,
+        fullPhone,
       );
       this.phoneError?.classList.add('hidden');
 

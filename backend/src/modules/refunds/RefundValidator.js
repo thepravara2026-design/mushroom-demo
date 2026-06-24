@@ -21,7 +21,11 @@ const adminApproveRejectSchema = Joi.object({
   adminNote: Joi.string()
     .trim()
     .max(500)
+    .optional(),
+  refundType: Joi.string()
+    .valid("auto", "manual")
     .optional()
+    .default("auto")
 });
 
 const adminCancelSchema = Joi.object({
@@ -69,9 +73,30 @@ const partialRefundSchema = Joi.object({
     .optional()
 });
 
+const manualRefundSchema = Joi.object({
+  paymentMode: Joi.string()
+    .valid("bank_transfer", "upi", "cash", "cheque", "other")
+    .required()
+    .messages({
+      "any.required": "Payment mode is required for manual refund.",
+      "any.only": "Payment mode must be one of: bank_transfer, upi, cash, cheque, other"
+    }),
+  paymentDetails: Joi.string()
+    .trim()
+    .max(500)
+    .optional()
+    .allow(""),
+  adminNote: Joi.string()
+    .trim()
+    .max(500)
+    .optional()
+    .allow("")
+});
+
 module.exports = {
   cancelRequestSchema,
   adminApproveRejectSchema,
   adminCancelSchema,
-  partialRefundSchema
+  partialRefundSchema,
+  manualRefundSchema
 };
