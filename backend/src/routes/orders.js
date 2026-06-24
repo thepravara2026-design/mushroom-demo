@@ -13,33 +13,11 @@ const { supabaseAdmin } = require("../config/supabase");
 const { sendInvoiceWhatsApp } = require("../services/notificationService");
 const { JWT_SECRET } = require("../config/jwt");
 const refundService = require("../modules/refunds/RefundService");
+const { OrderStates, assertForwardOnly, assertCancellable, resolveState } = require("../modules/orders/OrderStateService");
+const { logAuditAction, AUDIT_ACTIONS } = require("../services/AuditLogService");
+const { notify } = require("../services/NotificationService");
 const logger = require("../utils/logger");
-
-// Simple in-memory SSE subscribers list. Each subscriber: { id, res, user }
-const sseSubscribers = [];
-
-function sendSseEvent(event, data, filterFn) {
-  const payload = `event: ${event}\n` + `data: ${JSON.stringify(data)}\n\n`;
-  sseSubscribers.forEach((sub) => {
-    try {
-      if (typeof filterFn === "function" && !filterFn(sub)) return;
-      sub.res.write(payload);
-    } catch (e) {
-      // ignore write errors; cleanup will remove closed connections
-    }
-  });
-}
-
-function addSseSubscriber(req, res, user) {
-  const id = crypto.randomBytes(8).toString("hex");
-  const sub = { id, req, res, user };
-  sseSubscribers.push(sub);
-  req.on("close", () => {
-    const idx = sseSubscribers.findIndex((s) => s.id === id);
-    if (idx !== -1) sseSubscribers.splice(idx, 1);
-  });
-  return sub;
-}
+const { sendSseEvent, addSseSubscriber } = require("../lib/sse");
 
 function buildInvoiceData(order, user) {
   const gstSummary = {
@@ -458,8 +436,7 @@ const verifyPaymentSchema = Joi.object({
 
 // POST /api/orders/confirm-upi-payment
 // Called when user pays directly via UPI QR (no Razorpay payment ID generated).
-// In mock mode  → marks order as paid immediately.
-// In live mode  → marks order as pending_upi_verification for admin to confirm.
+// Marks order as paid with pending admin approval so it shows up in New Orders tab.
 router.post(
   "/confirm-upi-payment",
   authMiddleware,
@@ -473,11 +450,7 @@ router.post(
     try {
       const { razorpay_order_id, upi_ref } = req.body;
 
-      // In mock mode: mark as fully paid so the order completes normally.
-      // In live mode: mark as pending_upi_verification so admin can confirm.
-      const isMockMode = razorpay.isMock;
-      const newStatus = isMockMode ? "paid" : "pending_upi_verification";
-      const deliveryStatus = isMockMode ? "placed" : "pending";
+      // Mark as paid with pending admin approval so the order shows up in New Orders.
       const paymentId = upi_ref || `UPI-${Date.now()}`;
       const transactionId = `TXN-${paymentId}`;
 
@@ -493,8 +466,9 @@ router.post(
       const { data: updatedOrder, error } = await db
         .from("orders")
         .update({
-          status: newStatus,
-          delivery_status: deliveryStatus,
+          status: "paid",
+          delivery_status: "placed",
+          admin_approval_status: "pending",
           payment_method: "UPI QR",
           razorpay_payment_id: paymentId,
           transaction_id: transactionId,
@@ -518,27 +492,23 @@ router.post(
         );
       } catch (e) { /* ignore SSE errors */ }
 
-      // Send WhatsApp invoice on order placement (mock mode only)
-      if (isMockMode) {
-        try {
-          const { data: user } = await db
-            .from("users")
-            .select("*")
-            .eq("id", updatedOrder.user_id)
-            .single();
-          if (user) {
-            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
-          }
-        } catch (e) {
-          // ignore WhatsApp errors
+      // Send WhatsApp invoice on order placement
+      try {
+        const { data: user } = await db
+          .from("users")
+          .select("*")
+          .eq("id", updatedOrder.user_id)
+          .single();
+        if (user) {
+          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
         }
+      } catch (e) {
+        // ignore WhatsApp errors
       }
 
       return success(res, {
-        message: isMockMode
-          ? "UPI payment confirmed successfully."
-          : "UPI payment submitted. We will verify and confirm your order shortly.",
-        status: newStatus,
+        message: "UPI payment confirmed successfully.",
+        status: "paid",
         order: updatedOrder,
       });
     } catch (err) {
@@ -581,6 +551,7 @@ router.post(
           .update({
             status: "paid",
             delivery_status: "placed",
+            admin_approval_status: "pending",
             payment_method: "Razorpay",
             razorpay_payment_id,
             transaction_id: transactionId,
@@ -632,11 +603,36 @@ router.post(
           order: updatedOrder,
         });
       }
-      // Mark as failed
-      await db
+      // Only mark as failed if order is still in a pending state.
+      // This prevents overwriting statuses like CANCEL_REQUESTED,
+      // CANCEL_APPROVED, or REFUND_* that may have been set by a
+      // concurrent cancel/refund flow.
+      const { data: currentOrder } = await db
         .from("orders")
-        .update({ status: "failed" })
-        .eq("razorpay_order_id", razorpay_order_id);
+        .select("status, user_id")
+        .eq("razorpay_order_id", razorpay_order_id)
+        .single();
+
+      if (currentOrder && ["pending", "pending_upi_verification"].includes(currentOrder.status)) {
+        const { data: failedOrder } = await db
+          .from("orders")
+          .update({ status: "failed" })
+          .eq("razorpay_order_id", razorpay_order_id)
+          .single();
+
+        // Broadcast failure via SSE so frontends update in real-time
+        try {
+          if (failedOrder) {
+            sendSseEvent(
+              "order:updated",
+              { order: failedOrder },
+              (sub) =>
+                (sub.user && sub.user.role === "admin") ||
+                (sub.user && sub.user.userId === currentOrder.user_id),
+            );
+          }
+        } catch (e) { /* ignore SSE errors */ }
+      }
 
       return respondError(res, "Payment verification failed.", 400);
     } catch (error) {
@@ -736,19 +732,28 @@ router.put("/shipping-settings", authMiddleware, async (req, res) => {
 });
 
 // GET /api/orders/my-orders
-// Fetch all orders of authenticated user
+// Fetch all orders of authenticated user with resolved state
 router.get("/my-orders", authMiddleware, async (req, res) => {
   try {
     const { data: orders, error } = await db
       .from("orders")
       .select("*")
-      .eq("user_id", req.user.userId);
+      .eq("user_id", req.user.userId)
+      .order("created_at", { ascending: false });
 
     if (error) {
       return respondError(res, error.message || "Failed to fetch orders", 500);
     }
 
-    return success(res, orders);
+    const enriched = (orders || []).map(o => ({
+      ...o,
+      resolved_state: resolveState(o),
+      cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
+                    !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
+      invoice_accessible: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)),
+    }));
+
+    return success(res, enriched);
   } catch (error) {
     return respondError(res, error.message || "Failed to fetch orders", 500);
   }
@@ -784,6 +789,11 @@ router.get("/all-orders", authMiddleware, async (req, res) => {
     const enrichedOrders = orders.map((o) => ({
       ...o,
       user_email: userMap[o.user_id] || "unknown@sporekart.com",
+      resolved_state: resolveState(o),
+      cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
+                    !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
+      invoice_accessible_admin: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)) ||
+                                 (o.delivery_status === 'cancelled' && o.status === 'paid'),
     }));
 
     // Sort descending by created_at
@@ -823,19 +833,20 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       return respondError(res, "Order not found.", 404);
     }
 
-    const STATUS_FLOW = [
-      "placed",
-      "processing",
-      "shipped",
-      "in_transit",
-      "delivered",
-    ];
-    const currentStatus = order.delivery_status;
+    const previousState = { ...order };
 
-    if (currentStatus === "cancelled") {
+    // Enforce forward-only transitions on delivery_status
+    assertForwardOnly(order.delivery_status || 'placed', delivery_status);
+
+    // Enforce shipping lock (cannot change status of shipped+ orders backward)
+    if (['shipped', 'in_transit', 'delivered'].includes(order.delivery_status)) {
+      assertCancellable(order);
+    }
+
+    if (order.status === "cancelled" || order.status === "refunded") {
       return respondError(
         res,
-        "Cannot change status of a cancelled order.",
+        "Cannot change status of a cancelled or refunded order.",
         400,
       );
     }
@@ -847,29 +858,6 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       return respondError(
         res,
         "Cannot change status of an order with an active refund.",
-        400,
-      );
-    }
-
-    if (order.status === "cancelled" || order.status === "refunded") {
-      return respondError(
-        res,
-        "Cannot change status of a cancelled or refunded order.",
-        400,
-      );
-    }
-
-    const currentIndex = STATUS_FLOW.indexOf(currentStatus);
-    const newIndex = STATUS_FLOW.indexOf(delivery_status);
-
-    if (newIndex === -1 && delivery_status !== "cancelled") {
-      return respondError(res, "Invalid delivery status.", 400);
-    }
-
-    if (delivery_status !== "cancelled" && newIndex < currentIndex) {
-      return respondError(
-        res,
-        "Cannot move order status backward to a previous stage.",
         400,
       );
     }
@@ -894,6 +882,14 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       }
     }
 
+    // Track shipped_at and delivered_at timestamps
+    if (delivery_status === 'shipped' && !order.shipped_at) {
+      updatePayload.shipped_at = new Date().toISOString();
+    }
+    if (delivery_status === 'delivered' && !order.delivered_at) {
+      updatePayload.delivered_at = new Date().toISOString();
+    }
+
     if (!order.invoice_token) {
       updatePayload.invoice_token = crypto.randomBytes(12).toString("hex");
     }
@@ -906,6 +902,37 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
 
     if (error) {
       return respondError(res, error.message || "Failed to update order", 500);
+    }
+
+    const newState = { ...updatedOrder };
+
+    // Audit log
+    logAuditAction({
+      orderId: order.id,
+      action: AUDIT_ACTIONS.STATUS_CHANGED,
+      performedBy: req.user,
+      previousState: { delivery_status: previousState.delivery_status },
+      newState: { delivery_status: delivery_status },
+      metadata: { delivery_days_text },
+    }).catch(() => {});
+
+    // Notification
+    const eventMap = {
+      'shipped': 'ORDER_SHIPPED',
+      'delivered': 'ORDER_DELIVERED',
+    };
+    if (eventMap[delivery_status]) {
+      const { data: user } = await db
+        .from("users")
+        .select("*")
+        .eq("id", order.user_id)
+        .single()
+        .catch(() => ({}));
+      if (user) {
+        notify(eventMap[delivery_status], updatedOrder, user, {
+          eta: delivery_days_text,
+        }).catch(() => {});
+      }
     }
 
     // Emit SSE event for updated order (admins + order owner)
@@ -1116,12 +1143,14 @@ router.get("/:id/invoice", authMiddleware, async (req, res) => {
       );
     }
 
-    if (
-      !["shipped", "in_transit", "delivered"].includes(order.delivery_status)
-    ) {
+    // Invoice visibility rules (see implementation plan §10)
+    const isShippedOrLater = ["shipped", "in_transit", "delivered"].includes(order.delivery_status);
+    const isCancelledPaid = order.delivery_status === "cancelled" && order.status === "paid";
+
+    if (!isShippedOrLater && !(isAdmin && isCancelledPaid)) {
       return respondError(
         res,
-        "Invoice can only be generated after the order is shipped.",
+        "Invoice is not yet available for this order.",
         403,
       );
     }
@@ -1171,7 +1200,7 @@ router.get("/share/:token", async (req, res) => {
     }
 
     if (
-      !["placed", "processing", "shipped", "in_transit", "delivered"].includes(order.delivery_status)
+      !["shipped", "in_transit", "delivered"].includes(order.delivery_status)
     ) {
       return res
         .status(403)
@@ -1579,6 +1608,16 @@ router.post(
     try {
       const { reason } = req.body;
 
+      // Lock check: cannot cancel shipped orders
+      const { data: order } = await db
+        .from("orders")
+        .select("*")
+        .eq("id", req.params.id)
+        .single();
+      if (order) {
+        assertCancellable(order);
+      }
+
       const { requestCustomerCancellation } = require("../modules/refunds/RefundService");
       const updatedOrder = await requestCustomerCancellation(req.params.id, req.user.userId, reason);
 
@@ -1629,6 +1668,92 @@ router.get("/:id", authMiddleware, async (req, res) => {
     return success(res, order);
   } catch (error) {
     return respondError(res, error.message || "Failed to fetch order", 500);
+  }
+});
+
+// POST /api/orders/admin/approve/:id
+// Admin approves a PENDING_APPROVAL order → PLACED
+router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
+    const { adminNote } = req.body;
+    const updatedOrder = await refundService.approveOrder(req.params.id, adminNote || "", req.user);
+
+    // SSE broadcast
+    try {
+      sendSseEvent(
+        "order:updated",
+        { order: updatedOrder },
+        (sub) =>
+          (sub.user && sub.user.role === "admin") ||
+          (sub.user && sub.user.userId === updatedOrder.user_id),
+      );
+    } catch (e) { /* ignore */ }
+
+    return success(res, {
+      message: "Order approved successfully.",
+      order: updatedOrder,
+    });
+  } catch (err) {
+    return respondError(res, err.message || "Failed to approve order", 500);
+  }
+});
+
+// POST /api/orders/admin/reject/:id
+// Admin rejects a PENDING_APPROVAL order → REJECTED
+const rejectOrderSchema = Joi.object({
+  reason: Joi.string().trim().min(1).max(500).required().messages({
+    "string.empty": "Rejection reason is required.",
+    "any.required": "Rejection reason is required."
+  }),
+  adminNote: Joi.string().trim().max(500).optional()
+});
+
+router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema), async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
+    const { reason, adminNote } = req.body;
+    const updatedOrder = await refundService.rejectOrder(req.params.id, reason, adminNote || "", req.user);
+
+    // SSE broadcast
+    try {
+      sendSseEvent(
+        "order:updated",
+        { order: updatedOrder },
+        (sub) =>
+          (sub.user && sub.user.role === "admin") ||
+          (sub.user && sub.user.userId === updatedOrder.user_id),
+      );
+    } catch (e) { /* ignore */ }
+
+    return success(res, {
+      message: "Order rejected.",
+      order: updatedOrder,
+    });
+  } catch (err) {
+    return respondError(res, err.message || "Failed to reject order", 500);
+  }
+});
+
+// GET /api/orders/admin/:id/audit-logs
+// Admin: get audit logs for a specific order
+router.get("/admin/:id/audit-logs", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
+    const { getAuditLogs } = require("../services/AuditLogService");
+    const logs = await getAuditLogs(req.params.id);
+    return success(res, logs || []);
+  } catch (err) {
+    return respondError(res, err.message || "Failed to fetch audit logs", 500);
   }
 });
 

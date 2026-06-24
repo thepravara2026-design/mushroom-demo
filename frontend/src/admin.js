@@ -161,7 +161,7 @@ function initAdminSse() {
       try {
         const payload = JSON.parse(ev.data || '{}');
         if (state.user?.role === 'admin') {
-          // Only reload if the refunds tab is currently active
+          fetchAdminOrders();
           const refundsContent = document.getElementById('admin-content-refunds');
           if (refundsContent?.classList.contains('active')) {
             loadRefundsDashboard();
@@ -1504,7 +1504,8 @@ async function fetchAdminOrders() {
       }
     }
 
-    renderAdminOrders(orders);
+    updateSectionCounts(orders);
+    renderCurrentSection();
     renderAdminHistory();
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
@@ -1633,22 +1634,51 @@ function renderAdminOrders(orders) {
         cancelled: '❌',
       };
 
+      const manualRefundStatuses = ['MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
+      const refundStatuses = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED', ...manualRefundStatuses];
+      const cancelStatuses = ['CANCEL_REQUESTED', 'CANCEL_APPROVED', 'CANCEL_REJECTED'];
       const isCancelRequested = o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED';
+      const isRefundState = refundStatuses.includes(o.status);
+      const isCancelState = cancelStatuses.includes(o.status);
 
+      function getAdminBadge(status) {
+        const map = {
+          'CANCEL_REQUESTED': { bg: '#fffbeb', color: '#d97706', label: '⚠️ Cancel Requested' },
+          'CANCEL_APPROVED': { bg: '#ecfdf5', color: '#10b981', label: '✅ Cancel Approved' },
+          'CANCEL_REJECTED': { bg: '#fef2f2', color: '#ef4444', label: '❌ Cancel Rejected' },
+          'REFUND_PENDING': { bg: '#eff6ff', color: '#3b82f6', label: '🔄 Refund Pending' },
+          'REFUND_INITIATED': { bg: '#f5f3ff', color: '#8b5cf6', label: '🔄 Refund Initiated' },
+          'REFUND_PROCESSING': { bg: '#f5f3ff', color: '#8b5cf6', label: '🔄 Refund Processing' },
+          'REFUND_COMPLETED': { bg: '#ecfdf5', color: '#10b981', label: '✅ Refund Completed' },
+          'REFUND_FAILED': { bg: '#fef2f2', color: '#ef4444', label: '❌ Refund Failed' },
+          'MANUAL_REFUND_INITIATED': { bg: '#fffbeb', color: '#d97706', label: '🔄 Manual Refund Initiated' },
+          'MANUAL_REFUND_COMPLETED': { bg: '#ecfdf5', color: '#10b981', label: '✅ Manual Refund Completed' },
+        };
+        return map[status] || null;
+      }
+
+      let badgeHtml;
+      if (isCancelRequested) {
+        badgeHtml = `<span class="aoc-badge aoc-badge--warning" style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700;">⚠️ Cancel Requested</span>`;
+      } else if (isRefundState || isCancelState) {
+        const b = getAdminBadge(o.status);
+        badgeHtml = b ? `<span class="aoc-badge" style="background:${b.bg};color:${b.color};border:1px solid;font-weight:700;">${b.label}</span>` : '';
+      } else {
+        badgeHtml = `<span class="aoc-badge aoc-badge--${o.delivery_status === 'cancelled' ? 'cancelled' : o.delivery_status}">
+             ${o.delivery_status === 'cancelled' ? '' : statusEmoji[o.delivery_status] || ''} ${o.delivery_status === 'cancelled' ? 'Cancelled' : o.delivery_status}
+           </span>`;
+      }
+
+      const itemCount = Array.isArray(o.items) ? o.items.length : 0;
       return `
-      <div class="aoc-card ${o.delivery_status === 'cancelled' ? 'aoc-card--cancelled' : ''}" data-id="${o.id}">
+      <div class="aoc-card ${o.delivery_status === 'cancelled' || isRefundState ? 'aoc-card--cancelled' : ''}" data-id="${o.id}">
         <div class="aoc-row" onclick="globalThis.toggleOrderExpand(this)">
           <span class="aoc-id">#${o.id}</span>
           <span class="aoc-customer">${customerName}</span>
           <span class="aoc-summary-meta">
-            ${date} · ${o.items.length} item${o.items.length > 1 ? 's' : ''} · ₹${o.total.toFixed(2)}
+            ${date} · ${itemCount} item${itemCount > 1 ? 's' : ''} · ₹${Number(o.total || 0).toFixed(2)}
           </span>
-          ${isCancelRequested
-            ? `<span class="aoc-badge aoc-badge--warning" style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700;">⚠️ Cancel Requested</span>`
-            : `<span class="aoc-badge aoc-badge--${o.delivery_status === 'cancelled' ? 'cancelled' : o.delivery_status}">
-                 ${o.delivery_status === 'cancelled' ? '' : statusEmoji[o.delivery_status] || ''} ${o.delivery_status === 'cancelled' ? 'Cancelled' : o.delivery_status}
-               </span>`
-          }
+          ${badgeHtml}
           <span class="aoc-chev">${'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'}</span>
         </div>
 
@@ -1683,11 +1713,59 @@ function renderAdminOrders(orders) {
                     </div>
                   </div>
                 `
-          : o.delivery_status === 'cancelled'
+          : o.status === 'REFUND_FAILED'
           ? `
                   <div class="aoc-cancelled-box">
-                    <span class="aoc-cancelled-title">Cancelled by ${o.cancelled_by === 'admin' ? 'admin' : 'user'}</span>
-                    <span class="aoc-cancelled-why">${o.cancel_reason || 'Reason not provided'}</span>
+                    <span class="aoc-cancelled-title" style="color:#ef4444;">❌ Auto Refund Failed</span>
+                    ${o.cancel_reason ? `<span class="aoc-cancelled-why">${o.cancel_reason}</span>` : ''}
+                    <span class="aoc-cancelled-why" style="margin-top:6px;color:#8b5cf6;"><strong>Refund:</strong> auto refund failed</span>
+                    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                      <button class="btn btn-primary" style="background:#d97706;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminManualRefundInitiate('${o.id}')">
+                        <i class="fa-solid fa-hand-holding-dollar"></i> Manual Refund
+                      </button>
+                      <button class="btn btn-primary" style="background:#3b82f6;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminViewRefundDetails('${o.id}')">
+                        <i class="fa-solid fa-eye"></i> View Details
+                      </button>
+                    </div>
+                  </div>
+                `
+          : o.status === 'MANUAL_REFUND_INITIATED'
+          ? `
+                  <div class="aoc-cancelled-box">
+                    <span class="aoc-cancelled-title" style="color:#d97706;">🔄 Manual Refund Initiated</span>
+                    ${o.cancel_reason ? `<span class="aoc-cancelled-why">${o.cancel_reason}</span>` : ''}
+                    <span class="aoc-cancelled-why" style="margin-top:6px;color:#8b5cf6;"><strong>Refund:</strong> manual — pending completion</span>
+                    ${o.manual_refund_payment_mode ? `<span class="aoc-cancelled-why" style="margin-top:4px;color:#e2e8f0;font-size:0.78rem;"><strong>Payment Mode:</strong> ${o.manual_refund_payment_mode.replace(/_/g, ' ')}${o.manual_refund_payment_details ? ' — ' + o.manual_refund_payment_details : ''}</span>` : ''}
+                    <div style="display:flex;gap:8px;margin-top:12px;">
+                      <button class="btn btn-primary" style="background:#10b981;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminManualRefundComplete('${o.id}')">
+                        <i class="fa-solid fa-circle-check"></i> Mark Completed
+                      </button>
+                      <button class="btn btn-primary" style="background:#3b82f6;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminViewRefundDetails('${o.id}')">
+                        <i class="fa-solid fa-eye"></i> View Details
+                      </button>
+                    </div>
+                  </div>
+                `
+          : o.status === 'MANUAL_REFUND_COMPLETED'
+          ? `
+                  <div class="aoc-cancelled-box">
+                    <span class="aoc-cancelled-title" style="color:#10b981;">✅ Manual Refund Completed</span>
+                    ${o.cancel_reason ? `<span class="aoc-cancelled-why">${o.cancel_reason}</span>` : ''}
+                    <span class="aoc-cancelled-why" style="margin-top:6px;color:#8b5cf6;"><strong>Refund:</strong> manual — completed</span>
+                    ${o.manual_refund_payment_mode ? `<span class="aoc-cancelled-why" style="margin-top:4px;color:#e2e8f0;font-size:0.78rem;"><strong>Payment Mode:</strong> ${o.manual_refund_payment_mode.replace(/_/g, ' ')}${o.manual_refund_payment_details ? ' — ' + o.manual_refund_payment_details : ''}</span>` : ''}
+                    <div style="display:flex;gap:8px;margin-top:12px;">
+                      <button class="btn btn-primary" style="background:#3b82f6;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminViewRefundDetails('${o.id}')">
+                        <i class="fa-solid fa-eye"></i> View Details
+                      </button>
+                    </div>
+                  </div>
+                `
+          : o.delivery_status === 'cancelled' || isRefundState || isCancelState
+          ? `
+                  <div class="aoc-cancelled-box">
+                    <span class="aoc-cancelled-title">${o.status === 'CANCEL_REJECTED' ? 'Cancellation Rejected' : 'Cancelled by ' + (o.cancelled_by === 'admin' ? 'admin' : 'user')}</span>
+                    ${o.cancel_reason ? `<span class="aoc-cancelled-why">${o.cancel_reason}</span>` : ''}
+                    ${o.refund_status && o.refund_status !== 'none' ? `<span class="aoc-cancelled-why" style="margin-top:6px;color:#8b5cf6;"><strong>Refund:</strong> ${o.refund_status.replace(/_/g, ' ')}${o.total_refunded_amount ? ' — ₹' + Number(o.total_refunded_amount).toFixed(2) : ''}</span>` : ''}
                   </div>
                 `
           : `
@@ -1706,7 +1784,7 @@ function renderAdminOrders(orders) {
                       </select>
                     </div>
                   </div>
-                  ${!["shipped", "in_transit", "delivered", "cancelled"].includes(o.delivery_status) ? `
+                  ${!["shipped", "in_transit", "delivered", "cancelled"].includes(o.delivery_status) && !isRefundState && !isCancelState ? `
                   <div class="aoc-cancel-controls">
                     <button class="aoc-btn-cancel" style="background:#ef4444;border-color:#ef4444;color:#fff;padding:8px 16px;font-size:0.82rem;" onclick="globalThis.adminDirectCancelModal('${o.id}')">
                       <i class="fa-solid fa-ban"></i> Cancel & Refund
@@ -1714,13 +1792,20 @@ function renderAdminOrders(orders) {
                   </div>` : ''}
                 `}
 
-                <div class="aoc-summary">
-                  <div><span>Total</span><strong>₹${o.total.toFixed(2)}</strong></div>
-                  <div><span>Payment</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
-                  <div><span>Transaction</span><strong title="${o.transaction_id || o.razorpay_payment_id || 'Pending'}">${(o.transaction_id || o.razorpay_payment_id || 'Pending').substring(0, 16)}${((o.transaction_id || o.razorpay_payment_id || 'Pending').length > 16) ? '…' : ''}</strong></div>
-                </div>
+                  <div class="aoc-summary">
+                    <div><span>Total</span><strong>₹${Number(o.total || 0).toFixed(2)}</strong></div>
+                    <div><span>Payment</span><strong>${o.payment_method || (o.razorpay_order_id ? 'Razorpay' : 'Pending')}</strong></div>
+                    <div><span>Transaction</span><strong title="${o.transaction_id || o.razorpay_payment_id || 'Pending'}">${(o.transaction_id || o.razorpay_payment_id || 'Pending').substring(0, 16)}${((o.transaction_id || o.razorpay_payment_id || 'Pending').length > 16) ? '…' : ''}</strong></div>
+                    ${o.refund_status && o.refund_status !== 'none' ? `<div><span>Refund</span><strong style="color:#8b5cf6;">${o.refund_status.replace(/_/g, ' ')}${o.total_refunded_amount ? ' — ₹' + Number(o.total_refunded_amount).toFixed(2) : ''}</strong></div>` : ''}
+                  </div>
 
-                ${invoiceLink && ['placed', 'processing', 'shipped', 'in_transit', 'delivered'].includes(o.delivery_status)
+                ${invoiceLink && (function showInvoiceForAdmin(o) {
+                  const shippingStatuses = ['shipped', 'in_transit', 'delivered'];
+                  if (shippingStatuses.includes(o.delivery_status)) return true;
+                  // Cancelled + paid → admin sees invoice
+                  if (o.delivery_status === 'cancelled' && (o.status === 'paid' || o.payment_status === 'paid')) return true;
+                  return false;
+                })(o)
           ? `
                   <div class="aoc-actions">
                     <button class="aoc-btn" onclick="globalThis.open('${invoiceLink}','_blank')" title="View Invoice">📄</button>
@@ -1745,6 +1830,337 @@ function renderAdminOrders(orders) {
 
   wrap.innerHTML = pendingSectionHtml + listHtml;
 }
+
+/* ── 12-Section Switching ── */
+let currentSection = 'all';
+
+function updateSectionCounts(orders) {
+  const allOrders = orders || adminOrdersCache;
+  const countMap = {
+    new_orders: allOrders.filter(o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
+    placed: allOrders.filter(o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
+    processing: allOrders.filter(o => o.delivery_status === 'processing' && !['cancelled'].includes(o.delivery_status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
+    shipping: allOrders.filter(o => ['shipped','in_transit'].includes(o.delivery_status)).length,
+    delivered: allOrders.filter(o => o.delivery_status === 'delivered').length,
+    cancel_requests: allOrders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED').length,
+    cancelled: allOrders.filter(o => o.delivery_status === 'cancelled' && !['REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
+  };
+  Object.entries(countMap).forEach(([key, count]) => {
+    const el = document.getElementById(`sec-count-${key}`);
+    if (el) {
+      el.textContent = count;
+      el.classList.toggle('zero', count === 0);
+    }
+  });
+}
+
+function switchSection(section) {
+  currentSection = section;
+  document.querySelectorAll('.admin-section-pill').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.admin-section-pill[data-section="${section}"]`)?.classList.add('active');
+  renderCurrentSection();
+}
+
+function renderCurrentSection() {
+  const orders = adminOrdersCache || [];
+  updateSectionCounts(orders);
+
+  const refundStatuses = ['REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
+  const shippingStatuses = ['shipped','in_transit'];
+
+  const sectionFilters = {
+    new_orders: o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !refundStatuses.includes(o.status),
+    placed: o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundStatuses.includes(o.status) && o.status !== 'CANCEL_REQUESTED',
+    processing: o => o.delivery_status === 'processing' && !refundStatuses.includes(o.status),
+    shipping: o => shippingStatuses.includes(o.delivery_status),
+    delivered: o => o.delivery_status === 'delivered',
+    cancel_requests: o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED',
+    cancelled: o => o.delivery_status === 'cancelled' && !refundStatuses.includes(o.status),
+  };
+
+  const filterFn = sectionFilters[section];
+  if (!filterFn) {
+    // Fallback for refund sections — use existing refund filter
+    renderAdminOrders(orders);
+    return;
+  }
+
+  const filtered = orders.filter(filterFn);
+
+  if (section === 'new_orders') {
+    renderNewOrdersSection(filtered);
+  } else if (section === 'cancel_requests') {
+    renderCancelRequestsSection(filtered);
+  } else {
+    renderAdminOrders(filtered);
+  }
+}
+
+function renderNewOrdersSection(orders) {
+  const wrap = document.getElementById('admin-orders-list');
+  if (!wrap) return;
+
+  if (!orders.length) {
+    wrap.innerHTML = '<div class="admin-loading">No new orders pending approval.</div>';
+    return;
+  }
+
+  const headerHtml = `
+    <div class="admin-section-actions-bar">
+      <span class="section-title"><i class="fa-solid fa-sparkles"></i> Pending Approval</span>
+      <span class="section-count-badge">${orders.length}</span>
+      <span style="font-size:0.78rem;color:#6b7280;margin-left:4px;">Orders awaiting admin review</span>
+    </div>
+  `;
+
+  const cardsHtml = orders.map(o => {
+    const date = new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const customerName = o.customer_name || o.user_email || 'Customer';
+    const phone = o.delivery_phone || 'Not specified';
+    const address = o.delivery_address || 'Address not provided';
+    const orderItems = Array.isArray(o.items) ? o.items : [];
+    const itemCount = orderItems.length;
+    const items = orderItems.map(it => `${it.name} × ${it.quantity}`).join(', ');
+
+    return `
+      <div class="pending-approval-card">
+        <div class="pa-info">
+          <span class="pa-order-id">#${o.id}</span>
+          <span class="pa-meta">${customerName} · ${phone} · ${date}</span>
+          <span class="pa-meta" style="font-size:0.75rem;">₹${Number(o.total || 0).toFixed(2)} · ${o.payment_method || 'Razorpay'} · ${itemCount} item${itemCount > 1 ? 's' : ''}</span>
+          ${items ? `<span class="pa-meta" style="font-size:0.72rem;color:#9ca3af;">${items}</span>` : ''}
+          ${address ? `<span class="pa-meta" style="font-size:0.72rem;color:#9ca3af;">${address}</span>` : ''}
+        </div>
+        <div class="pa-actions">
+          <button class="btn btn-primary" style="background:#1a9650;border:none;padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminOrderApproveModal('${o.id}')">
+            <i class="fa-solid fa-check"></i> Approve
+          </button>
+          <button class="btn btn-cancel" style="padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminOrderRejectModal('${o.id}')">
+            <i class="fa-solid fa-xmark"></i> Reject
+          </button>
+          <button class="btn btn-secondary" style="padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminViewRefundDetails('${o.id}')">
+            <i class="fa-solid fa-eye"></i> View
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  wrap.innerHTML = headerHtml + cardsHtml;
+}
+
+function renderCancelRequestsSection(orders) {
+  // Reuse the existing renderAdminOrders which already has cancel request handling
+  renderAdminOrders(orders);
+}
+
+/* ── Order Approve Modal (PENDING_APPROVAL) ── */
+async function adminOrderApproveModal(orderId) {
+  const existing = document.getElementById('admin-order-approve-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'admin-order-approve-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML = `
+    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.3);border-radius:16px;max-width:440px;width:100%;padding:28px;color:#e2e8f0;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:1.1rem;color:#38b17b;"><i class="fa-solid fa-circle-check"></i> Approve Order</h3>
+        <button onclick="document.getElementById('admin-order-approve-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
+      </div>
+      <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
+        Approve Order <strong style="color:#38b17b;">#${orderId}</strong>? The order will move to <strong>Placed</strong> and the customer will be notified.
+      </p>
+      <div class="input-field" style="margin-bottom:18px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
+        <textarea id="admin-order-approve-note" rows="2" placeholder="Note to customer..." style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('admin-order-approve-modal').remove()">Cancel</button>
+        <button class="btn btn-primary" id="admin-order-approve-confirm" style="background:#38b17b;border:none;">Approve Order</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#admin-order-approve-confirm').addEventListener('click', async () => {
+    const adminNote = modal.querySelector('#admin-order-approve-note').value.trim();
+    modal.remove();
+
+    try {
+      await fetchWithAuth(`/orders/admin/approve/${orderId}`, {
+        method: 'POST',
+        body: JSON.stringify({ adminNote }),
+      });
+      showSuccessToast('✅ Order approved. Customer notified.');
+      fetchAdminOrders();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Failed to approve order.');
+    }
+  });
+}
+globalThis.adminOrderApproveModal = adminOrderApproveModal;
+
+/* ── Order Reject Modal (PENDING_APPROVAL) ── */
+async function adminOrderRejectModal(orderId) {
+  const existing = document.getElementById('admin-order-reject-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'admin-order-reject-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  const rejectReasons = [
+    { value: 'suspicious_payment', label: 'Suspicious payment' },
+    { value: 'address_not_serviceable', label: 'Address not serviceable' },
+    { value: 'duplicate_order', label: 'Duplicate order' },
+    { value: 'product_out_of_stock', label: 'Product out of stock' },
+    { value: 'other', label: 'Other' },
+  ];
+
+  modal.innerHTML = `
+    <div style="background:#1a0f0f;border:1px solid rgba(239,68,68,0.3);border-radius:16px;max-width:440px;width:100%;padding:28px;color:#e2e8f0;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:1.1rem;color:#ef4444;"><i class="fa-solid fa-ban"></i> Reject Order</h3>
+        <button onclick="document.getElementById('admin-order-reject-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
+      </div>
+      <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
+        Reject Order <strong style="color:#ef4444;">#${orderId}</strong>? The customer will be notified and inventory will be restored.
+      </p>
+      <div class="input-field" style="margin-bottom:12px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Reason for Rejection *</label>
+        <select id="admin-order-reject-reason" style="width:100%;padding:10px;border-radius:8px;background:#1f1414;border:1px solid rgba(239,68,68,0.3);color:#e2e8f0;">
+          <option value="">Select a reason</option>
+          ${rejectReasons.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="input-field hidden" id="admin-order-reject-other-wrap" style="margin-bottom:12px;display:none;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Custom Reason</label>
+        <textarea id="admin-order-reject-other" rows="2" placeholder="Enter rejection reason..." style="width:100%;padding:10px;border-radius:8px;background:#1f1414;border:1px solid rgba(239,68,68,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div class="input-field" style="margin-bottom:18px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
+        <textarea id="admin-order-reject-note" rows="2" placeholder="Internal note..." style="width:100%;padding:10px;border-radius:8px;background:#1f1414;border:1px solid rgba(239,68,68,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('admin-order-reject-modal').remove()">Cancel</button>
+        <button class="btn btn-cancel" id="admin-order-reject-confirm" style="background:#ef4444;border:none;color:#fff;">Reject Order</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const reasonSelect = modal.querySelector('#admin-order-reject-reason');
+  const otherWrap = modal.querySelector('#admin-order-reject-other-wrap');
+  const otherInput = modal.querySelector('#admin-order-reject-other');
+
+  reasonSelect.addEventListener('change', () => {
+    otherWrap.style.display = reasonSelect.value === 'other' ? 'block' : 'none';
+  });
+
+  modal.querySelector('#admin-order-reject-confirm').addEventListener('click', async () => {
+    let reason = reasonSelect.value;
+    if (!reason) {
+      showErrorToast('Please select a rejection reason.');
+      return;
+    }
+    if (reason === 'other') {
+      reason = otherInput.value.trim();
+      if (!reason) {
+        showErrorToast('Please enter a custom rejection reason.');
+        return;
+      }
+    }
+    const adminNote = modal.querySelector('#admin-order-reject-note').value.trim();
+    modal.remove();
+
+    try {
+      await fetchWithAuth(`/orders/admin/reject/${orderId}`, {
+        method: 'POST',
+        body: JSON.stringify({ reason, adminNote }),
+      });
+      showSuccessToast('Order rejected. Customer notified.');
+      fetchAdminOrders();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Failed to reject order.');
+    }
+  });
+}
+globalThis.adminOrderRejectModal = adminOrderRejectModal;
+
+/* ── Audit Log Viewer ── */
+async function adminToggleAuditLog(orderId, btnEl) {
+  const container = btnEl.nextElementSibling;
+  if (!container) return;
+
+  if (container.classList.contains('open')) {
+    container.classList.remove('open');
+    btnEl.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> Audit Log';
+    return;
+  }
+
+  btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+
+  try {
+    const logs = await fetchWithAuth(`/orders/admin/${orderId}/audit-logs`);
+    const list = container.querySelector('.admin-audit-log-list') || document.createElement('div');
+    list.className = 'admin-audit-log-list';
+
+    if (!logs || !logs.length) {
+      list.innerHTML = '<div style="padding:8px;color:#6b7280;font-size:0.8rem;">No audit log entries found.</div>';
+    } else {
+      list.innerHTML = logs.map(log => {
+        const time = log.created_at ? new Date(log.created_at).toLocaleString() : '—';
+        const detail = log.metadata ? Object.entries(log.metadata).map(([k,v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ') : '';
+        return `
+          <div class="admin-audit-log-entry">
+            <span class="al-time">${time}</span>
+            <span class="al-action">${log.action || '—'}</span>
+            <span class="al-by">by ${log.performed_by || 'system'}</span>
+            ${detail ? `<span class="al-detail">${detail}</span>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    if (!container.querySelector('.admin-audit-log-list')) {
+      container.appendChild(list);
+    }
+
+    container.classList.add('open');
+    btnEl.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> Audit Log';
+  } catch (err) {
+    showErrorToast('Failed to load audit logs.');
+    btnEl.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> Audit Log';
+  }
+}
+globalThis.adminToggleAuditLog = adminToggleAuditLog;
+
+/* ── Attach audit log toggles to order cards ── */
+function attachAuditLogToggles() {
+  document.querySelectorAll('.aoc-card').forEach(card => {
+    const orderId = card.dataset.id;
+    if (!orderId) return;
+    const existingToggle = card.querySelector('.admin-audit-log-wrap');
+    if (existingToggle) return;
+
+    const detailInner = card.querySelector('.aoc-detail-inner');
+    if (!detailInner) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'admin-audit-log-wrap';
+    wrap.innerHTML = `
+      <button class="admin-audit-log-toggle" onclick="globalThis.adminToggleAuditLog('${orderId}', this)">
+        <i class="fa-solid fa-clock-rotate-left"></i> Audit Log
+      </button>
+      <div class="admin-audit-log-container"></div>
+    `;
+    detailInner.appendChild(wrap);
+  });
+}
+
+// Override renderAdminOrders wrapper to attach audit logs after rendering
+const origRenderAdminOrders = window.renderAdminOrders || renderAdminOrders;
 /*
 function copyInvoiceLink(token) {
   if (!token) return;
@@ -3318,6 +3734,8 @@ function getRefundStatusBadge(status) {
     processed: { bg: 'rgba(16,185,129,0.18)', color: '#10b981', label: 'Processed' },
     failed: { bg: 'rgba(239,68,68,0.18)', color: '#ef4444', label: 'Failed' },
     pending: { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b', label: 'Pending' },
+    manual_initiated: { bg: 'rgba(245,158,11,0.15)', color: '#d97706', label: 'Manual Initiated' },
+    manual_completed: { bg: 'rgba(16,185,129,0.18)', color: '#10b981', label: 'Manual Completed' },
   };
   const s = map[status] || { bg: 'rgba(100,116,139,0.12)', color: '#94a3b8', label: status || 'Unknown' };
   return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">${s.label}</span>`;
@@ -3333,6 +3751,8 @@ function getOrderStatusBadge(status) {
     REFUND_PROCESSING: { color: '#8b5cf6', label: 'Refund Processing' },
     REFUND_COMPLETED: { color: '#10b981', label: 'Refund Done' },
     REFUND_FAILED: { color: '#ef4444', label: 'Refund Failed' },
+    MANUAL_REFUND_INITIATED: { color: '#d97706', label: 'Manual Refund Initiated' },
+    MANUAL_REFUND_COMPLETED: { color: '#10b981', label: 'Manual Refund Completed' },
   };
   const s = map[status] || { color: '#94a3b8', label: status || '-' };
   return `<span style="color:${s.color};font-size:0.72rem;font-weight:600;">${s.label}</span>`;
@@ -3456,6 +3876,8 @@ function renderAuditLogs(logs) {
     REFUND_INITIATED: { icon: 'fa-rotate-right', color: '#8b5cf6' },
     REFUND_COMPLETED: { icon: 'fa-circle-check', color: '#10b981' },
     REFUND_FAILED: { icon: 'fa-triangle-exclamation', color: '#ef4444' },
+    MANUAL_REFUND_INITIATED: { icon: 'fa-hand-holding-dollar', color: '#d97706' },
+    MANUAL_REFUND_COMPLETED: { icon: 'fa-circle-check', color: '#10b981' },
     ADMIN_CANCELLED: { icon: 'fa-user-slash', color: '#ef4444' },
     REFUND_RETRIED: { icon: 'fa-arrow-rotate-right', color: '#3b82f6' },
   };
@@ -3502,8 +3924,15 @@ async function adminApproveRefundModal(orderId) {
         <button onclick="document.getElementById('admin-approve-refund-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
       </div>
       <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
-        You are approving the cancellation request for Order #<strong style="color:#38b17b;">${orderId}</strong>. This will trigger a full refund via Razorpay.
+        You are approving the cancellation request for Order #<strong style="color:#38b17b;">${orderId}</strong>.
       </p>
+      <div class="input-field" style="margin-bottom:14px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Refund Type</label>
+        <select id="admin-approve-refund-type" style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;">
+          <option value="auto">Auto Refund (Razorpay) — 3-7 business days</option>
+          <option value="manual">Manual Refund (Offline) — Bank / UPI / Cash</option>
+        </select>
+      </div>
       <div class="input-field" style="margin-bottom:20px;">
         <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
         <textarea id="admin-approve-refund-note" rows="2" placeholder="Approval notes (sent to user)..." style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
@@ -3518,14 +3947,15 @@ async function adminApproveRefundModal(orderId) {
 
   modal.querySelector('#admin-approve-refund-confirm').addEventListener('click', async () => {
     const adminNote = modal.querySelector('#admin-approve-refund-note').value.trim();
+    const refundType = modal.querySelector('#admin-approve-refund-type').value;
     modal.remove();
 
     try {
       await fetchWithAuth(`/refunds/cancel-requests/${orderId}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ adminNote }),
+        body: JSON.stringify({ adminNote, refundType }),
       });
-      showSuccessToast('✅ Cancellation approved. Refund initiated.');
+      showSuccessToast(`✅ Cancellation approved. ${refundType === 'manual' ? 'Manual refund initiated.' : 'Auto refund initiated.'}`);
       fetchAdminOrders();
       loadRefundsDashboard();
     } catch (err) {
@@ -3595,6 +4025,120 @@ async function adminRetryRefund(orderId) {
   }
 }
 globalThis.adminRetryRefund = adminRetryRefund;
+
+function adminManualRefundInitiate(orderId) {
+  const existing = document.getElementById('admin-manual-refund-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'admin-manual-refund-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML = `
+    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.3);border-radius:16px;max-width:480px;width:100%;padding:28px;color:#e2e8f0;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+        <h3 style="margin:0;font-size:1.15rem;color:#d97706;"><i class="fa-solid fa-hand-holding-dollar"></i> Manual Refund</h3>
+        <button onclick="document.getElementById('admin-manual-refund-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
+      </div>
+      <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
+        Initiate manual refund for Order #<strong style="color:#38b17b;">${orderId}</strong>. Select the payment mode used for the offline refund.
+      </p>
+      <div class="input-field" style="margin-bottom:14px;">
+        <label style="color:#f59e0b;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Payment Mode *</label>
+        <select id="manual-refund-payment-mode" style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;">
+          <option value="">— Select payment mode —</option>
+          <option value="bank_transfer">Bank Transfer</option>
+          <option value="upi">UPI</option>
+          <option value="cash">Cash</option>
+          <option value="cheque">Cheque</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="input-field" style="margin-bottom:14px;">
+        <label style="color:#e2e8f0;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Payment Details / Reference</label>
+        <input type="text" id="manual-refund-payment-details" placeholder="e.g. UTR number, cheque no, bank ref..." style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;" />
+      </div>
+      <div class="input-field" style="margin-bottom:20px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
+        <textarea id="manual-refund-admin-note" rows="2" placeholder="Internal notes..." style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('admin-manual-refund-modal').remove()">Cancel</button>
+        <button class="btn btn-primary" id="admin-manual-refund-confirm" style="background:#d97706;border:none;color:#0d1f1a;font-weight:700;">Initiate Manual Refund</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#admin-manual-refund-confirm').addEventListener('click', async () => {
+    const paymentMode = modal.querySelector('#manual-refund-payment-mode').value;
+    const paymentDetails = modal.querySelector('#manual-refund-payment-details').value.trim();
+    const adminNote = modal.querySelector('#manual-refund-admin-note').value.trim();
+
+    if (!paymentMode) { showErrorToast('Please select a payment mode.'); return; }
+
+    modal.remove();
+
+    try {
+      const result = await fetchWithAuth(`/refunds/manual-refund/${orderId}/initiate`, {
+        method: 'POST',
+        body: JSON.stringify({ paymentMode, paymentDetails, adminNote }),
+      });
+      showSuccessToast('✅ Manual refund initiated. Complete the refund offline and mark as completed.');
+      loadRefundsDashboard();
+      fetchAdminOrders();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Failed to initiate manual refund.');
+    }
+  });
+}
+globalThis.adminManualRefundInitiate = adminManualRefundInitiate;
+
+function adminManualRefundComplete(orderId) {
+  const existing = document.getElementById('admin-manual-refund-complete-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'admin-manual-refund-complete-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
+  modal.innerHTML = `
+    <div style="background:#0d1f1a;border:1px solid rgba(56,177,123,0.3);border-radius:16px;max-width:440px;width:100%;padding:28px;color:#e2e8f0;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+        <h3 style="margin:0;font-size:1.15rem;color:#10b981;"><i class="fa-solid fa-circle-check"></i> Complete Manual Refund</h3>
+        <button onclick="document.getElementById('admin-manual-refund-complete-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
+      </div>
+      <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
+        Confirm that the manual refund for Order #<strong style="color:#38b17b;">${orderId}</strong> has been processed offline.
+      </p>
+      <div class="input-field" style="margin-bottom:20px;">
+        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
+        <textarea id="manual-refund-complete-note" rows="2" placeholder="Completion notes..." style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('admin-manual-refund-complete-modal').remove()">Cancel</button>
+        <button class="btn btn-primary" id="admin-manual-refund-complete-confirm" style="background:#10b981;border:none;color:#0d1f1a;font-weight:700;">Confirm Completion</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#admin-manual-refund-complete-confirm').addEventListener('click', async () => {
+    const adminNote = modal.querySelector('#manual-refund-complete-note').value.trim();
+    modal.remove();
+
+    try {
+      await fetchWithAuth(`/refunds/manual-refund/${orderId}/complete`, {
+        method: 'POST',
+        body: JSON.stringify({ adminNote }),
+      });
+      showSuccessToast('✅ Manual refund marked as completed.');
+      loadRefundsDashboard();
+      fetchAdminOrders();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Failed to complete manual refund.');
+    }
+  });
+}
+globalThis.adminManualRefundComplete = adminManualRefundComplete;
 
 async function adminPartialRefundModal(orderId) {
   const existing = document.getElementById('admin-partial-refund-modal');
@@ -3783,14 +4327,44 @@ async function adminDirectCancelModal(orderId) {
   modal.id = 'admin-direct-cancel-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
   modal.innerHTML = `
-    <div style="background:#0d1f1a;border:1px solid rgba(239,68,68,0.3);border-radius:16px;max-width:480px;width:100%;padding:28px;color:#e2e8f0;box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+    <div style="background:#0d1f1a;border:1px solid rgba(239,68,68,0.3);border-radius:16px;max-width:520px;width:100%;padding:28px;color:#e2e8f0;box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-        <h3 style="margin:0;font-size:1.15rem;color:#f87171;"><i class="fa-solid fa-ban"></i> Direct Cancel & Refund</h3>
+        <h3 style="margin:0;font-size:1.15rem;color:#f87171;"><i class="fa-solid fa-ban"></i> Cancel & Refund</h3>
         <button onclick="document.getElementById('admin-direct-cancel-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
       </div>
-      <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
-        You are about to cancel Order #<strong style="color:#f87171;">${orderId}</strong>. This will auto-initiate a full refund and restock items.
+      <p style="margin:0 0 12px;font-size:0.85rem;color:#94a3b8;line-height:1.5;">
+        Order #<strong style="color:#f87171;">${orderId}</strong> will be cancelled with auto refund via Razorpay.
       </p>
+
+      <div style="display:flex;gap:10px;margin-bottom:18px;padding:12px 14px;background:rgba(15,23,42,0.6);border-radius:12px;border:1px solid rgba(56,177,123,0.12);">
+        <div style="flex:1;text-align:center;">
+          <div style="width:32px;height:32px;border-radius:50%;background:rgba(239,68,68,0.15);color:#f87171;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:0.85rem;"><i class="fa-solid fa-ban"></i></div>
+          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#f87171;">Cancel</div>
+          <div style="font-size:0.62rem;color:#64748b;margin-top:2px;">Order stopped</div>
+        </div>
+        <div style="display:flex;align-items:center;color:#475569;"><i class="fa-solid fa-chevron-right" style="font-size:0.7rem;"></i></div>
+        <div style="flex:1;text-align:center;">
+          <div style="width:32px;height:32px;border-radius:50%;background:rgba(56,177,123,0.15);color:#38b17b;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:0.85rem;"><i class="fa-solid fa-rotate"></i></div>
+          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#38b17b;">Auto Refund</div>
+          <div style="font-size:0.62rem;color:#64748b;margin-top:2px;">Razorpay → Customer</div>
+        </div>
+        <div style="display:flex;align-items:center;color:#475569;"><i class="fa-solid fa-chevron-right" style="font-size:0.7rem;"></i></div>
+        <div style="flex:1;text-align:center;">
+          <div style="width:32px;height:32px;border-radius:50%;background:rgba(245,158,11,0.15);color:#fbbf24;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:0.85rem;"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#fbbf24;">Manual (If Fails)</div>
+          <div style="font-size:0.62rem;color:#64748b;margin-top:2px;">Bank / UPI / Cash</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#94a3b8;margin-bottom:8px;">Refund Process:</div>
+        <div style="display:flex;flex-direction:column;gap:5px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#cbd5e1;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(56,177,123,0.2);color:#38b17b;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-check"></i></span> Razorpay auto-refund initiated immediately</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#cbd5e1;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(56,177,123,0.2);color:#38b17b;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-check"></i></span> Order items auto-restocked</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#94a3b8;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(245,158,11,0.15);color:#fbbf24;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-triangle-exclamation"></i></span> If auto refund fails → <strong style="color:#fbbf24;">Manual Refund</strong> button appears in order card</div>
+        </div>
+      </div>
+
       <div class="input-field" style="margin-bottom:14px;">
         <label style="color:#f87171;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Cancellation Reason *</label>
         <select id="admin-direct-cancel-reason" style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;">
@@ -3811,7 +4385,7 @@ async function adminDirectCancelModal(orderId) {
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;">
         <button class="btn btn-secondary" onclick="document.getElementById('admin-direct-cancel-modal').remove()">Cancel</button>
-        <button class="btn btn-primary" id="admin-direct-cancel-confirm" style="background:#ef4444;border:none;">Confirm Cancel</button>
+        <button class="btn btn-primary" id="admin-direct-cancel-confirm" style="background:#ef4444;border:none;">Confirm Cancel & Refund</button>
       </div>
     </div>
   `;
@@ -4307,28 +4881,39 @@ function setupAdminEventHandlers() {
     });
   });
 
-  // Status pills — current orders
-  document.querySelectorAll('.ship-status-pill').forEach((pill) => {
+  // Status constants (shared)
+  const ACTIVE_STATUSES = ['placed', 'processing', 'shipped', 'in_transit'];
+  const REFUND_STATUSES_ALL = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
+  const REFUND_STATUSES_AUTO = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED'];
+  const REFUND_STATUSES_MANUAL = ['MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
+
+  function getActiveOrders() {
+    return adminOrdersCache.filter((o) => ACTIVE_STATUSES.includes(o.delivery_status));
+  }
+  function getRefundOrders(type) {
+    const map = { all: REFUND_STATUSES_ALL, auto: REFUND_STATUSES_AUTO, manual: REFUND_STATUSES_MANUAL };
+    return adminOrdersCache.filter((o) => (map[type] || REFUND_STATUSES_ALL).includes(o.status));
+  }
+  globalThis.getActiveOrders = getActiveOrders;
+  globalThis.getRefundOrders = getRefundOrders;
+
+  // 12-Section pills
+  document.querySelectorAll('.admin-section-pill').forEach(pill => {
     pill.addEventListener('click', () => {
-      document.querySelectorAll('.ship-status-pill').forEach((p) => p.classList.remove('active'));
-      pill.classList.add('active');
-      const status = pill.dataset.status;
-      if (status === 'all') {
-        renderAdminOrders(adminOrdersCache);
-        return;
-      }
-      const statusMap = {
-        placed: ['placed'],
-        processing: ['processing'],
-        shipped: ['shipped', 'in_transit'],
-        delivered: ['delivered'],
-        cancelled: ['cancelled'],
-      };
-      const allowed = statusMap[status] || [status];
-      const filtered = adminOrdersCache.filter((o) => allowed.includes(o.delivery_status));
-      renderAdminOrders(filtered);
+      const section = pill.dataset.section;
+      if (section) switchSection(section);
     });
   });
+
+  // Refund filter (shown in refund sections only)
+  const refundSelect = document.getElementById('ship-refund-filter-select');
+  if (refundSelect) {
+    refundSelect.addEventListener('change', () => {
+      if (currentSection.startsWith('refund_')) {
+        renderAdminOrders(getRefundOrders(refundSelect.value));
+      }
+    });
+  }
 
   // Recent orders status dropdown-pravara
   const historyStatusFilter = document.getElementById('admin-history-status-filter');
