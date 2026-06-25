@@ -214,123 +214,192 @@
           </div>
           <div id="admin-capsule-add-form" class="admin-capsule-form-wrap" style="display:none;">
             <div class="admin-form-wrap">
-              <form id="form-admin-capsule-add" class="admin-product-form">
+              <form id="form-admin-capsule-add" class="admin-product-form premium-add-form">
                 <input type="hidden" id="admin-capsule-edit-id" value="" />
-                <div class="admin-form-compact-grid">
-                  <div class="input-field">
-                    <label>Category *</label>
-                    <select id="admin-capsule-prod-category" class="admin-select-input"></select>
+
+                <!-- Header -->
+                <div class="premium-form-header">
+                  <div class="premium-form-header-icon">
+                    <i class="fa-solid fa-leaf"></i>
                   </div>
-                  <div class="input-field">
-                    <label>Product ID</label>
-                    <input type="text" id="admin-capsule-prod-id-display" readonly placeholder="Auto-generated" />
+                  <div>
+                    <h2>Publish New Product</h2>
+                    <p>Fill in the details below to list a new mushroom product</p>
                   </div>
-                  <div class="input-field">
-                    <label>Product Name *</label>
-                    <input type="text" id="admin-capsule-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit" />
+                </div>
+
+                <!-- Section 1: Basic Info -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-info-circle"></i>
+                    <h3>Basic Information</h3>
+                    <span>Step 1 of 3</span>
                   </div>
-                  <div class="input-field span-2">
-                    <label>Description *</label>
-                    <textarea id="admin-capsule-prod-desc" required placeholder="Product details, cultivation notes..." class="admin-textarea-compact"></textarea>
+                  <div class="premium-form-row">
+                    <div class="premium-field">
+                      <label>Category <span class="required-star">*</span></label>
+                      <select id="admin-capsule-prod-category"></select>
+                    </div>
+                    <div class="premium-field">
+                      <label>Product ID</label>
+                      <input type="text" id="admin-capsule-prod-id-display" readonly placeholder="Auto-generated" />
+                    </div>
+                    <div class="premium-field">
+                      <label>Product Name <span class="required-star">*</span></label>
+                      <input type="text" id="admin-capsule-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit" />
+                    </div>
+                    <div class="premium-field">
+                      <label>GST Slab</label>
+                      <select id="admin-capsule-prod-gst">
+                        <option value="0">0% (Exempt)</option>
+                        <option value="5" selected>5% (Food/Agri)</option>
+                        <option value="12">12% (Standard)</option>
+                        <option value="18">18% (Standard+)</option>
+                        <option value="28">28% (Luxury)</option>
+                      </select>
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Description <span class="required-star">*</span></label>
+                      <textarea id="admin-capsule-prod-desc" required placeholder="Product details, cultivation notes, taste profile..." style="min-height: 80px;"></textarea>
+                    </div>
                   </div>
-                  <div class="input-field">
-                    <label>GST Slab (%)</label>
-                    <select id="admin-capsule-prod-gst" class="admin-select-input">
-                      <option value="0">0% (Exempt)</option>
-                      <option value="5" selected>5% (Food/Agri)</option>
-                      <option value="12">12% (Standard)</option>
-                      <option value="18">18% (Standard+)</option>
-                      <option value="28">28% (Luxury)</option>
-                    </select>
+                </div>
+
+                <!-- Section 2: Pricing & Stock -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-cubes"></i>
+                    <h3>Pricing &amp; Inventory</h3>
+                    <span>Step 2 of 3</span>
                   </div>
-                  <div class="input-field span-2">
-                    <label>Weight-Based Pricing * <span class="admin-wp-hint">(add at least one variant)</span></label>
+                  <div class="premium-weight-section">
+                    <div class="pricing-type-toggle" style="margin-bottom:12px;">
+                      <button type="button" class="pricing-type-btn active" data-mode="weight">
+                        <i class="fa-solid fa-weight-scale"></i> Weight
+                      </button>
+                      <button type="button" class="pricing-type-btn" data-mode="litre">
+                        <i class="fa-solid fa-flask"></i> Volume
+                      </button>
+                    </div>
                     <div id="admin-capsule-weight-container">
-                      <div class="admin-weight-pricing-row">
-                        <select class="admin-weight-select admin-capsule-weight-select">
-                          <option value="">Select weight</option>
-                          <option value="100g">100 g</option>
-                          <option value="200g">200 g</option>
-                          <option value="250g">250 g</option>
-                          <option value="400g">400 g</option>
-                          <option value="500g">500 g</option>
-                          <option value="1kg">1 kg</option>
-                          <option value="2kg">2 kg</option>
-                          <option value="5kg">5 kg</option>
+                      <div class="premium-weight-row">
+                        <select class="admin-capsule-weight-select pw-select">
+                          <option value="">Select weight / volume</option>
+                          <optgroup label="— Weight —">
+                            <option value="100g">100 g</option>
+                            <option value="200g">200 g</option>
+                            <option value="250g">250 g</option>
+                            <option value="400g">400 g</option>
+                            <option value="500g">500 g</option>
+                            <option value="1kg">1 kg</option>
+                            <option value="2kg">2 kg</option>
+                            <option value="5kg">5 kg</option>
+                          </optgroup>
+                          <optgroup label="— Volume —">
+                            <option value="10ml">10 ml</option>
+                            <option value="20ml">20 ml</option>
+                            <option value="50ml">50 ml</option>
+                            <option value="100ml">100 ml</option>
+                            <option value="200ml">200 ml</option>
+                            <option value="500ml">500 ml</option>
+                            <option value="1l">1 l</option>
+                            <option value="2l">2 l</option>
+                            <option value="5l">5 l</option>
+                          </optgroup>
                         </select>
-                        <div class="awp-fields">
-                          <div class="awp-field">
-                            <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
-                            <input type="number" step="0.01" class="admin-weight-price admin-capsule-weight-price" placeholder="Price" />
+                        <div class="premium-weight-fields">
+                          <div class="pw-field">
+                            <label>Selling Price</label>
+                            <input type="number" step="0.01" class="admin-capsule-weight-price" placeholder="0.00" />
                           </div>
-                          <div class="awp-field">
-                            <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
-                            <input type="number" step="0.01" class="admin-weight-mrp admin-capsule-weight-mrp" placeholder="MRP" />
+                          <div class="pw-field">
+                            <label>MRP</label>
+                            <input type="number" step="0.01" class="admin-capsule-weight-mrp" placeholder="0.00" />
                           </div>
-                          <div class="awp-field awp-field-stock">
-                            <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
-                            <input type="number" class="admin-weight-stock admin-capsule-weight-stock" placeholder="Stock" min="0" />
+                          <div class="pw-field">
+                            <label>Stock</label>
+                            <input type="number" class="admin-capsule-weight-stock" placeholder="0" min="0" />
                           </div>
                         </div>
-                        <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
+                        <button type="button" class="premium-weight-remove"><i class="fa-solid fa-xmark"></i></button>
                       </div>
                     </div>
-                    <button type="button" class="btn-capsule-add-weight btn btn-secondary" style="margin-top:4px;font-size:0.82rem;padding:4px 12px;">
-                      <i class="fa-solid fa-plus"></i> Add Weight
-                    </button>
-                    <div class="admin-total-stock-wrap" id="admin-capsule-total-stock-wrap">
+                    <button type="button" class="btn-premium-add-weight"><i class="fa-solid fa-plus"></i> Add Variant</button>
+                    <div class="premium-total-stock" id="admin-capsule-total-stock-wrap">
                       <i class="fa-solid fa-cubes"></i>
                       <span>Total Inventory:</span>
                       <strong id="admin-capsule-total-stock">0</strong>
                       <span>units</span>
                     </div>
                   </div>
-                  <div class="input-field">
-                    <label>Product Image</label>
-                    <div class="admin-cat-image-upload">
-                      <input type="url" id="admin-capsule-prod-image-url" placeholder="Paste image URL or click Browse" />
-                      <button type="button" class="admin-capsule-image-browse btn btn-secondary btn-image-browse">
-                        <i class="fa-solid fa-upload"></i> Browse
-                      </button>
-                      <input type="file" class="admin-capsule-image-file hidden-file-input" />
+                </div>
+
+                <!-- Section 3: Media -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-image"></i>
+                    <h3>Product Media</h3>
+                    <span>Step 3 of 3</span>
+                  </div>
+                  <div class="premium-form-row">
+                    <div class="premium-field">
+                      <label>Main Image</label>
+                      <div class="premium-image-zone" id="capsule-image-zone">
+                        <div class="premium-img-preview" id="admin-capsule-img-preview">
+                          <i class="fa-solid fa-cloud-arrow-up"></i>
+                          <span>Drop an image here or click to browse</span>
+                          <small>Supports JPG, PNG, WebP</small>
+                        </div>
+                        <div class="premium-img-overlay" style="display:none;">
+                          <button type="button" class="capsule-image-change" title="Change image"><i class="fa-solid fa-rotate"></i></button>
+                          <button type="button" class="capsule-image-remove" title="Remove"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        <input type="url" id="admin-capsule-prod-image-url" class="hidden" />
+                        <input type="file" class="admin-capsule-image-file hidden-file-input" accept="image/*" />
+                      </div>
+                    </div>
+                    <div class="premium-field">
+                      <label>&nbsp;</label>
+                      <div style="display:flex;flex-direction:column;gap:8px;justify-content:center;height:100%;padding:0 4px;">
+                        <span style="font-size:0.78rem;color:var(--text-soft);font-weight:500;">Or paste an image URL</span>
+                        <div style="display:flex;gap:6px;">
+                          <input type="text" id="capsule-image-url-input" placeholder="https://example.com/image.jpg" style="flex:1;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:0.85rem;outline:none;font-family:var(--font-body);" />
+                          <button type="button" id="capsule-apply-url-btn" style="padding:10px 18px;border:none;border-radius:10px;background:var(--green-mid);color:#fff;font-weight:600;font-size:0.82rem;cursor:pointer;font-family:var(--font-body);">Apply</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div class="admin-form-preview-compact" id="admin-capsule-img-preview">
-                    <i class="fa-solid fa-image"></i>
-                    <span>Image preview</span>
-                  </div>
-                  <div class="input-field span-2 admin-gallery-section">
-                    <div class="admin-gallery-head">
-                      <label>Gallery Images <span class="gallery-count-badge" id="capsule-gallery-count-badge">0 / 3 min</span></label>
-                      <div class="admin-gallery-actions">
-                        <button type="button" class="btn-gallery-upload" id="btn-gallery-upload-capsule"><i class="fa-solid fa-upload"></i> Upload</button>
-                        <button type="button" class="btn-gallery-add" id="btn-gallery-add-capsule"><i class="fa-solid fa-plus"></i> Add Image</button>
+
+                  <div style="margin-top:16px;">
+                    <div class="premium-form-section-title" style="margin-bottom:8px;">
+                      <i class="fa-regular fa-images"></i>
+                      <h3>Gallery Images</h3>
+                      <span class="premium-gallery-count" id="capsule-gallery-count-badge">0 / 3 min</span>
+                    </div>
+                    <div class="premium-gallery-grid" id="capsule-gallery-grid">
+                      <div class="premium-gallery-slot" data-slot="0">
+                        <div class="gallery-placeholder"><i class="fa-regular fa-image"></i><span>#1</span></div>
+                        <input type="url" class="gallery-url-input gallery-input-hidden" data-slot="0" />
+                        <button type="button" class="gallery-remove-overlay" data-slot="0" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
                       </div>
+                    </div>
+                    <div class="premium-gallery-actions">
+                      <button type="button" class="btn-premium-gallery btn-premium-gallery-upload" id="btn-gallery-upload-capsule"><i class="fa-solid fa-upload"></i> Upload Images</button>
+                      <button type="button" class="btn-premium-gallery btn-premium-gallery-add" id="btn-gallery-add-capsule"><i class="fa-solid fa-plus"></i> Add Slot</button>
                       <input type="file" id="gallery-file-capsule" class="hidden-file-input" multiple accept="image/*" />
                     </div>
-                    <div class="admin-gallery-grid" id="capsule-gallery-grid">
-                      <div class="gallery-slot" data-slot="0">
-                        <div class="gallery-preview" id="capsule-gallery-preview-0">
-                          <i class="fa-solid fa-image"></i>
-                          <span>URL #1</span>
-                        </div>
-                        <div class="gallery-input-row">
-                          <div class="gallery-input-wrap">
-                            <i class="fa-solid fa-link"></i>
-                            <input type="url" class="gallery-url-input" data-slot="0" placeholder="Paste image URL..." />
-                          </div>
-                          <button type="button" class="gallery-remove-btn" data-slot="0" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
-                        </div>
-                      </div>
-                    </div>
-                    <small class="admin-gallery-hint">Add 3–8 images for carousel. First image becomes the main product image if none is set.</small>
+                    <small style="color:#94a3b8;font-size:0.72rem;display:block;margin-top:6px;">Add 3–8 images. First image becomes the main product image if none is set.</small>
                   </div>
                 </div>
-                <div class="admin-error-msg hidden" id="admin-capsule-add-feedback"></div>
-                <div class="admin-form-actions">
-                  <button type="button" class="btn-capsule-reset-form btn btn-secondary">Reset</button>
-                  <button type="submit" class="btn btn-primary admin-submit-btn">
-                    <i class="fa-solid fa-plus-circle"></i>
+
+                <div class="premium-feedback">
+                  <div class="admin-error-msg hidden" id="admin-capsule-add-feedback"></div>
+                </div>
+
+                <div class="premium-form-actions">
+                  <button type="button" class="btn-premium-reset btn-capsule-reset-form">Reset</button>
+                  <button type="submit" class="btn-premium-submit">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
                     <span>Publish Product</span>
                   </button>
                 </div>
@@ -513,55 +582,24 @@
 
       <!-- CURRENT ORDERS PANEL -->
       <div class="ship-panel active" id="ship-panel-current">
-
-        <!-- 12-Section Admin Pills -->
-        <div class="admin-section-pills">
-          <button class="admin-section-pill active" data-section="all">
-            <i class="fa-solid fa-list"></i> <span>All Orders</span>
+        <div class="ship-status-pills">
+          <button class="ship-status-pill active" data-status="all">All</button>
+          <button class="ship-status-pill" data-status="placed">
+            <i class="fa-solid fa-clock"></i> Placed
           </button>
-          <button class="admin-section-pill" data-section="new_orders">
-            <i class="fa-solid fa-sparkles"></i> <span>New Orders</span>
-            <span class="section-count" id="sec-count-new_orders">0</span>
+          <button class="ship-status-pill" data-status="processing">
+            <i class="fa-solid fa-gear"></i> Processing
           </button>
-          <button class="admin-section-pill" data-section="placed">
-            <i class="fa-solid fa-clock"></i> <span>Placed</span>
-            <span class="section-count" id="sec-count-placed">0</span>
+<button class="ship-status-pill" data-status="shipping">
+             <i class="fa-solid fa-truck"></i> Shipping
           </button>
-          <button class="admin-section-pill" data-section="processing">
-            <i class="fa-solid fa-gear"></i> <span>Processing</span>
-            <span class="section-count" id="sec-count-processing">0</span>
+          <button class="ship-status-pill" data-status="delivered">
+            <i class="fa-solid fa-circle-check"></i> Delivered
           </button>
-          <button class="admin-section-pill" data-section="shipping">
-            <i class="fa-solid fa-truck"></i> <span>Shipping</span>
-            <span class="section-count" id="sec-count-shipping">0</span>
-          </button>
-          <button class="admin-section-pill" data-section="delivered">
-            <i class="fa-solid fa-circle-check"></i> <span>Delivered</span>
-            <span class="section-count" id="sec-count-delivered">0</span>
-          </button>
-          <button class="admin-section-pill" data-section="cancel_requests">
-            <i class="fa-solid fa-triangle-exclamation"></i> <span>Cancel Requests</span>
-            <span class="section-count" id="sec-count-cancel_requests">0</span>
-          </button>
-          <button class="admin-section-pill" data-section="cancelled">
-            <i class="fa-solid fa-ban"></i> <span>Cancelled</span>
-            <span class="section-count" id="sec-count-cancelled">0</span>
+          <button class="ship-status-pill" data-status="cancelled">
+            <i class="fa-solid fa-ban"></i> Cancelled
           </button>
         </div>
-
-        <!-- Status pills (sub-filter within section) -->
-        <div class="ship-status-pills" id="section-status-pills" style="display:none;"></div>
-
-        <!-- Refund filter -->
-        <div class="ship-refund-filter-single" id="section-refund-filter" style="display:none;">
-          <span class="ship-refund-filter-icon"><i class="fa-solid fa-arrow-rotate-left"></i></span>
-          <select id="ship-refund-filter-select" class="ship-refund-filter-select">
-            <option value="all">All Refunds</option>
-            <option value="auto">🔄 Auto Refund</option>
-            <option value="manual">✋ Manual Refund</option>
-          </select>
-        </div>
-
         <div id="admin-orders-list">
           <div class="admin-loading">
             <i class="fa-solid fa-spinner fa-spin"></i> Loading orders...
@@ -1043,61 +1081,107 @@
         </h3>
       </div>
       <div class="admin-form-wrap">
-        <form id="form-admin-add-product" class="admin-product-form">
+        <form id="form-admin-add-product" class="admin-product-form premium-add-form">
           <input type="hidden" id="admin-edit-id" value="" />
-          <div class="admin-form-compact-grid">
-            <div class="input-field">
-              <label>Category *</label>
-              <select id="admin-prod-category" class="admin-select-input"></select>
+
+          <!-- ═══ HEADER ═══ -->
+          <div class="premium-form-header">
+            <div class="premium-form-header-icon">
+              <i class="fa-solid fa-leaf"></i>
             </div>
-            <div class="input-field">
-              <label>Product ID</label>
-              <input type="text" id="admin-prod-id-display" readonly placeholder="Auto-generated" />
+            <div>
+              <h2>Product Details</h2>
+              <p>Fill in the details below to list a new mushroom product</p>
             </div>
-            <div class="input-field">
-              <label>Product Name *</label>
-              <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit" />
+          </div>
+
+          <!-- ═══ SECTION 1: BASIC INFO ═══ -->
+          <div class="premium-form-section">
+            <div class="premium-form-section-title">
+              <i class="fa-solid fa-info-circle"></i>
+              <h3>Basic Information</h3>
+              <span>Required for compliance</span>
             </div>
-            <div class="input-field span-2">
-              <label>Description *</label>
-              <textarea id="admin-prod-desc" required placeholder="Product details, cultivation notes..."
-                class="admin-textarea-compact"></textarea>
+            <div class="premium-form-row">
+              <div class="premium-field">
+                <label>Category <span class="required-star">*</span></label>
+                <select id="admin-prod-category"></select>
+              </div>
+              <div class="premium-field">
+                <label>GST Slab <span class="required-star">*</span></label>
+                <select id="admin-prod-gst">
+                  <option value="0">0% (Exempt)</option>
+                  <option value="5" selected>5% (Food/Agri)</option>
+                  <option value="12">12% (Standard)</option>
+                  <option value="18">18% (Standard+)</option>
+                  <option value="28">28% (Luxury)</option>
+                </select>
+              </div>
+              <div class="premium-field">
+                <label>Product Name <span class="required-star">*</span></label>
+                <input type="text" id="admin-prod-name" required placeholder="e.g. Golden Oyster Mushroom Kit" />
+              </div>
+              <div class="premium-field">
+                <label>Product ID</label>
+                <input type="text" id="admin-prod-id-display" readonly placeholder="Auto-generated" />
+              </div>
+              <div class="premium-field span-full">
+                <label>Description <span class="required-star">*</span></label>
+                <textarea id="admin-prod-desc" required placeholder="Product details, cultivation notes, taste profile, usage instructions..." style="min-height: 80px;"></textarea>
+              </div>
             </div>
-            <!-- Stock quantity removed from product form (managed server-side) -->
-            <div class="input-field">
-              <label>GST Slab (%)</label>
-              <select id="admin-prod-gst" class="admin-select-input">
-                <option value="0">0% (Exempt)</option>
-                <option value="5" selected>5% (Food/Agri)</option>
-                <option value="12">12% (Standard)</option>
-                <option value="18">18% (Standard+)</option>
-                <option value="28">28% (Luxury)</option>
-              </select>
+          </div>
+
+          <!-- ═══ SECTION 2: PRICING & INVENTORY ═══ -->
+          <div class="premium-form-section">
+            <div class="premium-form-section-title">
+              <i class="fa-solid fa-cubes"></i>
+              <h3>Pricing &amp; Inventory</h3>
+              <span>MRP mandatory by law</span>
             </div>
-            <div class="input-field span-2">
-              <label>Weight-Based Pricing * <span style="font-weight:400;font-size:0.8rem;color:#e74c3c;">(add at least
-                  one variant)</span></label>
+            <div class="premium-weight-section">
+              <div class="pricing-type-toggle" style="margin-bottom:12px;">
+                <button type="button" class="pricing-type-btn active" data-mode="weight">
+                  <i class="fa-solid fa-weight-scale"></i> Weight
+                </button>
+                <button type="button" class="pricing-type-btn" data-mode="litre">
+                  <i class="fa-solid fa-flask"></i> Volume
+                </button>
+              </div>
               <div id="admin-weight-pricing-container">
                 <div class="admin-weight-pricing-row">
                   <select class="admin-weight-select">
-                    <option value="">Select weight</option>
-                    <option value="100g">100 g</option>
-                    <option value="200g">200 g</option>
-                    <option value="250g">250 g</option>
-                    <option value="400g">400 g</option>
-                    <option value="500g">500 g</option>
-                    <option value="1kg">1 kg</option>
-                    <option value="2kg">2 kg</option>
-                    <option value="5kg">5 kg</option>
+                    <option value="">Select weight / volume</option>
+                    <optgroup label="— Weight —">
+                      <option value="100g">100 g</option>
+                      <option value="200g">200 g</option>
+                      <option value="250g">250 g</option>
+                      <option value="400g">400 g</option>
+                      <option value="500g">500 g</option>
+                      <option value="1kg">1 kg</option>
+                      <option value="2kg">2 kg</option>
+                      <option value="5kg">5 kg</option>
+                    </optgroup>
+                    <optgroup label="— Volume —">
+                      <option value="10ml">10 ml</option>
+                      <option value="20ml">20 ml</option>
+                      <option value="50ml">50 ml</option>
+                      <option value="100ml">100 ml</option>
+                      <option value="200ml">200 ml</option>
+                      <option value="500ml">500 ml</option>
+                      <option value="1l">1 l</option>
+                      <option value="2l">2 l</option>
+                      <option value="5l">5 l</option>
+                    </optgroup>
                   </select>
                   <div class="awp-fields">
                     <div class="awp-field">
                       <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
-                      <input type="number" step="0.01" class="admin-weight-price" placeholder="Price" />
+                      <input type="number" step="0.01" class="admin-weight-price" placeholder="Price *" />
                     </div>
                     <div class="awp-field">
                       <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
-                      <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP" />
+                      <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP *" />
                     </div>
                     <div class="awp-field awp-field-stock">
                       <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
@@ -1107,41 +1191,53 @@
                   <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
                 </div>
               </div>
-              <button type="button" id="btn-add-weight-row" class="btn btn-secondary"
-                style="margin-top:4px;font-size:0.82rem;padding:4px 12px;">
-                <i class="fa-solid fa-plus"></i> Add Weight
-              </button>
-              <div class="admin-total-stock-wrap" id="admin-total-stock-wrap">
+              <button type="button" id="btn-add-weight-row" class="btn-premium-add-weight"><i class="fa-solid fa-plus"></i> Add Variant</button>
+              <div class="premium-total-stock" id="admin-total-stock-wrap">
                 <i class="fa-solid fa-cubes"></i>
                 <span>Total Inventory:</span>
                 <strong id="admin-total-stock">0</strong>
                 <span>units</span>
               </div>
             </div>
-            <div class="input-field">
-              <label>Product Image</label>
-              <div class="admin-cat-image-upload">
-                <input type="url" id="admin-prod-image-url" placeholder="Paste image URL or click Browse" />
-                <button type="button" id="admin-prod-image-browse" class="btn btn-secondary btn-image-browse">
-                  <i class="fa-solid fa-upload"></i> Browse
-                </button>
-                <input type="file" id="admin-prod-image-file" class="hidden-file-input" />
-              </div>
-            </div>
-            <div class="admin-form-preview-compact" id="admin-img-preview">
+          </div>
+
+          <!-- ═══ SECTION 3: PRODUCT MEDIA ═══ -->
+          <div class="premium-form-section">
+            <div class="premium-form-section-title">
               <i class="fa-solid fa-image"></i>
-              <span>Image preview</span>
+              <h3>Product Media</h3>
+              <span>Images boost sales</span>
             </div>
-            <div class="input-field span-2 admin-gallery-section">
-              <div class="admin-gallery-head">
-                <label>Gallery Images <span class="gallery-count-badge" id="gallery-count-badge">0 / 3 min</span></label>
-                <div class="admin-gallery-actions">
-                  <button type="button" class="btn-gallery-upload" id="btn-gallery-upload-main"><i class="fa-solid fa-upload"></i> Upload</button>
-                  <button type="button" class="btn-gallery-add" id="btn-gallery-add-main"><i class="fa-solid fa-plus"></i> Add Image</button>
+            <div class="premium-form-row">
+              <div class="premium-field span-full">
+                <label>Product Image <span class="required-star">*</span></label>
+                <div class="admin-image-zone" id="admin-image-zone">
+                  <div class="admin-img-preview" id="admin-img-preview">
+                    <i class="fa-solid fa-image"></i>
+                    <span>Image preview</span>
+                    <small>Upload an image or paste a URL</small>
+                  </div>
+                  <div class="admin-image-inputs">
+                    <div class="admin-image-url-row">
+                      <i class="fa-solid fa-link"></i>
+                      <input type="url" id="admin-prod-image-url" placeholder="Paste image URL..." />
+                    </div>
+                    <button type="button" id="admin-prod-image-browse" class="btn-premium-browse">
+                      <i class="fa-solid fa-upload"></i> Browse
+                    </button>
+                  </div>
+                  <input type="file" id="admin-prod-image-file" class="hidden-file-input" accept="image/*" />
                 </div>
-                <input type="file" id="gallery-file-main" class="hidden-file-input" multiple accept="image/*" />
               </div>
-              <div class="admin-gallery-grid" id="admin-gallery-grid">
+            </div>
+
+            <div style="margin-top:16px;">
+              <div class="premium-form-section-title" style="margin-bottom:8px;">
+                <i class="fa-regular fa-images"></i>
+                <h3>Gallery Images</h3>
+                <span class="premium-gallery-count" id="gallery-count-badge">0 / 3 min</span>
+              </div>
+              <div class="admin-gallery-grid" id="admin-gallery-grid" style="margin-bottom:0;">
                 <div class="gallery-slot" data-slot="0">
                   <div class="gallery-preview" id="gallery-preview-0">
                     <i class="fa-solid fa-image"></i>
@@ -1156,16 +1252,23 @@
                   </div>
                 </div>
               </div>
-              <small class="admin-gallery-hint">Add 3–8 images for carousel. First image becomes the main product image if none is set.</small>
+              <div class="premium-gallery-actions">
+                <button type="button" class="btn-premium-gallery btn-premium-gallery-upload" id="btn-gallery-upload-main"><i class="fa-solid fa-upload"></i> Upload Images</button>
+                <button type="button" class="btn-premium-gallery btn-premium-gallery-add" id="btn-gallery-add-main"><i class="fa-solid fa-plus"></i> Add Slot</button>
+                <input type="file" id="gallery-file-main" class="hidden-file-input" multiple accept="image/*" />
+              </div>
+              <small style="color:#94a3b8;font-size:0.72rem;display:block;margin-top:6px;">Add 3–8 images. First image becomes the main product image if none is set.</small>
             </div>
           </div>
-          <div class="admin-error-msg hidden" id="admin-add-feedback"></div>
-          <div class="admin-form-actions">
-            <button type="button" id="btn-admin-reset-form" class="btn btn-secondary">
-              Reset
-            </button>
-            <button type="submit" class="btn btn-primary admin-submit-btn" id="admin-form-submit-btn">
-              <i class="fa-solid fa-plus-circle"></i>
+
+          <div class="premium-feedback">
+            <div class="admin-error-msg hidden" id="admin-add-feedback"></div>
+          </div>
+
+          <div class="premium-form-actions">
+            <button type="button" id="btn-admin-reset-form" class="btn-premium-reset">Reset</button>
+            <button type="submit" class="btn-premium-submit" id="admin-form-submit-btn">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
               <span id="admin-submit-label">Publish Product</span>
             </button>
           </div>

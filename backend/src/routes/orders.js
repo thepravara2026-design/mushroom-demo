@@ -5,7 +5,6 @@ const router = express.Router();
 const db = require("../config/db");
 const razorpay = require("../config/razorpay");
 const authMiddleware = require("../middleware/auth");
-const { requireRole } = require("../middleware/roles");
 const { validateBody, Joi } = require("../middleware/validate");
 const { success, error: respondError } = require("../lib/response");
 const { validatePromoCode } = require("../services/promoService");
@@ -16,7 +15,7 @@ const { JWT_SECRET } = require("../config/jwt");
 const refundService = require("../modules/refunds/RefundService");
 const { OrderStates, assertForwardOnly, assertCancellable, resolveState } = require("../modules/orders/OrderStateService");
 const { logAuditAction, AUDIT_ACTIONS } = require("../services/AuditLogService");
-const { notify } = require("../services/NotificationService");
+const { notify } = require("../services/notificationService");
 const logger = require("../utils/logger");
 const { sendSseEvent, addSseSubscriber } = require("../lib/sse");
 
@@ -96,37 +95,6 @@ function buildInvoiceData(order, user) {
 async function getShippingCharge() {
   // Delivery is always free
   return 0;
-}
-
-async function restoreStock(items) {
-  if (items.length === 0) return;
-  for (const { id, quantity } of items) {
-    if (db.isMock) {
-      const { data: freshProduct } = await db
-        .from("products")
-        .select("stock")
-        .eq("id", id)
-        .single();
-      if (freshProduct) {
-        await db
-          .from("products")
-          .update({ stock: (freshProduct.stock || 0) + quantity })
-          .eq("id", id);
-      }
-    } else {
-      const { data: product } = await supabaseAdmin
-        .from("products")
-        .select("stock")
-        .eq("id", id)
-        .single();
-      if (product) {
-        await supabaseAdmin
-          .from("products")
-          .update({ stock: (product.stock || 0) + quantity })
-          .eq("id", id);
-      }
-    }
-  }
 }
 
 const checkoutSchema = Joi.object({
@@ -241,11 +209,9 @@ router.post(
       const orderItems = [];
 
       // Calculate itemized details
-      const decrementedItems = [];
       for (const cartItem of items) {
         const product = dbProducts.find((p) => p.id === cartItem.id);
         if (!product) {
-          await restoreStock(decrementedItems);
           return respondError(
             res,
             `Product with id ${cartItem.id} not found.`,
@@ -254,20 +220,24 @@ router.post(
         }
 
         const quantity = parseInt(cartItem.quantity, 10) || 1;
+        if (product.stock !== undefined && quantity > product.stock) {
+          return respondError(
+            res,
+            `Insufficient stock for ${product.name}. Only ${product.stock} unit(s) available.`,
+            400,
+          );
+        }
 
         // Reserve stock immediately to prevent overselling
+        const newStock = (product.stock || 0) - quantity;
         if (!db.isMock) {
-          const { error: rpcError } = await supabaseAdmin.rpc("decrement_stock", {
-            p_product_id: product.id,
-            p_quantity: quantity,
-          });
-          if (rpcError) {
-            await restoreStock(decrementedItems);
-            return respondError(
-              res,
-              `Insufficient stock for ${product.name}. Please try again.`,
-              400,
-            );
+          try {
+            await supabaseAdmin.rpc("decrement_stock", {
+              p_product_id: product.id,
+              p_quantity: quantity,
+            });
+          } catch (rpcErr) {
+            logger.error(`[orders] decrement_stock RPC failed for ${product.id}:`, rpcErr.message);
           }
         } else {
           const { data: freshProduct } = await db
@@ -277,7 +247,6 @@ router.post(
             .single();
           const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
           if (quantity > currentStock) {
-            await restoreStock(decrementedItems);
             return respondError(
               res,
               `Insufficient stock for ${product.name}. Only ${currentStock} unit(s) available.`,
@@ -289,7 +258,6 @@ router.post(
             .update({ stock: currentStock - quantity })
             .eq("id", product.id);
         }
-        decrementedItems.push({ id: product.id, quantity });
 
         // Determine base price — use weight variant price if applicable
         let basePrice = product.price;
@@ -337,22 +305,22 @@ router.post(
       const invoiceToken = crypto.randomBytes(12).toString("hex");
       const customerEmail = req.body.customer_email || req.user.email || "";
       const insertPayload = {
-          id: generatedOrderId,
-          user_id: req.user.userId,
-          customer_name: req.body.customer_name || req.user.fullName || req.user.email || "Customer",
-          customer_email: customerEmail,
-          delivery_address: rawAddress,
-          delivery_phone: deliveryPhone,
-          items: orderItems,
-          subtotal: parseFloat(subtotal.toFixed(2)),
-          discount_amount: parseFloat(discountAmount.toFixed(2)),
-          gst_amount: parseFloat(gstAmount.toFixed(2)),
-          shipping_charge: parseFloat(shippingCharge.toFixed(2)),
-          total: parseFloat(total.toFixed(2)),
-          promo_code: promoCode || "",
-          status: "pending",
-          delivery_status: "placed",
-          invoice_token: invoiceToken,
+        id: generatedOrderId,
+        user_id: req.user.userId,
+        customer_name: req.body.customer_name || req.user.fullName || req.user.email || "Customer",
+        customer_email: customerEmail,
+        delivery_address: rawAddress,
+        delivery_phone: deliveryPhone,
+        items: orderItems,
+        subtotal: parseFloat(subtotal.toFixed(2)),
+        discount_amount: parseFloat(discountAmount.toFixed(2)),
+        gst_amount: parseFloat(gstAmount.toFixed(2)),
+        shipping_charge: parseFloat(shippingCharge.toFixed(2)),
+        total: parseFloat(total.toFixed(2)),
+        promo_code: promoCode || "",
+        status: "pending",
+        delivery_status: "placed",
+        invoice_token: invoiceToken,
       };
 
       let newOrder, dbError;
@@ -386,8 +354,8 @@ router.post(
             );
             await adminClient.rpc("exec_sql", {
               sql: "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email TEXT;"
-            }).catch(() => {}); // rpc may not exist — that's fine, column will be added next startup
-          } catch (_) {}
+            }).catch(() => { }); // rpc may not exist — that's fine, column will be added next startup
+          } catch (_) { }
         });
       }
 
@@ -401,8 +369,8 @@ router.post(
         db.from("orders")
           .update({ customer_email: customerEmail })
           .eq("id", newOrder.id)
-          .then(() => {})
-          .catch(() => {});
+          .then(() => { })
+          .catch(() => { });
       }
 
       // Call Razorpay API to generate order
@@ -532,7 +500,7 @@ router.post(
           .eq("id", updatedOrder.user_id)
           .single();
         if (user) {
-          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
+          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
         }
       } catch (e) {
         // ignore WhatsApp errors
@@ -624,7 +592,7 @@ router.post(
             .eq("id", updatedOrder.user_id)
             .single();
           if (user) {
-            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
+            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
           }
         } catch (e) {
           // ignore WhatsApp errors
@@ -651,15 +619,6 @@ router.post(
           .update({ status: "failed" })
           .eq("razorpay_order_id", razorpay_order_id)
           .single();
-
-        // Restore stock for the failed order so inventory isn't permanently drained
-        if (failedOrder && Array.isArray(failedOrder.items)) {
-          const itemsToRestore = failedOrder.items.map((item) => ({
-            id: item.productId,
-            quantity: item.quantity,
-          }));
-          await restoreStock(itemsToRestore);
-        }
 
         // Broadcast failure via SSE so frontends update in real-time
         try {
@@ -708,21 +667,20 @@ router.get("/shipping-settings", async (req, res) => {
 
 // PUT /api/orders/shipping-settings
 // Admin updates global shipping charge
-router.put(
-  "/shipping-settings",
-  authMiddleware,
-  requireRole("admin"),
-  validateBody(
-    Joi.object({
-      shipping_charge: Joi.number().min(0).required().messages({
-        "number.min": "Shipping charge must be a non-negative number.",
-        "any.required": "Shipping charge is required.",
-      }),
-    }),
-  ),
-  async (req, res) => {
-    try {
-      const shipping_charge = Number(req.body.shipping_charge);
+router.put("/shipping-settings", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
+    const shipping_charge = Number(req.body.shipping_charge);
+    if (Number.isNaN(shipping_charge) || shipping_charge < 0) {
+      return respondError(
+        res,
+        "Shipping charge must be a non-negative number.",
+        400,
+      );
+    }
 
     const { data: existingSetting, error: selectError } = await db
       .from("settings")
@@ -791,7 +749,7 @@ router.get("/my-orders", authMiddleware, async (req, res) => {
       ...o,
       resolved_state: resolveState(o),
       cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
-                    !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
       invoice_accessible: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)),
     }));
 
@@ -803,8 +761,12 @@ router.get("/my-orders", authMiddleware, async (req, res) => {
 
 // GET /api/orders/all-orders
 // Fetch all orders in the system (admin only)
-router.get("/all-orders", authMiddleware, requireRole("admin"), async (req, res) => {
+router.get("/all-orders", authMiddleware, async (req, res) => {
   try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
     const { data: orders, error: ordersErr } = await db
       .from("orders")
       .select("*");
@@ -829,9 +791,9 @@ router.get("/all-orders", authMiddleware, requireRole("admin"), async (req, res)
       user_email: userMap[o.user_id] || "unknown@sporekart.com",
       resolved_state: resolveState(o),
       cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
-                    !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
       invoice_accessible_admin: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)) ||
-                                 (o.delivery_status === 'cancelled' && o.status === 'paid'),
+        (o.delivery_status === 'cancelled' && o.status === 'paid'),
     }));
 
     // Sort descending by created_at
@@ -851,24 +813,16 @@ router.get("/all-orders", authMiddleware, requireRole("admin"), async (req, res)
 
 // PUT /api/orders/:id/status
 // Update delivery status of an order (admin only)
-router.put(
-  "/:id/status",
-  authMiddleware,
-  requireRole("admin"),
-  validateBody(
-    Joi.object({
-      delivery_status: Joi.string().valid(
-        "placed", "processing", "shipped", "in_transit", "delivered"
-      ).required().messages({
-        "any.only": "Delivery status must be one of: placed, processing, shipped, in_transit, delivered.",
-        "any.required": "Delivery status is required.",
-      }),
-      delivery_days_text: Joi.string().max(100).allow("").optional(),
-    }),
-  ),
-  async (req, res) => {
-    try {
-      const { delivery_status, delivery_days_text } = req.body;
+router.put("/:id/status", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
+    const { delivery_status, delivery_days_text } = req.body;
+    if (!delivery_status) {
+      return respondError(res, "Delivery status is required.", 400);
+    }
 
     const { data: order, error: orderErr } = await db
       .from("orders")
@@ -960,7 +914,7 @@ router.put(
       previousState: { delivery_status: previousState.delivery_status },
       newState: { delivery_status: delivery_status },
       metadata: { delivery_days_text },
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Notification
     const eventMap = {
@@ -977,7 +931,7 @@ router.put(
       if (user) {
         notify(eventMap[delivery_status], updatedOrder, user, {
           eta: delivery_days_text,
-        }).catch(() => {});
+        }).catch(() => { });
       }
     }
 
@@ -998,8 +952,8 @@ router.put(
     const shouldSendWhatsApp =
       (delivery_status === "shipped" && !order.whatsapp_sent) ||
       (["placed", "processing"].includes(delivery_status) &&
-       ["pending", "pending_upi_verification"].includes(order.delivery_status) &&
-       !order.whatsapp_sent);
+        ["pending", "pending_upi_verification"].includes(order.delivery_status) &&
+        !order.whatsapp_sent);
 
     if (shouldSendWhatsApp) {
       try {
@@ -1133,8 +1087,12 @@ router.get("/:id/refund", authMiddleware, async (req, res) => {
 
 // GET /api/orders/admin/refunds
 // Admin: list all refunds across all orders
-router.get("/admin/refunds", authMiddleware, requireRole("admin"), async (req, res) => {
+router.get("/admin/refunds", authMiddleware, async (req, res) => {
   try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
     const { data: refunds, error } = await db
       .from("refunds")
       .select("*")
@@ -1257,11 +1215,7 @@ router.get("/share/:token", async (req, res) => {
       .eq("id", order.user_id)
       .single();
     const inv = buildInvoiceData(order, user);
-
-    // Sanitize host header to prevent Host header injection attacks
-    const rawHost = req.get("host") || "sporekart.com";
-    const safeHost = rawHost.replace(/[^a-zA-Z0-9.:\[\]-]/g, "").replace(/^\.+|\.+$/g, "").substring(0, 255);
-    const shareUrl = `${req.protocol}://${safeHost || "sporekart.com"}${req.originalUrl}`;
+    const shareUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
     const isDownload = req.query.download === "1";
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1333,8 +1287,8 @@ router.get("/share/:token", async (req, res) => {
         </thead>
         <tbody>
           ${inv.items
-            .map(
-              (item, idx) => `
+        .map(
+          (item, idx) => `
             <tr>
               <td>${idx + 1}</td>
               <td>${escapeHtml(item.name)}</td>
@@ -1344,8 +1298,8 @@ router.get("/share/:token", async (req, res) => {
               <td class="text-right">₹${item.total.toFixed(2)}</td>
             </tr>
           `,
-            )
-            .join("")}
+        )
+        .join("")}
         </tbody>
       </table>
     </div>
@@ -1379,8 +1333,7 @@ router.get("/share/:token", async (req, res) => {
     res.setHeader("Content-Type", "text/html");
     res.send(html);
   } catch (error) {
-    logger.error(`[orders] Invoice share error: ${error.message}`);
-    res.status(500).send("An error occurred while generating the invoice.");
+    res.status(500).send(error.message);
   }
 });
 
@@ -1574,14 +1527,6 @@ router.get("/events", (req, res) => {
     }
   }
 
-  // Set headers for SSE
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-  res.write("\n");
-
   addSseSubscriber(req, res, user);
 });
 
@@ -1720,19 +1665,14 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
 // POST /api/orders/admin/approve/:id
 // Admin approves a PENDING_APPROVAL order → PLACED
-router.post(
-  "/admin/approve/:id",
-  authMiddleware,
-  requireRole("admin"),
-  validateBody(
-    Joi.object({
-      adminNote: Joi.string().max(500).allow("").optional(),
-    }),
-  ),
-  async (req, res) => {
-    try {
-      const { adminNote } = req.body;
-      const updatedOrder = await refundService.approveOrder(req.params.id, adminNote || "", req.user);
+router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
+    const { adminNote } = req.body;
+    const updatedOrder = await refundService.approveCancellation(req.params.id, adminNote || "", req.user);
 
     // SSE broadcast
     try {
@@ -1764,10 +1704,14 @@ const rejectOrderSchema = Joi.object({
   adminNote: Joi.string().trim().max(500).optional()
 });
 
-router.post("/admin/reject/:id", authMiddleware, requireRole("admin"), validateBody(rejectOrderSchema), async (req, res) => {
+router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema), async (req, res) => {
   try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
     const { reason, adminNote } = req.body;
-    const updatedOrder = await refundService.rejectOrder(req.params.id, reason, adminNote || "", req.user);
+    const updatedOrder = await refundService.rejectCancellation(req.params.id, reason, adminNote || "", req.user);
 
     // SSE broadcast
     try {
@@ -1791,8 +1735,12 @@ router.post("/admin/reject/:id", authMiddleware, requireRole("admin"), validateB
 
 // GET /api/orders/admin/:id/audit-logs
 // Admin: get audit logs for a specific order
-router.get("/admin/:id/audit-logs", authMiddleware, requireRole("admin"), async (req, res) => {
+router.get("/admin/:id/audit-logs", authMiddleware, async (req, res) => {
   try {
+    if (req.user.role !== "admin") {
+      return respondError(res, "Access denied. Admins only.", 403);
+    }
+
     const { getAuditLogs } = require("../services/AuditLogService");
     const logs = await getAuditLogs(req.params.id);
     return success(res, logs || []);

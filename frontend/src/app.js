@@ -91,7 +91,7 @@ function _saveRecentlyReadBlog(slug) {
 }
 
 function getShopInventorySortValue() {
-  return document.getElementById('shop-inventory-sort')?.value || 'name_asc';
+  return document.getElementById('shop-inventory-sort')?.value || 'created_at_desc';
 }
 
 // ── Inactivity auto-logout ──────────────────────────────────────
@@ -1240,7 +1240,7 @@ async function fetchProducts() {
   try {
     const params = new URLSearchParams();
     const sort = getShopInventorySortValue();
-    if (sort && sort !== 'name_asc') params.set('sort', sort);
+    if (sort) params.set('sort', sort);
     const cat = state.activeCategory;
     if (cat && cat !== 'all') params.set('category', cat);
     const search = document.getElementById('shop-search')?.value?.trim();
@@ -1321,78 +1321,82 @@ function renderProducts() {
       const mainImage = galleryImages[0] || prod.image_url;
       const carouselId = `carousel-${prod.id}`;
 
+      const imgCount = galleryImages.filter(Boolean).length;
+
       return `
-        <div class="product-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
-          <div class="product-img-wrapper">
-            <div class="product-carousel" id="${carouselId}" data-images='${JSON.stringify(galleryImages.map(img => img || prod.image_url).filter(Boolean)).replace(/'/g, "&#39;")}'>
-              <div class="carousel-track">
-                ${galleryImages.filter(Boolean).map((img, i) => `
-                  <img src="${img}" alt="${prod.name} - ${i + 1}" loading="lazy" class="carousel-slide ${i === 0 ? 'active' : ''}">
-                `).join('')}
-              </div>
-              ${galleryImages.length > 1 ? `
-                <button type="button" class="carousel-btn carousel-prev" data-carousel="${carouselId}"><i class="fa-solid fa-chevron-left"></i></button>
-                <button type="button" class="carousel-btn carousel-next" data-carousel="${carouselId}"><i class="fa-solid fa-chevron-right"></i></button>
-                <div class="carousel-dots">
-                  ${galleryImages.filter(Boolean).map((_, i) => `
-                    <span class="carousel-dot ${i === 0 ? 'active' : ''}" data-index="${i}" data-carousel="${carouselId}"></span>
+        <div class="product-card-3d-wrap">
+          <div class="product-card premium-card reveal-element" data-id="${prod.id}" style="transition-delay: ${idx * 0.05}s">
+            <div class="product-img-wrapper">
+              <div class="product-carousel" id="${carouselId}" data-images='${JSON.stringify(galleryImages.map(img => img || prod.image_url).filter(Boolean)).replace(/'/g, "&#39;")}'>
+                <div class="carousel-track">
+                  ${galleryImages.filter(Boolean).map((img, i) => `
+                    <img src="${img}" alt="${prod.name} - ${i + 1}" loading="lazy" class="carousel-slide ${i === 0 ? 'active' : ''}">
                   `).join('')}
                 </div>
-              ` : ''}
+                ${imgCount > 1 ? `
+                  <button type="button" class="carousel-btn carousel-prev" data-carousel="${carouselId}"><i class="fa-solid fa-chevron-left"></i></button>
+                  <button type="button" class="carousel-btn carousel-next" data-carousel="${carouselId}"><i class="fa-solid fa-chevron-right"></i></button>
+                  <div class="carousel-dots">
+                    ${galleryImages.filter(Boolean).map((_, i) => `
+                      <span class="carousel-dot ${i === 0 ? 'active' : ''}" data-index="${i}" data-carousel="${carouselId}"></span>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
+              <div class="product-badges-overlay">
+                <span class="tag tag-stock tag-stock-${stockMeta.variant}">${stockMeta.label}</span>
+                <span class="product-gst-badge">${prod.gst_rate}% GST</span>
+              </div>
+              ${hasMrp ? `
+                <span class="product-discount-badge" data-prod-id="${prod.id}">${discountPct}% OFF</span>
+              ` : `
+                <span class="product-discount-badge" data-prod-id="${prod.id}" style="display: none;"></span>
+              `}
             </div>
-            <div class="product-badges-overlay">
-              <span class="tag tag-stock tag-stock-${stockMeta.variant}">${stockMeta.label}</span>
-              <span class="product-gst-badge">${prod.gst_rate}% GST</span>
-            </div>
-            ${hasMrp ? `
-              <span class="product-discount-badge" data-prod-id="${prod.id}">${discountPct}% OFF</span>
-            ` : `
-              <span class="product-discount-badge" data-prod-id="${prod.id}" style="display: none;"></span>
-            `}
-          </div>
-          <div class="product-info">
-            <div class="product-meta-row">
-              <span class="product-category-lbl">${catLabel}</span>
-              <span class="product-free-shipping-badge"><i class="fa-solid fa-truck-fast"></i> Free Shipping</span>
-            </div>
-            <h3>${prod.name}</h3>
-            <p class="product-desc">${prod.description}</p>
-            
-            ${hasWeights ? `
-              <div class="product-weight-selector">
-                <span class="selector-lbl">Select Variant:</span>
-                <div class="weight-chips-container">
-                  ${prod.weight_pricing.map(w => {
+            <div class="product-info">
+              <div class="product-meta-row">
+                <span class="product-category-lbl">${catLabel}</span>
+                <span class="product-free-shipping-badge"><i class="fa-solid fa-truck-fast"></i> Free Shipping</span>
+              </div>
+              <h3>${prod.name}</h3>
+              <p class="product-desc">${prod.description}</p>
+              
+              ${hasWeights ? `
+                <div class="variant-chips-inline" data-prod-id="${prod.id}">
+                  <span class="vci-label">Size:</span>
+                  <div class="vci-chips">
+                    ${prod.weight_pricing.map(w => {
         const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
         const isDefault = w === defaultWeight;
         return `
-                      <button type="button" class="weight-chip ${isDefault ? 'active' : ''}" 
-                        data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}" 
-                        data-prod-id="${prod.id}">
-                        ${label}
-                      </button>
-                    `;
+                        <button type="button" class="weight-chip ${isDefault ? 'active' : ''}" 
+                          data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}" 
+                          data-prod-id="${prod.id}">
+                          ${label}
+                        </button>
+                      `;
       }).join('')}
+                  </div>
                 </div>
-              </div>
-            ` : ''}
-            
-            <div class="product-card-footer">
-              <div class="product-price-section">
-                <div class="product-price-wrap">
-                  <span class="product-price" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight ? defaultWeight.price : fallbackPrice)}</span>
-                  ${defaultWeight && defaultWeight.mrp_price && defaultWeight.mrp_price > defaultWeight.price
+              ` : ''}
+              
+              <div class="product-card-footer">
+                <div class="product-price-section">
+                  <div class="product-price-wrap">
+                    <span class="product-price" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight ? defaultWeight.price : fallbackPrice)}</span>
+                    ${defaultWeight && defaultWeight.mrp_price && defaultWeight.mrp_price > defaultWeight.price
           ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(defaultWeight.mrp_price)}</span>`
           : hasMrp ? `<span class="product-mrp" data-prod-id="${prod.id}">${_formatCurrency(prod.mrp_price)}</span>` : `<span class="product-mrp" data-prod-id="${prod.id}" style="display: none;"></span>`}
+                  </div>
                 </div>
+                ${isAdmin ? `
+                  <span class="admin-view-badge"><i class="fa-solid fa-eye"></i> View Only</span>
+                ` : `
+                  <button class="btn-card-add" data-id="${prod.id}" title="Add to Cart">
+                    <i class="fa-solid fa-cart-plus"></i> Add
+                  </button>
+                `}
               </div>
-              ${isAdmin ? `
-                <span class="admin-view-badge"><i class="fa-solid fa-eye"></i> View Only</span>
-              ` : `
-                <button class="btn-card-add" data-id="${prod.id}" title="Add to Cart">
-                  <i class="fa-solid fa-cart-plus"></i> Add
-                </button>
-              `}
             </div>
           </div>
         </div>
@@ -1419,7 +1423,7 @@ function renderProducts() {
       if (isAdmin) {
         openProductDetails(id);
       } else {
-        showQuickAddModal(id);
+        showPremiumProductModal(id);
       }
     });
   });
@@ -1461,6 +1465,59 @@ function renderProducts() {
       carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
       if (slides[index]) slides[index].classList.add('active');
       dot.classList.add('active');
+    });
+  });
+
+  // Premium: 3D tilt effect on product cards
+  grid.querySelectorAll('.premium-card').forEach((card) => {
+    const wrap = card.closest('.product-card-3d-wrap');
+    if (!wrap) return;
+
+    card.addEventListener('mousemove', (e) => {
+      const rect = card.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      const tiltX = (y - 0.5) * -8;
+      const tiltY = (x - 0.5) * 8;
+
+      card.classList.add('is-tilting');
+      card.style.transform = `perspective(1000px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateY(-6px)`;
+    });
+
+    card.addEventListener('mouseleave', () => {
+      card.classList.remove('is-tilting');
+      card.style.transform = '';
+    });
+  });
+
+  // Premium: auto-advance carousel on card hover
+  grid.querySelectorAll('.product-carousel').forEach((carousel) => {
+    const card = carousel.closest('.premium-card');
+    if (!card) return;
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    const dots = carousel.querySelectorAll('.carousel-dot');
+    if (slides.length <= 1) return;
+    let autoInterval = null;
+
+    function advanceSlide() {
+      const current = carousel.querySelector('.carousel-slide.active');
+      const idx = current ? Array.from(slides).indexOf(current) : 0;
+      const next = (idx + 1) % slides.length;
+      carousel.querySelectorAll('.carousel-slide').forEach(s => s.classList.remove('active'));
+      carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
+      if (slides[next]) slides[next].classList.add('active');
+      if (dots[next]) dots[next].classList.add('active');
+    }
+
+    card.addEventListener('mouseenter', () => {
+      autoInterval = setInterval(advanceSlide, 2500);
+    });
+
+    card.addEventListener('mouseleave', () => {
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+      }
     });
   });
 
@@ -1655,6 +1712,320 @@ async function updateSearchSuggestions(query) {
     });
   });
 }
+
+// ── Premium product display modal ──
+function getProductInfo(category) {
+  const cat = (category || '').toLowerCase();
+  if (cat.includes('fresh')) {
+    return {
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Certified' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Produce' },
+        { icon: 'fa-solid fa-check-circle', label: 'Non-GMO' },
+      ],
+      agriInfo: [
+        'Hand-picked at peak freshness from certified farms',
+        'Cold-chain maintained throughout transit (2-4°C)',
+        'Shelf life: 5-7 days under refrigeration',
+        'Washed and trimmed, ready to cook',
+        'Grown using sustainable agricultural practices',
+      ],
+      storage: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
+      warranty: '7-day freshness guarantee — replace if spoiled on arrival.',
+      returnPolicy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
+      shipping: 'Free shipping on orders above ₹499. Dispatched in insulated boxes with ice packs.',
+      compliance: 'Compliant with FSSAI (Food Safety and Standards Authority of India) regulations. Grown under Good Agricultural Practices (GAP). Lot-wise traceability maintained.',
+    };
+  }
+  if (cat.includes('dry') || cat.includes('dried')) {
+    return {
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Approved' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Certified' },
+        { icon: 'fa-solid fa-shield', label: 'HACCP Compliant' },
+      ],
+      agriInfo: [
+        'Premium-grade sun-dried & air-dehydrated mushrooms',
+        'No preservatives, no artificial colours',
+        'Shelf life: 12 months in proper storage',
+        'Rehydrate in warm water for 20 mins before use',
+        'Sourced from organic-certified farms in India',
+      ],
+      storage: 'Store in an airtight container in a cool, dry place away from direct sunlight. Refrigeration extends shelf life.',
+      warranty: '30-day quality guarantee — replace if damaged or infested.',
+      returnPolicy: 'Unopened packages can be returned within 7 days. Opened packages replaced only if quality issues found.',
+      shipping: 'Free shipping on orders above ₹499. Lightweight, compact packaging.',
+      compliance: 'Manufactured in FSSAI-registered facility. Batch-tested for microbial contaminants. Meets食品安全 standards per FSSAI regulations.',
+    };
+  }
+  if (cat.includes('kit') || cat.includes('grow')) {
+    return {
+      certificates: [
+        { icon: 'fa-solid fa-flask', label: 'Lab Tested' },
+        { icon: 'fa-solid fa-child', label: 'Child-Safe Materials' },
+        { icon: 'fa-solid fa-recycle', label: 'Eco-Friendly Pack' },
+      ],
+      agriInfo: [
+        'Complete DIY mushroom growing kit — ready to use',
+        'Includes substrate, spawn, and detailed instruction manual',
+        'First harvest in 10-14 days, continues for 2-3 flushes',
+        'Compact size — fits on any shelf or countertop',
+        '100% biodegradable packaging materials',
+      ],
+      storage: 'Store at room temperature (20-30°C) away from direct sunlight. Use within 3 months of purchase for best results.',
+      warranty: '30-day germination guarantee — free replacement if no growth.',
+      returnPolicy: 'Unused kits can be returned within 7 days. Used kits replaced only under warranty terms.',
+      shipping: 'Free shipping on all kit orders. Dispatched within 24 hrs in discreet packaging.',
+      compliance: 'Compliant with BIS standards for educational kits. Non-toxic materials certified. Meets CPCB guidelines for biodegradable packaging.',
+    };
+  }
+  // Default: spores, spawn, other
+  return {
+    certificates: [
+      { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
+      { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
+      { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
+    ],
+    agriInfo: [
+      'Cultured in sterile laboratory conditions',
+      'High germination rate — tested for viability',
+      'Packaged in sterile, contamination-proof containers',
+      'Shelf life: 6 months under proper storage',
+      'Suitable for both beginners and experienced growers',
+    ],
+    storage: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
+    warranty: '14-day viability guarantee — free replacement if no germination.',
+    returnPolicy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
+    shipping: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
+    compliance: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
+  };
+}
+
+function showPremiumProductModal(productId) {
+  const modal = document.getElementById('premium-product-modal');
+  if (!modal) return;
+  const body = document.getElementById('ppm-body');
+  const product = state.products.find(p => p.id === productId);
+  if (!product) { body.innerHTML = '<p style="padding:2rem;text-align:center;color:#94a3b8;">Product not found.</p>'; modal.classList.add('active'); return; }
+
+  const images = (Array.isArray(product.image_urls) && product.image_urls.length > 0)
+    ? product.image_urls.filter(Boolean)
+    : [product.image_url].filter(Boolean);
+
+  const cat = (state.categories || []).find(c => c.id === product.category);
+  const catName = cat ? cat.name : product.category;
+  const varOpts = Array.isArray(product.weight_pricing) && product.weight_pricing.length > 0 ? product.weight_pricing : null;
+  const defVar = varOpts ? varOpts[0] : null;
+  const curPrice = defVar ? defVar.price : (product.price || 0);
+  const curMrp = defVar && defVar.mrp_price ? defVar.mrp_price : (product.mrp_price || 0);
+  const discount = curMrp > curPrice ? Math.round((1 - curPrice / curMrp) * 100) : 0;
+  const info = getProductInfo(product.category);
+
+  const varHTML = varOpts ? `
+    <div class="ppm-variants">
+      <label class="ppm-section-label">Select Variant</label>
+      <div class="ppm-chips" id="ppm-chips">
+        ${varOpts.map((v, i) => `<button class="ppm-chip${i === 0 ? ' active' : ''}" data-idx="${i}" data-w="${v.weight}" data-u="${v.unit}" data-p="${v.price}" data-m="${v.mrp_price || ''}">${v.weight} ${v.unit === 'kg' ? 'kg' : v.unit === 'l' ? 'L' : v.unit === 'ml' ? 'ml' : 'g'}</button>`).join('')}
+      </div>
+    </div>` : '';
+
+  body.innerHTML = `
+    <div class="ppm-layout">
+      <div class="ppm-gallery">
+        <div class="ppm-main-wrap" id="ppm-main-wrap">
+          <img src="${images[0]}" alt="${product.name}" id="ppm-main-img" />
+          <div class="ppm-zoom-hint"><i class="fa-solid fa-magnifying-glass-plus"></i> Hover to zoom</div>
+        </div>
+        ${images.length > 1 ? `
+        <div class="ppm-thumbs" id="ppm-thumbs">
+          ${images.map((img, i) => `<button class="ppm-thumb${i === 0 ? ' active' : ''}" data-idx="${i}"><img src="${img}" alt="" /></button>`).join('')}
+        </div>` : ''}
+      </div>
+      <div class="ppm-info">
+        <div class="ppm-meta-row">
+          <span class="ppm-cat"><i class="fa-solid fa-tag"></i> ${catName}</span>
+          ${discount > 0 ? `<span class="ppm-badge" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">${discount}% OFF</span>` : ''}
+          <span class="ppm-gst">GST ${product.gst_rate || 0}%</span>
+        </div>
+
+        <h1 class="ppm-title">${product.name}</h1>
+
+        <div class="ppm-price-row">
+          <span class="ppm-price" id="ppm-price">₹${curPrice}</span>
+          ${curMrp > curPrice ? `<span class="ppm-mrp" id="ppm-mrp">₹${curMrp}</span>` : ''}
+          ${discount > 0 ? `<span class="ppm-save">Save ₹${curMrp - curPrice}</span>` : ''}
+        </div>
+
+        <p class="ppm-desc">${product.description}</p>
+
+        ${varHTML}
+
+        <div class="ppm-qty-row">
+          <label class="ppm-section-label">Quantity</label>
+          <div class="ppm-qty">
+            <button class="ppm-qty-btn" id="ppm-qty-m">−</button>
+            <span id="ppm-qty-v">1</span>
+            <button class="ppm-qty-btn" id="ppm-qty-p">+</button>
+          </div>
+        </div>
+
+        <div class="ppm-actions">
+          <button class="btn btn-primary" id="ppm-add-cart"><i class="fa-solid fa-bag-shopping"></i> Add to Cart</button>
+          <button class="btn btn-secondary-glow" id="ppm-buy-now"><i class="fa-solid fa-bolt"></i> Buy Now</button>
+        </div>
+
+        <div class="ppm-certs">
+          ${info.certificates.map(c => `<span class="ppm-cert"><i class="${c.icon}"></i> ${c.label}</span>`).join('')}
+        </div>
+
+        <div class="ppm-accordion">
+          <div class="ppm-acc-item open">
+            <button class="ppm-acc-hdr"><i class="fa-solid fa-leaf"></i> Product Information <i class="fa-solid fa-chevron-down ppm-acc-arrow"></i></button>
+            <div class="ppm-acc-body">
+              <ul>${info.agriInfo.map(i => `<li>${i}</li>`).join('')}</ul>
+            </div>
+          </div>
+          <div class="ppm-acc-item">
+            <button class="ppm-acc-hdr"><i class="fa-solid fa-box"></i> Storage &amp; Handling <i class="fa-solid fa-chevron-down ppm-acc-arrow"></i></button>
+            <div class="ppm-acc-body"><p>${info.storage}</p></div>
+          </div>
+          <div class="ppm-acc-item">
+            <button class="ppm-acc-hdr"><i class="fa-solid fa-scale-balanced"></i> Regulatory Compliance <i class="fa-solid fa-chevron-down ppm-acc-arrow"></i></button>
+            <div class="ppm-acc-body"><p>${info.compliance}</p></div>
+          </div>
+        </div>
+
+        <div class="ppm-policies">
+          <div class="ppm-pol"><i class="fa-solid fa-shield-halved"></i><div><strong>Warranty</strong><span>${info.warranty}</span></div></div>
+          <div class="ppm-pol"><i class="fa-solid fa-rotate-left"></i><div><strong>Returns</strong><span>${info.returnPolicy}</span></div></div>
+          <div class="ppm-pol"><i class="fa-solid fa-truck"></i><div><strong>Shipping</strong><span>${info.shipping}</span></div></div>
+        </div>
+      </div>
+    </div>`;
+
+  modal.classList.add('active');
+  document.body.style.overflow = 'hidden';
+
+  // Mark info panel as entered after entrance animation completes
+  const ppmInfo = document.querySelector('.ppm-info');
+  if (ppmInfo) {
+    ppmInfo.classList.remove('entered');
+    setTimeout(() => ppmInfo.classList.add('entered'), 600);
+  }
+
+  // ── Init zoom ──
+  const mw = document.getElementById('ppm-main-wrap');
+  const mi = document.getElementById('ppm-main-img');
+  if (mw && mi) {
+    mw.addEventListener('mousemove', e => {
+      const r = mw.getBoundingClientRect();
+      const x = ((e.clientX - r.left) / r.width) * 100;
+      const y = ((e.clientY - r.top) / r.height) * 100;
+      mi.style.transformOrigin = `${x}% ${y}%`;
+      mi.style.transform = 'scale(2)';
+      const zh = mw.querySelector('.ppm-zoom-hint');
+      if (zh) zh.style.opacity = '0';
+    });
+    mw.addEventListener('mouseleave', () => {
+      mi.style.transform = 'scale(1)';
+      const zh = mw.querySelector('.ppm-zoom-hint');
+      if (zh) zh.style.opacity = '1';
+    });
+  }
+
+  // ── Init thumbnails ──
+  document.getElementById('ppm-thumbs')?.querySelectorAll('.ppm-thumb').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.ppm-thumb').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      const idx = parseInt(t.dataset.idx, 10);
+      mi.src = images[idx];
+      mi.style.transform = 'scale(1)';
+    });
+  });
+
+  // ── Init variant chips ──
+  let selIdx = 0;
+  const chips = document.querySelectorAll('.ppm-chip');
+  chips.forEach(c => {
+    c.addEventListener('click', () => {
+      chips.forEach(x => x.classList.remove('active', 'clicked'));
+      c.classList.add('active', 'clicked');
+      setTimeout(() => c.classList.remove('clicked'), 400);
+      selIdx = parseInt(c.dataset.idx, 10);
+      const p = document.getElementById('ppm-price');
+      const m = document.getElementById('ppm-mrp');
+      p.textContent = `₹${c.dataset.p}`;
+      p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash');
+      if (m && c.dataset.m) {
+        m.textContent = `₹${c.dataset.m}`;
+        m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash');
+      }
+      const s = document.querySelector('.ppm-save');
+      if (s) { s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash'); }
+    });
+  });
+
+  // ── Init quantity ──
+  let qty = 1;
+  const qv = document.getElementById('ppm-qty-v');
+  const popQty = () => { qv.classList.remove('pop'); void qv.offsetWidth; qv.classList.add('pop'); };
+  document.getElementById('ppm-qty-p')?.addEventListener('click', () => { qty = Math.min(qty + 1, 99); qv.textContent = qty; popQty(); });
+  document.getElementById('ppm-qty-m')?.addEventListener('click', () => { qty = Math.max(qty - 1, 1); qv.textContent = qty; popQty(); });
+
+  // ── Init accordion ──
+  document.querySelectorAll('.ppm-acc-hdr').forEach(h => {
+    h.addEventListener('click', () => {
+      const item = h.closest('.ppm-acc-item');
+      const isOpen = item.classList.contains('open');
+      item.classList.toggle('open');
+      if (isOpen) item.querySelector('.ppm-acc-body').style.maxHeight = '0';
+      else item.querySelector('.ppm-acc-body').style.maxHeight = item.querySelector('.ppm-acc-body').scrollHeight + 'px';
+    });
+  });
+  // Set initial heights for open items
+  document.querySelectorAll('.ppm-acc-item.open .ppm-acc-body').forEach(b => { b.style.maxHeight = b.scrollHeight + 'px'; });
+
+  // ── Init add to cart ──
+  document.getElementById('ppm-add-cart')?.addEventListener('click', () => {
+    const chip = document.querySelector('.ppm-chip.active');
+    let wi = null;
+    if (chip) wi = { weight: parseInt(chip.dataset.w, 10), unit: chip.dataset.u, price: parseFloat(chip.dataset.p), mrp_price: chip.dataset.m ? parseFloat(chip.dataset.m) : undefined };
+    for (let i = 0; i < qty; i++) addToCart(product.id, wi);
+    showSuccessToast(`${qty} × ${product.name} added to cart!`);
+  });
+
+  // ── Init buy now ──
+  document.getElementById('ppm-buy-now')?.addEventListener('click', () => {
+    const chip = document.querySelector('.ppm-chip.active');
+    let wi = null;
+    if (chip) wi = { weight: parseInt(chip.dataset.w, 10), unit: chip.dataset.u, price: parseFloat(chip.dataset.p), mrp_price: chip.dataset.m ? parseFloat(chip.dataset.m) : undefined };
+    addToCart(product.id, wi);
+    modal.classList.remove('active');
+    document.body.style.overflow = '';
+    toggleCartDrawer(false);
+    window.location.hash = 'checkout';
+  });
+}
+
+// Close modal
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('premium-product-modal');
+  if (!modal || !modal.classList.contains('active')) return;
+  if (e.target.closest('#ppm-close') || e.target === modal) {
+    modal.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('premium-product-modal');
+    if (modal && modal.classList.contains('active')) {
+      modal.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+  }
+});
 
 // Quick add to cart modal
 function showQuickAddModal(productId) {
@@ -2757,22 +3128,16 @@ function renderTrainingGallery() {
   const allSlides = [...clonesBefore, ...images, ...clonesAfter];
 
   track.innerHTML = allSlides.map((img) => `
-    <div class="tg-slide" style="flex: 0 0 ${slideW}px; width: ${slideW}px; overflow: hidden; border-radius: 12px;">
-      <div class="tg-slide-inner" style="position:relative; width:100%; height:220px;">
+    <div class="tg-slide" style="flex: 0 0 ${slideW}px; width: ${slideW}px;">
+      <div class="tg-slide-inner">
         <img
           src="${img.url}"
           alt="${img.caption || 'Training glimpse'}"
           loading="lazy"
-          style="width:100%; height:100%; object-fit:cover; display:block; border-radius:12px;"
           onerror="this.parentElement.style.background='#e5e7eb';"
         />
         ${img.caption ? `
-          <div class="tg-slide-caption" style="
-            position:absolute; bottom:0; left:0; right:0;
-            background:linear-gradient(transparent, rgba(0,0,0,0.65));
-            color:#fff; padding:12px 14px 10px;
-            font-size:0.82rem; border-radius:0 0 12px 12px;
-          "><i class="fa-solid fa-image"></i> ${img.caption}</div>` : ''}
+          <div class="tg-slide-caption"><i class="fa-solid fa-image"></i> ${img.caption}</div>` : ''}
       </div>
     </div>
   `).join("");
@@ -2787,8 +3152,6 @@ function renderTrainingGallery() {
   for (let i = 0; i < totalSlides; i++) {
     const dot = document.createElement("button");
     dot.className = "tg-dot" + (i === tgCurrentPage ? " active" : "");
-    dot.style.cssText = `width:10px;height:10px;border-radius:50%;border:none;cursor:pointer;padding:0;
-      background:${i === tgCurrentPage ? '#38b17b' : '#d1d5db'};transition:background 0.3s;`;
     dot.addEventListener("click", () => {
       tgCurrentPage = i;
       renderTrainingGallery();
@@ -2808,7 +3171,6 @@ function renderTgDots(dotsWrap, currentPage) {
   if (!dotsWrap) return;
   dotsWrap.querySelectorAll(".tg-dot").forEach((d, i) => {
     d.classList.toggle("active", i === currentPage);
-    d.style.background = i === currentPage ? '#38b17b' : '#d1d5db';
   });
 }
 

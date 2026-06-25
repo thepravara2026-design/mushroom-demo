@@ -149,6 +149,18 @@ async function createProduct(payload) {
         throw err;
       }
     }
+
+    // Ensure MRP is always greater than price for each variant
+    for (const v of weight_pricing) {
+      if (v.mrp_price != null && v.mrp_price <= v.price) {
+        const label = `${v.weight}${v.unit}`;
+        const err = new Error(
+          `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`
+        );
+        err.status = 400;
+        throw err;
+      }
+    }
   }
 
   // Check product name uniqueness across all categories
@@ -341,6 +353,18 @@ async function updateProduct(productId, updates) {
       if (sorted[i].price <= sorted[i - 1].price) {
         const err = new Error(
           `Price for ${sorted[i].weight}${sorted[i].unit} (₹${sorted[i].price}) must be higher than price for ${sorted[i - 1].weight}${sorted[i - 1].unit} (₹${sorted[i - 1].price}). Larger quantities must cost more.`
+        );
+        err.status = 400;
+        throw err;
+      }
+    }
+
+    // Ensure MRP is always greater than price for each variant
+    for (const v of updates.weight_pricing) {
+      if (v.mrp_price != null && v.mrp_price <= v.price) {
+        const label = `${v.weight}${v.unit}`;
+        const err = new Error(
+          `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`
         );
         err.status = 400;
         throw err;

@@ -1,6 +1,6 @@
 import { state, saveUserProfile, deleteUserProfile, saveCart } from '../utils/state.js';
 import { fetchWithAuth, API_BASE, getApiErrorMessage } from '../api/client.js';
-import { showErrorToast, showSuccessToast } from '../utils/notify.js';
+import { showErrorToast, showSuccessToast, showConfirmModal } from '../utils/notify.js';
 import { isValidIndianPhone, isValidEmail, isValidPincode, getFieldError } from '../utils/validation.js';
 import { locationApi } from '../api/locationApi.js';
 
@@ -1022,15 +1022,23 @@ class ProfileModal {
   }
 
   async handleDelete() {
-    const doDelete = confirm(
-      'Delete account? This will remove your account. This action cannot be undone. Proceed?',
-    );
-    if (!doDelete) return;
+    const confirmed = await new Promise((resolve) => {
+      showConfirmModal({
+        title: 'Delete Account',
+        message: 'This will permanently remove your account and all associated data. This action cannot be undone.',
+        confirmText: 'Delete My Account',
+        cancelText: 'Keep Account',
+        showReason: true,
+        reasonPlaceholder: 'Optional: Tell us why you are leaving (helps us improve)',
+        onConfirm: (reason) => resolve(reason || ''),
+        onCancel: () => resolve(null),
+      });
+    });
+
+    if (confirmed === null) return;
+    const reason = confirmed;
 
     if (state.token) {
-      const reason = prompt(
-        'Optional: Please tell us why you are deleting (helps us improve).',
-      ) || '';
       try {
         await fetchWithAuth('/auth/me', {
           method: 'DELETE',
@@ -1042,7 +1050,6 @@ class ProfileModal {
       }
     }
 
-    // clear local profile and auth
     deleteUserProfile();
     window.dispatchEvent(new Event('auth:changed'));
     this.close();

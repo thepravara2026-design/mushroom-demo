@@ -15,10 +15,10 @@ async function findAll(filters = {}) {
   }
 
   if (sort) {
-    const validSorts = ["name", "price", "stock", "category"];
-    const parts = sort.split("_");
-    const field = parts[0];
-    const dir = parts[1];
+    const validSorts = ["name", "price", "stock", "category", "created_at"];
+    const lastUnderscore = sort.lastIndexOf("_");
+    const field = sort.slice(0, lastUnderscore);
+    const dir = sort.slice(lastUnderscore + 1);
     if (validSorts.includes(field)) {
       query = query.order(field, { ascending: dir !== "desc" });
     }

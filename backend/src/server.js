@@ -118,6 +118,16 @@ app.use("/api/promo", promoRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/refunds", refundRoutes);
 
+// Reset mock database (dev only)
+app.post("/api/reset", (req, res) => {
+  if (!db.isMock) {
+    return res.status(400).json({ error: "Reset is only available in mock mode" });
+  }
+  db.resetMockStore();
+  logger.info(" Mock database reset — users, orders, refunds, enrollments cleared");
+  res.json({ success: true, message: "Mock database reset. Users, orders, refunds, and enrollments cleared." });
+});
+
 // Health Check
 app.get("/api/health", (req, res) => {
   res.json({

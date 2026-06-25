@@ -55,8 +55,8 @@ const mockStore = {
   products: [
     {
       id: "prod-1",
+      created_at: "2025-06-01T10:00:00.000Z",
       name: "Pink Oyster Spore Syringe (10ml)",
-
       description:
         "High-viability Pleurotus djamor spores. Perfect for growers who want fast colonizing spawn and beautiful pink mushroom clusters.",
       price: 350.0,
@@ -80,6 +80,7 @@ const mockStore = {
     },
     {
       id: "prod-2",
+      created_at: "2025-06-02T10:00:00.000Z",
       name: "Lion's Mane Spore Culture (10ml)",
       description:
         "Hericium erinaceus liquid culture. High-viability mycelium growth with exceptional yield records.",
@@ -94,6 +95,7 @@ const mockStore = {
     },
     {
       id: "prod-3",
+      created_at: "2025-06-03T10:00:00.000Z",
       name: "Shiitake Grain Spawn (1kg)",
       description:
         "Sterilized organic rye grains fully colonized with premium Lentinula edodes mycelium. Ideal for inoculating sawdust blocks.",
@@ -108,6 +110,7 @@ const mockStore = {
     },
     {
       id: "prod-4",
+      created_at: "2025-06-04T10:00:00.000Z",
       name: "Reishi Spore Print",
       description:
         "Dark purple spore print of Ganoderma lucidum collected on sterile foil. Perfect for agar transfers.",
@@ -122,6 +125,7 @@ const mockStore = {
     },
     {
       id: "prod-5",
+      created_at: "2025-06-05T10:00:00.000Z",
       name: "Fresh Pink Oyster Mushrooms (500g)",
       description:
         "Freshly harvested organic Pink Oyster mushrooms. Beautiful color with a savory, bacon-like aroma when cooked.",
@@ -136,6 +140,7 @@ const mockStore = {
     },
     {
       id: "prod-6",
+      created_at: "2025-06-06T10:00:00.000Z",
       name: "Fresh King Oyster Mushrooms (500g)",
       description:
         "Thick, meaty stems with a savory, umami flavor. Harvested fresh daily. Kept chilled during delivery.",
@@ -150,6 +155,7 @@ const mockStore = {
     },
     {
       id: "prod-7",
+      created_at: "2025-06-07T10:00:00.000Z",
       name: "Dried Reishi Mushrooms (100g)",
       description:
         "Premium sun-dried Ganoderma lucidum slices. Used commonly for making herbal teas and immunity decoctions.",
@@ -164,6 +170,7 @@ const mockStore = {
     },
     {
       id: "prod-8",
+      created_at: "2025-06-08T10:00:00.000Z",
       name: "Dried Cordyceps Militaris (50g)",
       description:
         "Premium lab-grown Cordyceps, dehydrated to preserve active cordycepin content. Excellent for wellness soups.",
@@ -178,6 +185,7 @@ const mockStore = {
     },
     {
       id: "prod-9",
+      created_at: "2025-06-09T10:00:00.000Z",
       name: "Oyster Mushroom Grow Kit",
       description:
         "Easy-to-use organic mushroom fruiting block. Spray with water daily and watch your delicious mushrooms grow in just 10 days!",
@@ -761,5 +769,14 @@ const db = {
   },
 };
 
+function resetMockStore() {
+  mockStore.users = [];
+  mockStore.orders = [];
+  mockStore.refunds = [];
+  mockStore.refund_audits = [];
+  mockStore.enrollments = [];
+}
+
 module.exports = db;
 module.exports._getMockStore = () => mockStore;
+module.exports.resetMockStore = resetMockStore;

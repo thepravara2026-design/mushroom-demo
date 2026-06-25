@@ -1,12 +1,9 @@
 const crypto = require("crypto");
 const repo = require("./RefundRepository");
-const { OrderStates, isValidTransition, restockOrderItems, assertCancellable } = require("../orders/OrderStateService");
+const { OrderStates, isValidTransition, restockOrderItems } = require("../orders/OrderStateService");
 const { generateRefundIdempotencyKey, initiateRazorpayRefund } = require("../payments/PaymentService");
 const { logRefundAction } = require("./RefundAuditService");
 const { sendWhatsAppMessage } = require("../../services/notificationService");
-const { logAuditAction, AUDIT_ACTIONS } = require("../../services/AuditLogService");
-const { notify } = require("../../services/NotificationService");
-const db = require("../../config/db");
 const razorpay = require("../../config/razorpay");
 const logger = require("../../utils/logger");
 
@@ -75,11 +72,13 @@ async function requestCustomerCancellation(orderId, userId, reason) {
     throw new Error("Unauthorized to cancel this order");
   }
 
-  if (!["paid", "pending", "pending_upi_verification"].includes(order.status)) {
+  if (order.status !== "paid" && order.status !== "pending") {
     throw new Error("Only unpaid or paid orders can be cancelled");
   }
 
-  assertCancellable(order);
+  if (order.delivery_status !== "processing" && order.delivery_status !== "placed" && order.delivery_status !== "pending" && order.delivery_status !== "inoculating") {
+    throw new Error("Order can only be cancelled before it is shipped");
+  }
 
   // Validate state machine transition
   if (!isValidTransition(order.status, OrderStates.CANCEL_REQUESTED)) {
@@ -116,23 +115,8 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
     throw new Error("Order has no transaction/payment ID to refund");
   }
 
-  // Check if a refund was already issued for this amount — prevents double-refund on retry
+  // Get number of refund records for this order to use as attempt count
   const existingRefunds = await repo.findRefundsByOrderId(order.id);
-  const completedRefund = (existingRefunds || []).find(
-    (r) => r.razorpay_refund_id && r.status !== "failed" && Number(r.amount) === Number(refundAmount),
-  );
-  if (completedRefund) {
-    logger.info(`[RefundService] Refund ${completedRefund.id} already issued for order ${order.id} — skipping gateway call.`);
-    const updatedOrder = await repo.updateOrder(order.id, {
-      status: OrderStates.REFUND_INITIATED,
-      refund_status: "initiated",
-      refund_id: completedRefund.id,
-      total_refunded_amount: Number(order.total_refunded_amount || 0) + Number(refundAmount),
-    });
-    await restockOrderItems(order);
-    return { success: true, order: updatedOrder, refund: completedRefund };
-  }
-
   const attemptCount = (existingRefunds || []).length;
 
   // Generate deterministic idempotency key
@@ -272,41 +256,32 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
 }
 
 /**
- * Admin approves user cancellation request with refund type selection.
- * @param {string} orderId
- * @param {string} [adminNote=""]
- * @param {object|null} [adminUser=null]
- * @param {string} [refundType="auto"] — 'auto' (Razorpay) or 'manual' (offline)
+ * Admin approves user cancellation request
  */
-async function approveCancellation(orderId, adminNote = "", adminUser = null, refundType = "auto") {
+async function approveCancellation(orderId, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  const isRetry = order.status === OrderStates.REFUND_FAILED;
-
-  if (order.status !== OrderStates.CANCEL_REQUESTED && !isRetry) {
+  if (order.status !== OrderStates.CANCEL_REQUESTED) {
     throw new Error(`Order cancellation request must be in CANCEL_REQUESTED status. Current: ${order.status}`);
   }
 
+  // Update status to CANCEL_APPROVED
+  await repo.updateOrder(orderId, {
+    status: OrderStates.CANCEL_APPROVED
+  });
+
   const auditPerformer = adminUser || "ADMIN";
 
-  if (!isRetry) {
-    // First-time approval — transition from CANCEL_REQUESTED → CANCEL_APPROVED
-    await repo.updateOrder(orderId, {
-      status: OrderStates.CANCEL_APPROVED,
-      refund_type: refundType,
-    });
+  await logRefundAction({
+    orderId,
+    action: "CANCEL_APPROVED",
+    performedBy: auditPerformer,
+    metadata: { adminNote }
+  });
 
-    await logRefundAction({
-      orderId,
-      action: "CANCEL_APPROVED",
-      performedBy: auditPerformer,
-      metadata: { adminNote, refundType }
-    });
-
-    // Notify cancellation approval
-    await sendRefundNotification(order, "APPROVED", { amount: order.total });
-  }
+  // Notify cancellation approval
+  await sendRefundNotification(order, "APPROVED", { amount: order.total });
 
   // If order has no payment ID, cancel it directly without gateway refund
   if (!order.razorpay_payment_id) {
@@ -319,12 +294,7 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null, re
     return { success: true, order: cancelledOrder, refund: null };
   }
 
-  // Route by refund type
-  if (refundType === "manual") {
-    return manualRefundInitiate(orderId, "other", `Manual refund via approval — ${adminNote}`, adminNote, auditPerformer);
-  }
-
-  // Default: auto refund via Razorpay
+  // Initiate full refund
   return executeRefundProcess(order, order.total, "admin", order.cancel_reason || "User Cancelled", adminNote, auditPerformer);
 }
 
@@ -366,7 +336,9 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  assertCancellable(order);
+  if (["shipped", "in_transit", "delivered", "cancelled"].includes(order.delivery_status)) {
+    throw new Error("Order cannot be cancelled after it has been shipped.");
+  }
 
   // Direct cancellation sets status to CANCEL_APPROVED directly
   const cancelledOrder = await repo.updateOrder(orderId, {
@@ -528,170 +500,6 @@ async function runAutoRefundSweep() {
   }
 }
 
-/**
- * Admin manually marks refund as initiated (offline/gateway bypass)
- */
-async function manualRefundInitiate(orderId, paymentMode = "", paymentDetails = "", adminNote = "", adminUser = null) {
-  const order = await repo.findOrderById(orderId);
-  if (!order) throw new Error("Order not found");
-
-  if (order.status !== OrderStates.REFUND_FAILED) {
-    throw new Error(`Manual refund can only be initiated for orders with REFUND_FAILED status. Current: ${order.status}`);
-  }
-
-  const auditPerformer = adminUser || "ADMIN";
-
-  // Create a refund record for the manual refund
-  const refundRecord = await repo.createRefund({
-    order_id: order.id,
-    user_id: order.user_id,
-    razorpay_payment_id: order.razorpay_payment_id || `manual_${Date.now()}`,
-    amount: order.total,
-    refund_reason: order.cancel_reason || "Manual refund",
-    status: "manual_initiated",
-    cancelled_by: "admin",
-    admin_note: adminNote,
-    payment_mode: paymentMode,
-    payment_details: paymentDetails
-  });
-
-  const updatedOrder = await repo.updateOrder(orderId, {
-    status: OrderStates.MANUAL_REFUND_INITIATED,
-    refund_status: "manual_initiated",
-    refund_id: refundRecord.id,
-    manual_refund_payment_mode: paymentMode,
-    manual_refund_payment_details: paymentDetails
-  });
-
-  await logRefundAction({
-    orderId,
-    action: "MANUAL_REFUND_INITIATED",
-    performedBy: auditPerformer,
-    metadata: { adminNote, paymentMode, paymentDetails, refundId: refundRecord.id }
-  });
-
-  await sendRefundNotification(updatedOrder, "REFUND_INITIATED", { amount: order.total });
-
-  return { order: updatedOrder, refund: refundRecord };
-}
-
-/**
- * Admin manually marks refund as completed
- */
-async function manualRefundComplete(orderId, adminNote = "", adminUser = null) {
-  const order = await repo.findOrderById(orderId);
-  if (!order) throw new Error("Order not found");
-
-  if (order.status !== OrderStates.MANUAL_REFUND_INITIATED) {
-    throw new Error(`Manual refund can only be completed for orders in MANUAL_REFUND_INITIATED status. Current: ${order.status}`);
-  }
-
-  const auditPerformer = adminUser || "ADMIN";
-
-  // Update the refund record to completed
-  const refunds = await repo.findRefundsByOrderId(orderId);
-  const activeRefund = refunds.find(r => r.status === "manual_initiated");
-  if (activeRefund) {
-    await repo.updateRefund(activeRefund.id, {
-      status: "manual_completed",
-      processed_at: new Date().toISOString()
-    });
-  }
-
-  const updatedOrder = await repo.updateOrder(orderId, {
-    status: OrderStates.MANUAL_REFUND_COMPLETED,
-    refund_status: "manual_completed"
-  });
-
-  await logRefundAction({
-    orderId,
-    action: "MANUAL_REFUND_COMPLETED",
-    performedBy: auditPerformer,
-    metadata: { adminNote, refundId: activeRefund?.id }
-  });
-
-  await sendRefundNotification(updatedOrder, "REFUND_COMPLETED", { amount: order.total });
-
-  return updatedOrder;
-}
-
-/**
- * Admin approves a PENDING_APPROVAL order → PLACED.
- */
-async function approveOrder(orderId, adminNote = "", adminUser = null) {
-  const order = await repo.findOrderById(orderId);
-  if (!order) throw new Error("Order not found");
-
-  const isPaid = order.status === "paid" || order.status === OrderStates.PAID;
-  if (!isPaid) {
-    throw new Error(`Only paid orders can be approved. Current status: ${order.status}`);
-  }
-
-  const approvalStatus = order.admin_approval_status || "pending";
-  if (approvalStatus === "approved") {
-    throw new Error("Order is already approved.");
-  }
-
-  const auditPerformer = adminUser || "ADMIN";
-  const updatedOrder = await repo.updateOrder(orderId, {
-    admin_approval_status: "approved",
-    delivery_status: "placed",
-    updated_at: new Date().toISOString()
-  });
-
-  logAuditAction({
-    orderId,
-    action: AUDIT_ACTIONS.ORDER_APPROVED,
-    performedBy: auditPerformer,
-    previousState: { status: order.status, delivery_status: order.delivery_status, admin_approval_status: order.admin_approval_status },
-    newState: { status: updatedOrder.status, delivery_status: updatedOrder.delivery_status, admin_approval_status: "approved" },
-    metadata: { adminNote }
-  }).catch(() => {});
-
-  const { data: user } = await db.from("users").select("*").eq("id", order.user_id).single().catch(() => ({}));
-  if (user) {
-    notify("ORDER_APPROVED", updatedOrder, user, { adminNote }).catch(() => {});
-  }
-
-  return updatedOrder;
-}
-
-/**
- * Admin rejects a PENDING_APPROVAL order → REJECTED.
- */
-async function rejectOrder(orderId, reason = "", adminNote = "", adminUser = null) {
-  const order = await repo.findOrderById(orderId);
-  if (!order) throw new Error("Order not found");
-
-  const auditPerformer = adminUser || "ADMIN";
-
-  const updatedOrder = await repo.updateOrder(orderId, {
-    status: OrderStates.REJECTED,
-    admin_approval_status: "rejected",
-    rejection_reason: reason,
-    updated_at: new Date().toISOString()
-  });
-
-  // Restock items since order is rejected
-  await restockOrderItems(order);
-
-  logAuditAction({
-    orderId,
-    action: AUDIT_ACTIONS.ORDER_REJECTED,
-    performedBy: auditPerformer,
-    previousState: { status: order.status, delivery_status: order.delivery_status, admin_approval_status: order.admin_approval_status },
-    newState: { status: updatedOrder.status, admin_approval_status: "rejected" },
-    metadata: { reason, adminNote }
-  }).catch(() => {});
-
-  const { data: user } = await db.from("users").select("*").eq("id", order.user_id).single().catch(() => ({}));
-  if (user) {
-    notify("ORDER_REJECTED", updatedOrder, user, { reason, adminNote }).catch(() => {});
-  }
-
-  return updatedOrder;
-}
-
 module.exports = {
   requestCustomerCancellation,
   approveCancellation,
@@ -699,11 +507,7 @@ module.exports = {
   adminDirectCancellation,
   initiatePartialRefund,
   retryFailedRefund,
-  manualRefundInitiate,
-  manualRefundComplete,
   runAutoRefundSweep,
   sendRefundNotification,
-  executeRefundProcess,
-  approveOrder,
-  rejectOrder
+  executeRefundProcess
 };
