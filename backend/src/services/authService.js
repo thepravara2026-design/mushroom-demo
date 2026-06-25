@@ -116,7 +116,9 @@ class AuthService {
     // Fall back to mock store if live DB failed or in mock mode
     if (!user) {
       // Find or create user in mock store
-      const mockUsers = require("../config/db").mockStore?.users || [];
+      const dbConfig = require("../config/db");
+const mockStore = dbConfig._getMockStore ? dbConfig._getMockStore() : { users: [] };
+const mockUsers = mockStore.users;
       user = mockUsers.find(u => u.email === emailLower);
       if (!user) {
         // Phone uniqueness check: if whatsappNumber provided, ensure no other user has it
@@ -175,7 +177,23 @@ class AuthService {
   async adminRequestOTP(email) {
     const emailLower = String(email).toLowerCase();
 
-    const { data: user } = await userRepo.findByEmail(emailLower);
+    // Try live DB first, fall back to mock store
+    let user = null;
+    if (!db.isMock) {
+      try {
+        const { data: liveUser } = await userRepo.findByEmail(emailLower);
+        if (liveUser) user = liveUser;
+      } catch {
+        // Live DB failed — fall through to mock store
+      }
+    }
+
+    if (!user) {
+      const dbConfig = require("../config/db");
+      const mockStore = dbConfig._getMockStore ? dbConfig._getMockStore() : { users: [] };
+      user = mockStore.users.find(u => u.email === emailLower);
+    }
+
     if (!user || user.role !== "admin") {
       const err = new Error("Invalid admin credentials.");
       err.status = 403;
@@ -228,7 +246,23 @@ class AuthService {
 
     adminOtpStore.delete(emailLower);
 
-    const { data: user } = await userRepo.findByEmail(emailLower);
+    // Try live DB first, fall back to mock store
+    let user = null;
+    if (!db.isMock) {
+      try {
+        const { data: liveUser } = await userRepo.findByEmail(emailLower);
+        if (liveUser) user = liveUser;
+      } catch {
+        // Live DB failed — fall through to mock store
+      }
+    }
+
+    if (!user) {
+      const dbConfig = require("../config/db");
+      const mockStore = dbConfig._getMockStore ? dbConfig._getMockStore() : { users: [] };
+      user = mockStore.users.find(u => u.email === emailLower);
+    }
+
     if (!user || user.role !== "admin") {
       const err = new Error("Admin user not found.");
       err.status = 403;

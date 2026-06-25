@@ -22,7 +22,8 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.21.0",
     "razorpay": "^2.9.2",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "jest": "^29.6.1",

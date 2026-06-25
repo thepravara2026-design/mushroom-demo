@@ -87,8 +87,100 @@ async function restockOrderItems(order) {
   }
 }
 
+
+/**
+ * Resolves a human-readable state label for an order based on its status and delivery_status.
+ * @param {object} order - Order object with status and delivery_status fields
+ * @returns {string} Resolved state description
+ */
+function resolveState(order) {
+  if (!order) return "unknown";
+
+  const { status, delivery_status } = order;
+
+  // Cancel/Refund states take priority
+  if (status === "CANCEL_REQUESTED") return "Cancellation Requested";
+  if (status === "CANCEL_APPROVED") return "Cancellation Approved";
+  if (status === "CANCEL_REJECTED") return "Cancellation Rejected";
+  if (status === "REFUND_PENDING") return "Refund Pending";
+  if (status === "REFUND_INITIATED") return "Refund Initiated";
+  if (status === "REFUND_PROCESSING") return "Refund Processing";
+  if (status === "REFUND_COMPLETED") return "Refund Completed";
+  if (status === "REFUND_FAILED") return "Refund Failed";
+  if (status === "cancelled") return "Cancelled";
+  if (status === "refunded") return "Refunded";
+
+  // Payment states
+  if (status === "pending") return "Pending Payment";
+  if (status === "failed") return "Payment Failed";
+  if (status === "paid" && delivery_status === "placed") return "Order Placed";
+
+  // Delivery states
+  if (delivery_status === "processing" || delivery_status === "inoculating") return "Processing";
+  if (delivery_status === "shipped") return "Shipped";
+  if (delivery_status === "in_transit") return "In Transit";
+  if (delivery_status === "delivered") return "Delivered";
+
+  return status || "unknown";
+}
+
+/**
+ * Asserts that a delivery_status transition is forward-only.
+ * Throws an error if the new status is not a forward progression.
+ * @param {string} currentStatus - Current delivery_status
+ * @param {string} nextStatus - New delivery_status to transition to
+ * @returns {boolean} Returns true if valid
+ * @throws {Error} If transition is not forward-only
+ */
+function assertForwardOnly(currentStatus, nextStatus) {
+  const ORDERED_STATUSES = ["placed", "processing", "inoculating", "shipped", "in_transit", "delivered"];
+
+  const currentIdx = ORDERED_STATUSES.indexOf(currentStatus);
+  const nextIdx = ORDERED_STATUSES.indexOf(nextStatus);
+
+  // If either status is not in the ordered list, allow it (custom statuses like 'cancelled')
+  if (currentIdx === -1 || nextIdx === -1) return true;
+
+  if (nextIdx < currentIdx) {
+    throw new Error(
+      `Cannot move delivery status backward from "${currentStatus}" to "${nextStatus}". ` +
+      "Only forward transitions are allowed."
+    );
+  }
+
+  return true;
+}
+
+/**
+ * Asserts that an order is cancellable (not shipped, in_transit, or delivered).
+ * Throws an error if the order cannot be cancelled.
+ * @param {object} order - Order object to check
+ * @returns {boolean} Returns true if cancellable
+ * @throws {Error} If order cannot be cancelled
+ */
+function assertCancellable(order) {
+  if (!order) {
+    throw new Error("Order not found");
+  }
+
+  const { delivery_status, status } = order;
+
+  if (["shipped", "in_transit", "delivered"].includes(delivery_status)) {
+    throw new Error("Order cannot be cancelled after it has been shipped.");
+  }
+
+  if (["cancelled", "refunded", "CANCEL_REQUESTED", "REFUND_FAILED", "REFUND_COMPLETED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"].includes(status)) {
+    throw new Error("Order is already cancelled or has a completed refund.");
+  }
+
+  return true;
+}
+
 module.exports = {
   OrderStates,
   isValidTransition,
-  restockOrderItems
+  restockOrderItems,
+  resolveState,
+  assertForwardOnly,
+  assertCancellable
 };

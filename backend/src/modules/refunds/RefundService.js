@@ -336,8 +336,8 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  if (["shipped", "delivered", "cancelled"].includes(order.delivery_status)) {
-    throw new Error("Order cannot be cancelled at this stage.");
+  if (["shipped", "in_transit", "delivered", "cancelled"].includes(order.delivery_status)) {
+    throw new Error("Order cannot be cancelled after it has been shipped.");
   }
 
   // Direct cancellation sets status to CANCEL_APPROVED directly

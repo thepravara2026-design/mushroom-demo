@@ -15,7 +15,7 @@ const { JWT_SECRET } = require("../config/jwt");
 const refundService = require("../modules/refunds/RefundService");
 const { OrderStates, assertForwardOnly, assertCancellable, resolveState } = require("../modules/orders/OrderStateService");
 const { logAuditAction, AUDIT_ACTIONS } = require("../services/AuditLogService");
-const { notify } = require("../services/NotificationService");
+const { notify } = require("../services/notificationService");
 const logger = require("../utils/logger");
 const { sendSseEvent, addSseSubscriber } = require("../lib/sse");
 
@@ -305,22 +305,22 @@ router.post(
       const invoiceToken = crypto.randomBytes(12).toString("hex");
       const customerEmail = req.body.customer_email || req.user.email || "";
       const insertPayload = {
-          id: generatedOrderId,
-          user_id: req.user.userId,
-          customer_name: req.body.customer_name || req.user.fullName || req.user.email || "Customer",
-          customer_email: customerEmail,
-          delivery_address: rawAddress,
-          delivery_phone: deliveryPhone,
-          items: orderItems,
-          subtotal: parseFloat(subtotal.toFixed(2)),
-          discount_amount: parseFloat(discountAmount.toFixed(2)),
-          gst_amount: parseFloat(gstAmount.toFixed(2)),
-          shipping_charge: parseFloat(shippingCharge.toFixed(2)),
-          total: parseFloat(total.toFixed(2)),
-          promo_code: promoCode || "",
-          status: "pending",
-          delivery_status: "placed",
-          invoice_token: invoiceToken,
+        id: generatedOrderId,
+        user_id: req.user.userId,
+        customer_name: req.body.customer_name || req.user.fullName || req.user.email || "Customer",
+        customer_email: customerEmail,
+        delivery_address: rawAddress,
+        delivery_phone: deliveryPhone,
+        items: orderItems,
+        subtotal: parseFloat(subtotal.toFixed(2)),
+        discount_amount: parseFloat(discountAmount.toFixed(2)),
+        gst_amount: parseFloat(gstAmount.toFixed(2)),
+        shipping_charge: parseFloat(shippingCharge.toFixed(2)),
+        total: parseFloat(total.toFixed(2)),
+        promo_code: promoCode || "",
+        status: "pending",
+        delivery_status: "placed",
+        invoice_token: invoiceToken,
       };
 
       let newOrder, dbError;
@@ -354,8 +354,8 @@ router.post(
             );
             await adminClient.rpc("exec_sql", {
               sql: "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email TEXT;"
-            }).catch(() => {}); // rpc may not exist — that's fine, column will be added next startup
-          } catch (_) {}
+            }).catch(() => { }); // rpc may not exist — that's fine, column will be added next startup
+          } catch (_) { }
         });
       }
 
@@ -369,8 +369,8 @@ router.post(
         db.from("orders")
           .update({ customer_email: customerEmail })
           .eq("id", newOrder.id)
-          .then(() => {})
-          .catch(() => {});
+          .then(() => { })
+          .catch(() => { });
       }
 
       // Call Razorpay API to generate order
@@ -500,7 +500,7 @@ router.post(
           .eq("id", updatedOrder.user_id)
           .single();
         if (user) {
-          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
+          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
         }
       } catch (e) {
         // ignore WhatsApp errors
@@ -592,7 +592,7 @@ router.post(
             .eq("id", updatedOrder.user_id)
             .single();
           if (user) {
-            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => {});
+            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
           }
         } catch (e) {
           // ignore WhatsApp errors
@@ -749,7 +749,7 @@ router.get("/my-orders", authMiddleware, async (req, res) => {
       ...o,
       resolved_state: resolveState(o),
       cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
-                    !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
       invoice_accessible: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)),
     }));
 
@@ -791,9 +791,9 @@ router.get("/all-orders", authMiddleware, async (req, res) => {
       user_email: userMap[o.user_id] || "unknown@sporekart.com",
       resolved_state: resolveState(o),
       cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
-                    !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
       invoice_accessible_admin: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)) ||
-                                 (o.delivery_status === 'cancelled' && o.status === 'paid'),
+        (o.delivery_status === 'cancelled' && o.status === 'paid'),
     }));
 
     // Sort descending by created_at
@@ -914,7 +914,7 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       previousState: { delivery_status: previousState.delivery_status },
       newState: { delivery_status: delivery_status },
       metadata: { delivery_days_text },
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Notification
     const eventMap = {
@@ -931,7 +931,7 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       if (user) {
         notify(eventMap[delivery_status], updatedOrder, user, {
           eta: delivery_days_text,
-        }).catch(() => {});
+        }).catch(() => { });
       }
     }
 
@@ -952,8 +952,8 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
     const shouldSendWhatsApp =
       (delivery_status === "shipped" && !order.whatsapp_sent) ||
       (["placed", "processing"].includes(delivery_status) &&
-       ["pending", "pending_upi_verification"].includes(order.delivery_status) &&
-       !order.whatsapp_sent);
+        ["pending", "pending_upi_verification"].includes(order.delivery_status) &&
+        !order.whatsapp_sent);
 
     if (shouldSendWhatsApp) {
       try {
@@ -1287,8 +1287,8 @@ router.get("/share/:token", async (req, res) => {
         </thead>
         <tbody>
           ${inv.items
-            .map(
-              (item, idx) => `
+        .map(
+          (item, idx) => `
             <tr>
               <td>${idx + 1}</td>
               <td>${escapeHtml(item.name)}</td>
@@ -1298,8 +1298,8 @@ router.get("/share/:token", async (req, res) => {
               <td class="text-right">₹${item.total.toFixed(2)}</td>
             </tr>
           `,
-            )
-            .join("")}
+        )
+        .join("")}
         </tbody>
       </table>
     </div>
@@ -1527,14 +1527,6 @@ router.get("/events", (req, res) => {
     }
   }
 
-  // Set headers for SSE
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-  res.write("\n");
-
   addSseSubscriber(req, res, user);
 });
 
@@ -1680,7 +1672,7 @@ router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
     }
 
     const { adminNote } = req.body;
-    const updatedOrder = await refundService.approveOrder(req.params.id, adminNote || "", req.user);
+    const updatedOrder = await refundService.approveCancellation(req.params.id, adminNote || "", req.user);
 
     // SSE broadcast
     try {
@@ -1719,7 +1711,7 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
     }
 
     const { reason, adminNote } = req.body;
-    const updatedOrder = await refundService.rejectOrder(req.params.id, reason, adminNote || "", req.user);
+    const updatedOrder = await refundService.rejectCancellation(req.params.id, reason, adminNote || "", req.user);
 
     // SSE broadcast
     try {

@@ -87,6 +87,7 @@ router.post(
           unit: Joi.string().valid("g", "kg", "ml", "l").required(),
           price: Joi.number().required(),
           mrp_price: Joi.number().optional(),
+          stock: Joi.number().min(0).optional(),
         }),
       ).min(1).optional(),
     }),
@@ -122,6 +123,7 @@ const updateProductSchema = Joi.object({
       unit: Joi.string().valid("g", "kg", "ml", "l").required(),
       price: Joi.number().required(),
       mrp_price: Joi.number().optional(),
+      stock: Joi.number().min(0).optional(),
     }),
   ).optional(),
 });

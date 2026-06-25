@@ -41,6 +41,7 @@ const productForm = document.getElementById('form-admin-add-product');
 const productIdDisplay = document.getElementById('admin-prod-id-display');
 const productImageUrl = document.getElementById('admin-prod-image-url');
 const weightPricingContainer = document.getElementById('admin-weight-pricing-container');
+const capsuleWeightContainer = document.getElementById('admin-capsule-weight-container');
 const btnAddWeightRow = document.getElementById('btn-add-weight-row');
 // Training DOM elements
 const trainForm = document.getElementById('form-admin-add-training');
@@ -521,27 +522,126 @@ async function readFileAsDataUrl(file) {
 // Weight / Litre pricing row management
 // -----------------------------
 const WEIGHT_OPTIONS = [
-  { value: '100g', label: '100 g' },
-  { value: '200g', label: '200 g' },
-  { value: '250g', label: '250 g' },
-  { value: '400g', label: '400 g' },
-  { value: '500g', label: '500 g' },
-  { value: '1kg', label: '1 kg' },
-  { value: '2kg', label: '2 kg' },
-  { value: '5kg', label: '5 kg' },
+  { value: '100g', label: '100g' },
+  { value: '200g', label: '200g' },
+  { value: '250g', label: '250g' },
+  { value: '400g', label: '400g' },
+  { value: '500g', label: '500g' },
+  { value: '1kg', label: '1kg' },
+  { value: '2kg', label: '2kg' },
+  { value: '5kg', label: '5kg' },
 ];
 
 const LITRE_OPTIONS = [
-  { value: '10ml', label: '10 ml' },
-  { value: '20ml', label: '20 ml' },
-  { value: '40ml', label: '40 ml' },
-  { value: '50ml', label: '50 ml' },
-  { value: '100ml', label: '100 ml' },
-  { value: '200ml', label: '200 ml' },
-  { value: '1l', label: '1 l' },
-  { value: '2l', label: '2 l' },
-  { value: '5l', label: '5 l' },
+  { value: '10ml', label: '10ml' },
+  { value: '20ml', label: '20ml' },
+  { value: '50ml', label: '50ml' },
+  { value: '100ml', label: '100ml' },
+  { value: '200ml', label: '200ml' },
+  { value: '500ml', label: '500ml' },
+  { value: '1l', label: '1l' },
+  { value: '2l', label: '2l' },
+  { value: '5l', label: '5l' },
 ];
+
+// Weight pill widget helpers
+function wpwHTML(selectClass, mode) {
+  const groups = [];
+  if (!mode || mode === 'weight') groups.push({ label: 'Weight', options: WEIGHT_OPTIONS });
+  if (!mode || mode === 'litre') groups.push({ label: 'Volume', options: LITRE_OPTIONS });
+  const allOpts = [...WEIGHT_OPTIONS, ...LITRE_OPTIONS];
+  return `<div class="wpw">
+    <select class="${selectClass}" hidden>
+      <option value=""></option>
+      ${allOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+    </select>
+    <div class="wpw-pills">
+      ${groups.map(g => `<div class="wpw-g">
+        <span class="wpw-gl">${g.label}</span>
+        <div class="wpw-r">${g.options.map(o => `<button type="button" class="wpw-p" data-value="${o.value}">${o.label}</button>`).join('')}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function wpwAttach(root) {
+  root.querySelectorAll('.wpw-p').forEach(p => {
+    p.addEventListener('click', () => {
+      const w = p.closest('.wpw');
+      w.querySelectorAll('.wpw-p.active').forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+      const s = w.querySelector('select');
+      s.value = p.dataset.value;
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+}
+
+function wpwSetValue(root, value) {
+  if (!value) return;
+  const key = value.unit === 'kg' || value.unit === 'l' ? `${value.weight}${value.unit}` : `${value.weight}${value.unit}`;
+  const s = root.querySelector('select');
+  if ([...s.options].some(o => o.value === key)) s.value = key;
+  const p = root.querySelector(`.wpw-p[data-value="${key}"]`);
+  if (p) p.classList.add('active');
+}
+
+function wpwTransformStatic() {
+  document.querySelectorAll('.admin-weight-select, .admin-capsule-weight-select').forEach(sel => {
+    if (sel.closest('.wpw') || sel.hidden) return;
+    const ctr = sel.closest('#admin-weight-pricing-container, #admin-capsule-weight-container');
+    const mode = ctr?.dataset.mode;
+    const wrap = document.createElement('div');
+    wrap.className = 'wpw';
+    sel.parentNode.insertBefore(wrap, sel);
+    sel.hidden = true;
+    wrap.appendChild(sel);
+    const og = sel.querySelectorAll('optgroup');
+    const groups = [];
+    if (og.length) {
+      og.forEach(g => {
+        const label = g.label.replace(/[—\s]/g,'').trim() || 'Options';
+        if (mode && ((mode === 'weight' && label !== 'Weight') || (mode === 'litre' && label !== 'Volume'))) return;
+        const opts = [];
+        g.querySelectorAll('option').forEach(o => { if (o.value) opts.push({ value: o.value, label: o.textContent.trim() }); });
+        if (opts.length) groups.push({ label, options: opts });
+      });
+    } else {
+      const w = [], v = [];
+      sel.querySelectorAll('option').forEach(o => {
+        if (!o.value) return;
+        const u = (o.value.match(/[a-z]+$/) || [''])[0];
+        ((u === 'g' || u === 'kg') ? w : v).push({ value: o.value, label: o.textContent.trim() });
+      });
+      if (w.length && (!mode || mode === 'weight')) groups.push({ label: 'Weight', options: w });
+      if (v.length && (!mode || mode === 'litre')) groups.push({ label: 'Volume', options: v });
+    }
+    const pd = document.createElement('div');
+    pd.className = 'wpw-pills';
+    groups.forEach(g => {
+      const gd = document.createElement('div');
+      gd.className = 'wpw-g';
+      const gl = document.createElement('span');
+      gl.className = 'wpw-gl';
+      gl.textContent = g.label;
+      gd.appendChild(gl);
+      const gr = document.createElement('div');
+      gr.className = 'wpw-r';
+      g.options.forEach(o => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'wpw-p' + (o.value === sel.value ? ' active' : '');
+        b.dataset.value = o.value;
+        b.textContent = o.label.replace(/\s+/g, '');
+        gr.appendChild(b);
+      });
+      gd.appendChild(gr);
+      pd.appendChild(gd);
+    });
+    wrap.appendChild(pd);
+  });
+  wpwAttach(document.body);
+}
 
 function getActivePricingMode() {
   const activeBtn = document.querySelector('.pricing-type-btn.active');
@@ -558,15 +658,11 @@ function toggleStockField() {
 }
 
 function createWeightRow(value) {
-  const mode = getActivePricingMode();
-  const options = mode === 'litre' ? LITRE_OPTIONS : WEIGHT_OPTIONS;
+  const mode = weightPricingContainer?.dataset.mode;
   const row = document.createElement('div');
   row.className = 'admin-weight-pricing-row';
   row.innerHTML = `
-    <select class="admin-weight-select">
-      <option value="">Select ${mode === 'litre' ? 'volume' : 'weight'}</option>
-      ${options.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
-    </select>
+    ${wpwHTML('admin-weight-select', mode)}
     <div class="awp-fields">
       <div class="awp-field">
         <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
@@ -583,10 +679,9 @@ function createWeightRow(value) {
     </div>
     <button type="button" class="btn-weight-remove" title="Remove variant"><i class="fa-solid fa-trash-can"></i></button>
   `;
+  wpwAttach(row);
   if (value) {
-    const sel = row.querySelector('.admin-weight-select');
-    const key = value.unit === 'kg' ? `${value.weight}kg` : value.unit === 'l' ? `${value.weight}l` : `${value.weight}${value.unit}`;
-    if ([...sel.options].some(o => o.value === key)) sel.value = key;
+    wpwSetValue(row, value);
     row.querySelector('.admin-weight-price').value = value.price;
     row.querySelector('.admin-weight-mrp').value = value.mrp_price || '';
     row.querySelector('.admin-weight-stock').value = value.stock ?? '';
@@ -635,9 +730,9 @@ function getWeightPricingData() {
 function setWeightPricingData(data) {
   weightPricingContainer.innerHTML = '';
   if (Array.isArray(data) && data.length > 0) {
-    // Detect mode from existing data
     const isLitre = data.some(v => v.unit === 'ml' || v.unit === 'l');
     const targetMode = isLitre ? 'litre' : 'weight';
+    weightPricingContainer.dataset.mode = targetMode;
     document.querySelectorAll('.pricing-type-btn').forEach(btn => {
       btn.classList.toggle('active', btn.getAttribute('data-mode') === targetMode);
     });
@@ -1069,6 +1164,20 @@ function initGallery(containerId, previewPrefix, badgeId, addBtnId, galleryName)
   updateGalleryCount(containerId, badgeId);
 }
 
+/* ── Premium Gallery Reset ────────────────────── */
+function resetPremiumGallery() {
+  const grid = document.getElementById('capsule-gallery-grid');
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="premium-gallery-slot" data-slot="0">
+      <div class="gallery-placeholder"><i class="fa-regular fa-image"></i><span>#1</span></div>
+      <input type="url" class="gallery-url-input gallery-input-hidden" data-slot="0" />
+      <button type="button" class="gallery-remove-overlay" data-slot="0" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+    </div>`;
+  const badge = document.getElementById('capsule-gallery-count-badge');
+  if (badge) badge.textContent = '0 / 3 min';
+}
+
 /* ── Live total stock helpers ─────────────────── */
 function updateCapsuleTotalStock() {
   const container = document.getElementById('admin-capsule-weight-container');
@@ -1124,42 +1233,40 @@ function resetCapsuleAddForm() {
   if (form) form.reset();
   populateCapsuleCategorySelect();
   const preview = document.getElementById('admin-capsule-img-preview');
-  if (preview) preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+  if (preview) {
+    preview.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i><span>Drop an image here or click to browse</span><small>Supports JPG, PNG, WebP</small>';
+  }
+  const zone = document.getElementById('capsule-image-zone');
+  if (zone) zone.classList.remove('has-image');
+  const overlay = zone?.querySelector('.premium-img-overlay');
+  if (overlay) overlay.style.display = 'none';
   document.getElementById('admin-capsule-edit-id').value = '';
+  document.getElementById('capsule-image-url-input').value = '';
   const wc = document.getElementById('admin-capsule-weight-container');
   if (wc) {
     wc.innerHTML = `
-      <div class="admin-weight-pricing-row">
-        <select class="admin-weight-select admin-capsule-weight-select">
-          <option value="">Select weight</option>
-          <option value="100g">100 g</option>
-          <option value="200g">200 g</option>
-          <option value="250g">250 g</option>
-          <option value="400g">400 g</option>
-          <option value="500g">500 g</option>
-          <option value="1kg">1 kg</option>
-          <option value="2kg">2 kg</option>
-          <option value="5kg">5 kg</option>
-        </select>
-        <div class="awp-fields">
-          <div class="awp-field">
-            <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
-            <input type="number" step="0.01" class="admin-weight-price admin-capsule-weight-price" placeholder="Price" />
+      <div class="premium-weight-row">
+        ${wpwHTML('admin-capsule-weight-select pw-select')}
+        <div class="premium-weight-fields">
+          <div class="pw-field">
+            <label>Selling Price</label>
+            <input type="number" step="0.01" class="admin-capsule-weight-price" placeholder="0.00" />
           </div>
-          <div class="awp-field">
-            <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
-            <input type="number" step="0.01" class="admin-weight-mrp admin-capsule-weight-mrp" placeholder="MRP" />
+          <div class="pw-field">
+            <label>MRP</label>
+            <input type="number" step="0.01" class="admin-capsule-weight-mrp" placeholder="0.00" />
           </div>
-          <div class="awp-field awp-field-stock">
-            <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
-            <input type="number" class="admin-weight-stock admin-capsule-weight-stock" placeholder="Stock" min="0" />
+          <div class="pw-field">
+            <label>Stock</label>
+            <input type="number" class="admin-capsule-weight-stock admin-weight-stock" placeholder="0" min="0" />
           </div>
         </div>
-        <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
+        <button type="button" class="premium-weight-remove"><i class="fa-solid fa-xmark"></i></button>
       </div>`;
+    wpwAttach(wc);
   }
   updateCapsuleTotalStock();
-  resetGallery('capsule-gallery-grid', 'capsule-gallery-preview', 'capsule-gallery-count-badge');
+  resetPremiumGallery();
   const fb = document.getElementById('admin-capsule-add-feedback');
   if (fb) { fb.classList.add('hidden'); fb.textContent = ''; }
 }
@@ -1183,7 +1290,7 @@ async function handleCapsuleAddSubmit(e) {
   const weightContainer = document.getElementById('admin-capsule-weight-container');
   const weightPricing = [];
   if (weightContainer) {
-    weightContainer.querySelectorAll('.admin-weight-pricing-row').forEach(row => {
+    weightContainer.querySelectorAll('.premium-weight-row').forEach(row => {
       const w = row.querySelector('.admin-capsule-weight-select')?.value;
       const price = parseFloat(row.querySelector('.admin-capsule-weight-price')?.value);
       const mrp = parseFloat(row.querySelector('.admin-capsule-weight-mrp')?.value);
@@ -1206,6 +1313,22 @@ async function handleCapsuleAddSubmit(e) {
   if (!weightPricing.length) {
     if (feedback) { feedback.textContent = 'Add at least one weight variant with a price.'; feedback.classList.remove('hidden'); }
     return;
+  }
+
+  // Ensure MRP is provided and > price for every variant (mandatory by law)
+  for (const v of weightPricing) {
+    if (v.mrp_price == null || isNaN(v.mrp_price)) {
+      const label = `${v.weight}${v.unit}`;
+      feedback.textContent = `MRP (Maximum Retail Price) is mandatory for ${label}. Please enter a valid MRP as required by law.`;
+      feedback.classList.remove('hidden');
+      return;
+    }
+    if (v.mrp_price <= v.price) {
+      const label = `${v.weight}${v.unit}`;
+      feedback.textContent = `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`;
+      feedback.classList.remove('hidden');
+      return;
+    }
   }
 
   let imageUrl = document.getElementById('admin-capsule-prod-image-url')?.value.trim() || '';
@@ -1421,6 +1544,24 @@ async function handleAdminAddProduct(event) {
         const prevLabel = variantLabel(sorted[i - 1]);
         const currLabel = variantLabel(sorted[i]);
         feedback.textContent = `Price for ${currLabel} (₹${sorted[i].price}) must be higher than price for ${prevLabel} (₹${sorted[i - 1].price}). Larger quantities must cost more.`;
+        feedback.classList.remove('hidden');
+        feedback.style.color = 'var(--color-danger)';
+        return;
+      }
+    }
+
+    // Ensure MRP is provided and > price for every variant (mandatory by law)
+    for (const v of weightPricing) {
+      if (v.mrp_price == null || isNaN(v.mrp_price)) {
+        const label = variantLabel(v);
+        feedback.textContent = `MRP (Maximum Retail Price) is mandatory for ${label}. Please enter a valid MRP as required by law.`;
+        feedback.classList.remove('hidden');
+        feedback.style.color = 'var(--color-danger)';
+        return;
+      }
+      if (v.mrp_price <= v.price) {
+        const label = variantLabel(v);
+        feedback.textContent = `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`;
         feedback.classList.remove('hidden');
         feedback.style.color = 'var(--color-danger)';
         return;
@@ -3619,7 +3760,7 @@ function resetAdminForm() {
   const label = document.getElementById('admin-submit-label');
   if (label) label.textContent = 'Publish Product';
   const preview = document.getElementById('admin-img-preview');
-  if (preview) preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+  if (preview) preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span><small>Upload an image or paste a URL</small>';
   const feedback = document.getElementById('admin-add-feedback');
   if (feedback) feedback.classList.add('hidden');
   updateProductIdDisplay();
@@ -4548,15 +4689,24 @@ function setupAdminEventHandlers() {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.pricing-type-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      // Rebuild rows with new mode options
-      const existingData = getWeightPricingData();
-      weightPricingContainer.innerHTML = '';
-      if (existingData.length > 0) {
-        existingData.forEach(item => weightPricingContainer.appendChild(createWeightRow(item)));
-      } else {
-        weightPricingContainer.appendChild(createWeightRow(null));
+      const mode = btn.getAttribute('data-mode') || 'weight';
+      const ctr = btn.closest('.premium-weight-section, .input-field')
+        ?.querySelector('#admin-capsule-weight-container, #admin-weight-pricing-container');
+      if (!ctr) return;
+      ctr.dataset.mode = mode;
+      if (ctr.id === 'admin-weight-pricing-container') {
+        const existingData = getWeightPricingData();
+        ctr.innerHTML = '';
+        if (existingData.length > 0) {
+          existingData.forEach(item => ctr.appendChild(createWeightRow(item)));
+        } else {
+          ctr.appendChild(createWeightRow(null));
+        }
+        toggleStockField();
       }
-      toggleStockField();
+      if (ctr.id === 'admin-capsule-weight-container') {
+        // CSS handles pill visibility via data-mode
+      }
     });
   });
 
@@ -4644,6 +4794,23 @@ function setupAdminEventHandlers() {
     productImageUrl.addEventListener('input', () => {
       if (productImageFile?.files?.length) productImageFile.value = '';
       updateImagePreview();
+    });
+  }
+  // Premium image zone — click to upload, drag-and-drop
+  const adminImageZone = document.getElementById('admin-image-zone');
+  if (adminImageZone && productImageFile) {
+    adminImageZone.addEventListener('click', (e) => {
+      if (e.target.closest('#admin-prod-image-browse')) return;
+      if (e.target.closest('#admin-prod-image-url')) return;
+      productImageFile.click();
+    });
+    adminImageZone.addEventListener('dragover', (e) => { e.preventDefault(); adminImageZone.classList.add('dragover'); });
+    adminImageZone.addEventListener('dragleave', () => { adminImageZone.classList.remove('dragover'); });
+    adminImageZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      adminImageZone.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if (files.length) { productImageFile.files = files; productImageFile.dispatchEvent(new Event('change')); }
     });
   }
   if (categoryImageFile) categoryImageFile.addEventListener('change', updateCategoryImagePreview);
@@ -4744,44 +4911,35 @@ function setupAdminEventHandlers() {
   }
 
   // Capsule add-weight row
-  const capsuleAddWeight = document.querySelector('.btn-capsule-add-weight');
+  const capsuleAddWeight = document.querySelector('.btn-premium-add-weight');
   if (capsuleAddWeight) {
     capsuleAddWeight.addEventListener('click', () => {
       const wc = document.getElementById('admin-capsule-weight-container');
       if (!wc) return;
       const row = document.createElement('div');
-      row.className = 'admin-weight-pricing-row';
+      row.className = 'premium-weight-row';
       row.innerHTML = `
-        <select class="admin-weight-select admin-capsule-weight-select">
-          <option value="">Select weight</option>
-          <option value="100g">100 g</option>
-          <option value="200g">200 g</option>
-          <option value="250g">250 g</option>
-          <option value="400g">400 g</option>
-          <option value="500g">500 g</option>
-          <option value="1kg">1 kg</option>
-          <option value="2kg">2 kg</option>
-          <option value="5kg">5 kg</option>
-        </select>
-        <div class="awp-fields">
-          <div class="awp-field">
-            <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
-            <input type="number" step="0.01" class="admin-weight-price admin-capsule-weight-price" placeholder="Price" />
+        ${wpwHTML('admin-capsule-weight-select pw-select')}
+        <div class="premium-weight-fields">
+          <div class="pw-field">
+            <label>Selling Price</label>
+            <input type="number" step="0.01" class="admin-capsule-weight-price" placeholder="0.00" />
           </div>
-          <div class="awp-field">
-            <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
-            <input type="number" step="0.01" class="admin-weight-mrp admin-capsule-weight-mrp" placeholder="MRP" />
+          <div class="pw-field">
+            <label>MRP</label>
+            <input type="number" step="0.01" class="admin-capsule-weight-mrp" placeholder="0.00" />
           </div>
-          <div class="awp-field awp-field-stock">
-            <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
-            <input type="number" class="admin-weight-stock admin-capsule-weight-stock" placeholder="Stock" min="0" />
+          <div class="pw-field">
+            <label>Stock</label>
+            <input type="number" class="admin-capsule-weight-stock admin-weight-stock" placeholder="0" min="0" />
           </div>
         </div>
-        <button type="button" class="btn-weight-remove"><i class="fa-solid fa-trash-can"></i></button>
+        <button type="button" class="premium-weight-remove"><i class="fa-solid fa-xmark"></i></button>
       `;
       wc.appendChild(row);
-      row.querySelector('.btn-weight-remove').addEventListener('click', () => {
-        if (wc.querySelectorAll('.admin-weight-pricing-row').length > 1) {
+      wpwAttach(row);
+      row.querySelector('.premium-weight-remove').addEventListener('click', () => {
+        if (wc.querySelectorAll('.premium-weight-row').length > 1) {
           row.remove();
           updateCapsuleTotalStock();
         }
@@ -4791,44 +4949,104 @@ function setupAdminEventHandlers() {
   }
   // Delegate remove for existing weight rows
   document.addEventListener('click', (ev) => {
-    const rm = ev.target.closest('.btn-weight-remove');
+    const rm = ev.target.closest('.premium-weight-remove');
     if (rm && rm.closest('#admin-capsule-weight-container')) {
       const wc = document.getElementById('admin-capsule-weight-container');
-      if (wc && wc.querySelectorAll('.admin-weight-pricing-row').length > 1) {
-        rm.closest('.admin-weight-pricing-row').remove();
+      if (wc && wc.querySelectorAll('.premium-weight-row').length > 1) {
+        rm.closest('.premium-weight-row').remove();
         updateCapsuleTotalStock();
       }
     }
   });
 
-  // Capsule image preview
-  const capsuleBrowseBtn = document.querySelector('.admin-capsule-image-browse');
+  // Capsule image zone - click & drag/drop
+  const capsuleImageZone = document.getElementById('capsule-image-zone');
   const capsuleImageFile = document.querySelector('.admin-capsule-image-file');
-  if (capsuleBrowseBtn && capsuleImageFile) {
-    capsuleBrowseBtn.addEventListener('click', () => capsuleImageFile.click());
+  if (capsuleImageZone && capsuleImageFile) {
+    capsuleImageZone.addEventListener('click', (e) => {
+      if (e.target.closest('.premium-img-overlay')) return;
+      capsuleImageFile.click();
+    });
+    capsuleImageZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      capsuleImageZone.classList.add('dragover');
+    });
+    capsuleImageZone.addEventListener('dragleave', () => {
+      capsuleImageZone.classList.remove('dragover');
+    });
+    capsuleImageZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      capsuleImageZone.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if (files.length) {
+        capsuleImageFile.files = files;
+        capsuleImageFile.dispatchEvent(new Event('change'));
+      }
+    });
     capsuleImageFile.addEventListener('change', () => {
       const file = capsuleImageFile.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev2) => {
         const preview = document.getElementById('admin-capsule-img-preview');
-        if (preview) preview.innerHTML = `<img src="${ev2.target.result}" alt="Preview">`;
+        if (preview) {
+          preview.innerHTML = `<img src="${ev2.target.result}" alt="Preview">`;
+        }
+        capsuleImageZone.classList.add('has-image');
+        const overlay = capsuleImageZone.querySelector('.premium-img-overlay');
+        if (overlay) overlay.style.display = 'flex';
+        const urlInput = document.getElementById('admin-capsule-prod-image-url');
+        if (urlInput) urlInput.value = ev2.target.result;
       };
       reader.readAsDataURL(file);
     });
   }
-  // Capsule image URL preview
-  const capsuleImageUrl = document.getElementById('admin-capsule-prod-image-url');
-  if (capsuleImageUrl) {
-    capsuleImageUrl.addEventListener('input', () => {
+
+  // Capsule URL apply button
+  const capsuleUrlInput = document.getElementById('capsule-image-url-input');
+  const capsuleApplyBtn = document.getElementById('capsule-apply-url-btn');
+  if (capsuleUrlInput && capsuleApplyBtn) {
+    function applyImageUrl() {
+      const url = capsuleUrlInput.value.trim();
+      if (!url) return;
       const preview = document.getElementById('admin-capsule-img-preview');
-      if (preview && capsuleImageUrl.value.trim()) {
-        preview.innerHTML = `<img src="${capsuleImageUrl.value.trim()}" alt="Preview" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-image\\\\\\'></i><span>Image preview</span>'">`;
-      } else if (preview) {
-        preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
+      if (preview) {
+        preview.innerHTML = `<img src="${url}" alt="Preview" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-cloud-arrow-up\\\\\\'></i><span>Invalid image URL</span><small>Try again</small>'">`;
       }
+      capsuleImageZone?.classList.add('has-image');
+      const overlay = capsuleImageZone?.querySelector('.premium-img-overlay');
+      if (overlay) overlay.style.display = 'flex';
+      const urlInputHidden = document.getElementById('admin-capsule-prod-image-url');
+      if (urlInputHidden) urlInputHidden.value = url;
+    }
+    capsuleApplyBtn.addEventListener('click', applyImageUrl);
+    capsuleUrlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') applyImageUrl();
     });
   }
+
+  // Capsule image change/remove buttons
+  document.addEventListener('click', (ev) => {
+    const changeBtn = ev.target.closest('.capsule-image-change');
+    if (changeBtn && capsuleImageFile) {
+      capsuleImageFile.click();
+    }
+    const removeBtn = ev.target.closest('.capsule-image-remove');
+    if (removeBtn) {
+      const zone = document.getElementById('capsule-image-zone');
+      const preview = document.getElementById('admin-capsule-img-preview');
+      if (preview) {
+        preview.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i><span>Drop an image here or click to browse</span><small>Supports JPG, PNG, WebP</small>';
+      }
+      zone?.classList.remove('has-image');
+      const overlay = zone?.querySelector('.premium-img-overlay');
+      if (overlay) overlay.style.display = 'none';
+      const urlInput = document.getElementById('admin-capsule-prod-image-url');
+      if (urlInput) urlInput.value = '';
+      document.getElementById('capsule-image-url-input').value = '';
+      if (capsuleImageFile) capsuleImageFile.value = '';
+    }
+  });
 
   // Mobile filter toggle
   const filterToggle = document.getElementById('admin-filter-toggle');
@@ -4878,6 +5096,22 @@ function setupAdminEventHandlers() {
       document.querySelectorAll('.ship-panel').forEach((p) => p.classList.remove('active'));
       const panel = document.getElementById(`ship-panel-${target}`);
       if (panel) panel.classList.add('active');
+    });
+  });
+
+  // Status pill filter buttons
+  document.querySelectorAll('.ship-status-pill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.ship-status-pill').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const status = btn.dataset.status;
+      if (status === 'all') {
+        currentSection = 'all';
+        renderAdminOrders(adminOrdersCache || []);
+      } else {
+        currentSection = status;
+        renderCurrentSection();
+      }
     });
   });
 
@@ -5007,11 +5241,10 @@ function setupAdminEventHandlers() {
   globalThis.shareInvoiceWhatsApp = shareInvoiceWhatsApp;
   globalThis.renderAdminOrders = renderAdminOrders;
 
-  // Initialize gallery grids
+  // Initialize gallery grids (main form)
   initGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge', 'btn-gallery-add-main', 'main');
-  initGallery('capsule-gallery-grid', 'capsule-gallery-preview', 'capsule-gallery-count-badge', 'btn-gallery-add-capsule', 'capsule');
 
-  // Gallery upload buttons
+  // Gallery upload buttons (main form)
   const uploadMainBtn = document.getElementById('btn-gallery-upload-main');
   const galleryFileMain = document.getElementById('gallery-file-main');
   if (uploadMainBtn && galleryFileMain) {
@@ -5020,19 +5253,148 @@ function setupAdminEventHandlers() {
       handleGalleryFiles('gallery-file-main', 'admin-gallery-grid', 'gallery-preview', 'main');
     });
   }
+
+  // Premium capsule gallery
   const uploadCapsuleBtn = document.getElementById('btn-gallery-upload-capsule');
   const galleryFileCapsule = document.getElementById('gallery-file-capsule');
-  if (uploadCapsuleBtn && galleryFileCapsule) {
-    uploadCapsuleBtn.addEventListener('click', () => galleryFileCapsule.click());
-    galleryFileCapsule.addEventListener('change', () => {
-      handleGalleryFiles('gallery-file-capsule', 'capsule-gallery-grid', 'capsule-gallery-preview', 'capsule');
+  const capsuleGalleryGrid = document.getElementById('capsule-gallery-grid');
+
+  function updatePremiumGalleryCount() {
+    const filled = capsuleGalleryGrid ? capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot img').length : 0;
+    const badge = document.getElementById('capsule-gallery-count-badge');
+    if (badge) badge.textContent = `${filled} / 3 min`;
+  }
+
+  function wirePremiumGallerySlot(slot) {
+    const slotIdx = parseInt(slot.dataset.slot, 10);
+    const placeholder = slot.querySelector('.gallery-placeholder');
+    const hiddenInput = slot.querySelector('.gallery-url-input');
+    const removeBtn = slot.querySelector('.gallery-remove-overlay');
+
+    if (hiddenInput) {
+      hiddenInput.addEventListener('input', () => {
+        const val = hiddenInput.value.trim();
+        if (val && placeholder) {
+          placeholder.innerHTML = `<img src="${val}" alt="Gallery ${slotIdx + 1}" />`;
+          slot.classList.add('has-image');
+          removeBtn.style.display = 'flex';
+        } else if (placeholder) {
+          placeholder.innerHTML = `<i class="fa-regular fa-image"></i><span>#${slotIdx + 1}</span>`;
+          slot.classList.remove('has-image');
+          removeBtn.style.display = 'none';
+        }
+        updatePremiumGalleryCount();
+      });
+    }
+    if (removeBtn) {
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (capsuleGalleryGrid && capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot').length <= 1) return;
+        slot.remove();
+        reindexPremiumGallerySlots();
+        updatePremiumGalleryCount();
+      });
+    }
+  }
+
+  function reindexPremiumGallerySlots() {
+    if (!capsuleGalleryGrid) return;
+    capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot').forEach((s, i) => {
+      s.dataset.slot = i;
+      const placeholder = s.querySelector('.gallery-placeholder');
+      const input = s.querySelector('.gallery-url-input');
+      if (input) input.dataset.slot = i;
+      const rmBtn = s.querySelector('.gallery-remove-overlay');
+      if (rmBtn) rmBtn.dataset.slot = i;
+      if (placeholder && !placeholder.querySelector('img')) {
+        placeholder.innerHTML = `<i class="fa-regular fa-image"></i><span>#${i + 1}</span>`;
+      }
+      if (i === 0 && capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot').length === 1) {
+        if (rmBtn) rmBtn.style.display = 'none';
+      }
     });
   }
 
-  // Initialize weight pricing with one empty row
+  if (uploadCapsuleBtn && galleryFileCapsule) {
+    uploadCapsuleBtn.addEventListener('click', () => galleryFileCapsule.click());
+    galleryFileCapsule.addEventListener('change', async () => {
+      const files = [...galleryFileCapsule.files];
+      if (!capsuleGalleryGrid) return;
+      let slots = [...capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot')];
+      let slotIdx = 0;
+      for (const file of files) {
+        if (slotIdx >= 8) break;
+        let dataUrl;
+        try { dataUrl = await readFileAsDataUrl(file); } catch { continue; }
+        while (slotIdx < slots.length) {
+          const inp = slots[slotIdx]?.querySelector('.gallery-url-input');
+          if (inp && !inp.value.trim()) break;
+          slotIdx++;
+        }
+        if (slotIdx < slots.length) {
+          const inp = slots[slotIdx].querySelector('.gallery-url-input');
+          if (inp) { inp.value = dataUrl; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+          slotIdx++;
+        } else {
+          const newSlot = addPremiumGallerySlot(dataUrl);
+          if (newSlot) slotIdx++;
+        }
+      }
+      galleryFileCapsule.value = '';
+      updatePremiumGalleryCount();
+    });
+  }
+
+  // Add gallery slot button
+  const addGallerySlotBtn = document.getElementById('btn-gallery-add-capsule');
+  function addPremiumGallerySlot(initialValue) {
+    if (!capsuleGalleryGrid) return null;
+    const slots = capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot');
+    if (slots.length >= 8) return null;
+    const idx = slots.length;
+    const div = document.createElement('div');
+    div.className = 'premium-gallery-slot';
+    div.dataset.slot = idx;
+    if (initialValue) div.classList.add('has-image');
+    const imgHtml = initialValue
+      ? `<img src="${initialValue}" alt="Gallery ${idx + 1}" />`
+      : `<i class="fa-regular fa-image"></i><span>#${idx + 1}</span>`;
+    div.innerHTML = `
+      <div class="gallery-placeholder">${imgHtml}</div>
+      <input type="url" class="gallery-url-input gallery-input-hidden" data-slot="${idx}" value="${initialValue || ''}" />
+      <button type="button" class="gallery-remove-overlay" data-slot="${idx}" style="${initialValue ? 'display:flex' : 'display:none'}"><i class="fa-solid fa-xmark"></i></button>
+    `;
+    capsuleGalleryGrid.appendChild(div);
+    wirePremiumGallerySlot(div);
+    updatePremiumGalleryCount();
+    return div;
+  }
+  if (addGallerySlotBtn) {
+    addGallerySlotBtn.addEventListener('click', () => addPremiumGallerySlot());
+  }
+
+  // Wire existing capsule gallery slots
+  if (capsuleGalleryGrid) {
+    capsuleGalleryGrid.querySelectorAll('.premium-gallery-slot').forEach(wirePremiumGallerySlot);
+    updatePremiumGalleryCount();
+  }
+
+  // Ensure both containers have a default mode
+  const defaultMode = (() => {
+    const ab = document.querySelector('.pricing-type-btn.active');
+    return ab ? ab.getAttribute('data-mode') || 'weight' : 'weight';
+  })();
+  [weightPricingContainer, capsuleWeightContainer].forEach(ctr => {
+    if (ctr && !ctr.dataset.mode) ctr.dataset.mode = defaultMode;
+  });
+
+  // Initialize weight pricing with one empty row (mode must be set first)
   if (weightPricingContainer && !weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
     setWeightPricingData(null);
   }
+
+  // Transform static weight selects into pill widgets
+  wpwTransformStatic();
 }
 
 async function initAdminPage() {
