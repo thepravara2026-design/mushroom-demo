@@ -261,13 +261,33 @@ button {
    MAIN NAVBAR
    ============================================================ */
 .main-navbar {
-  background: var(--white);
-  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   padding: 0;
   position: sticky;
   top: 61px;
   z-index: 990;
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.06),
+    0 1px 4px rgba(0, 0, 0, 0.04);
+  animation: navSlideIn 0.5s ease forwards;
+}
+
+@keyframes navSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  }
 }
 
 .navbar-inner {
@@ -703,7 +723,7 @@ button {
 }
 
 /* ============================================================
-   HERO SECTION
+   HERO SECTION — Glassmorphism + 3D Animated
    ============================================================ */
 .hero-section {
   position: relative;
@@ -714,9 +734,99 @@ button {
   justify-content: center;
   width: 100%;
   padding: 0;
-  background: url("/images/hero_mushroom.png") center center / cover no-repeat;
+  background:
+    linear-gradient(135deg, #0a1f14 0%, #163a28 35%, #2a5222 65%, #3d3518 100%);
+  background-blend-mode: normal;
+  perspective: 1200px;
 }
 
+/* Three.js canvas full-bleed background */
+#hero-three-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Ambient light-pulse overlay */
+.hero-section::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 50% 40% at 30% 70%, rgba(124, 194, 91, 0.10) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 50% at 70% 20%, rgba(255, 215, 100, 0.07) 0%, transparent 70%),
+    radial-gradient(ellipse 30% 30% at 50% 40%, rgba(255, 255, 255, 0.03) 0%, transparent 60%);
+  animation: heroAmbient 16s ease-in-out infinite alternate;
+}
+
+@keyframes heroAmbient {
+  0%   { opacity: 0.5; transform: scale(1) rotate(0deg); }
+  50%  { opacity: 1;   transform: scale(1.04) rotate(2deg); }
+  100% { opacity: 0.6; transform: scale(0.96) rotate(-1deg); }
+}
+
+/* Floating decorative blobs */
+.hero-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.45;
+}
+
+.hero-blob-1 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(124, 194, 91, 0.20) 0%, transparent 70%);
+  top: -10%;
+  right: -5%;
+  animation: blobFloat1 22s ease-in-out infinite;
+}
+
+.hero-blob-2 {
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, rgba(255, 215, 100, 0.12) 0%, transparent 70%);
+  bottom: -8%;
+  left: 10%;
+  animation: blobFloat2 18s ease-in-out infinite;
+}
+
+.hero-blob-3 {
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(180, 230, 160, 0.10) 0%, transparent 70%);
+  top: 30%;
+  left: 55%;
+  animation: blobFloat3 20s ease-in-out infinite;
+}
+
+@keyframes blobFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25%  { transform: translate(40px, -30px) scale(1.08); }
+  50%  { transform: translate(-25px, 20px) scale(0.92); }
+  75%  { transform: translate(15px, -15px) scale(1.04); }
+}
+
+@keyframes blobFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(-30px, 25px) scale(0.95); }
+  66%  { transform: translate(20px, -20px) scale(1.06); }
+}
+
+@keyframes blobFloat3 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  50%  { transform: translate(20px, -30px) rotate(10deg) scale(1.03); }
+}
+
+/* ── Hero Inner ── */
 .hero-inner {
   position: relative;
   z-index: 20;
@@ -731,8 +841,9 @@ button {
   margin: 0 auto;
 }
 
+/* ── Hero Content (Full-width image-backed glass card) ── */
 .hero-content {
-  width: 52%;
+  width: 100%;
   flex-shrink: 0;
   padding: 60px 64px;
   position: relative;
@@ -740,113 +851,220 @@ button {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: transparent;
-  color: #000000;
+  color: #ffffff;
+  min-height: 500px;
+
+  /* Image as card background — 90% visible, soft left scrim for text */
+  background:
+    linear-gradient(90deg,
+      rgba(10, 31, 20, 0.65) 0%,
+      rgba(10, 31, 20, 0.30) 35%,
+      rgba(10, 31, 20, 0.06) 60%,
+      transparent 100%),
+    url("/images/hero_mushroom.png") center 25% / cover no-repeat;
+
+  /* Glassmorphism backdrop (blurs Three.js behind) */
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 32px;
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), box-shadow 0.5s ease;
+  margin: 24px 0;
 }
 
+.hero-content:hover {
+  transform: rotateX(1.2deg) rotateY(-1.2deg) translateZ(6px);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* ── Hero Badge ── */
 .hero-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.22);
-  color: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  padding: 8px 16px;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.30);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 16px;
   border-radius: 30px;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   width: fit-content;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transform-style: preserve-3d;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
+.hero-badge i {
+  color: #7cc25b;
+}
+
+/* ── Hero Title ── */
 .hero-title {
   font-family: var(--font-head);
   font-size: clamp(2.4rem, 4vw, 3.8rem);
   font-weight: 800;
   line-height: 1.1;
-  color: #000000;
-  margin-bottom: 18px;
-  text-shadow: none;
+  color: #ffffff;
+  margin-bottom: 14px;
+  text-shadow:
+    0 2px 24px rgba(0, 0, 0, 0.40),
+    0 1px 4px rgba(0, 0, 0, 0.60);
+  transform-style: preserve-3d;
 }
 
 .hero-highlight {
-  color: #7cc25b;
+  background: linear-gradient(90deg, #7cc25b, #a8e063, #7cc25b);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmerText 4s ease-in-out infinite;
+  display: inline-block;
 }
 
+@keyframes shimmerText {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 200% center; }
+}
+
+/* ── Hero Description ── */
 .hero-desc {
   font-size: 1rem;
-  color: rgba(0, 0, 0, 0.96);
-  line-height: 1.75;
-  margin-bottom: 32px;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1.7;
+  margin-bottom: 24px;
   max-width: 520px;
-  text-shadow: none;
-  font-weight: 600;
+  text-shadow:
+    0 1px 12px rgba(0, 0, 0, 0.35),
+    0 0 4px rgba(0, 0, 0, 0.20);
+  font-weight: 500;
+  transform-style: preserve-3d;
 }
 
+/* ── Hero Buttons (compact + premium) ── */
 .hero-btns {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
-  gap: 14px;
+  gap: 10px;
   width: 100%;
-  margin-bottom: 42px;
+  margin-bottom: 32px;
+  transform-style: preserve-3d;
 }
 
 .hero-btns>a {
-  flex: 1 1 auto;
-  min-width: 180px;
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
 }
 
 .btn-primary-hero {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  background: #ffffff;
-  color: #000000;
-  padding: 14px 28px;
-  border-radius: var(--radius-sm);
+  gap: 8px;
+  background: linear-gradient(135deg, #ffffff 0%, #f0f5ea 100%);
+  color: #0a1f14;
+  padding: 10px 22px;
+  border-radius: 60px;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.3px;
   border: none;
   transition:
-    background var(--transition),
-    transform var(--transition),
-    box-shadow var(--transition);
-  box-shadow: 0 16px 34px rgba(15, 79, 34, 0.24);
+    background 0.3s ease,
+    transform 0.3s cubic-bezier(0.23, 1, 0.32, 1),
+    box-shadow 0.3s ease;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.15),
+    0 2px 6px rgba(124, 194, 91, 0.20);
+  transform: translateZ(0);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 60px;
+  background: linear-gradient(135deg, rgba(124, 194, 91, 0.08), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .btn-primary-hero:hover {
-  background: #f6faf2;
-  transform: translateY(-1px);
+  background: linear-gradient(135deg, #f5faf0 0%, #e8f0df 100%);
+  transform: translateY(-2px) translateZ(10px) scale(1.02);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.20),
+    0 4px 12px rgba(124, 194, 91, 0.25);
+}
+
+.btn-primary-hero:hover::before {
+  opacity: 1;
+}
+
+.btn-primary-hero i {
+  font-size: 0.8rem;
+  transition: transform 0.3s ease;
+}
+
+.btn-primary-hero:hover i {
+  transform: translateX(4px);
 }
 
 .btn-outline-hero {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.22);
-  color: #000000;
-  padding: 13px 24px;
-  border-radius: var(--radius-sm);
-  border: 2px solid rgba(0, 0, 0, 0.18);
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.20);
+  color: #ffffff;
+  padding: 9px 20px;
+  border-radius: 60px;
+  border: 1.5px solid rgba(255, 255, 255, 0.20);
   font-weight: 700;
-  font-size: 0.95rem;
-  transition: all var(--transition);
+  font-size: 0.85rem;
+  letter-spacing: 0.3px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transform: translateZ(0);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
 }
 
 .btn-outline-hero:hover {
-  background: rgba(255, 255, 255, 0.48);
-  color: #000000;
-  border-color: rgba(0, 0, 0, 0.24);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.40);
+  transform: translateY(-2px) translateZ(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
-/* Trust Badges */
+.btn-outline-hero i {
+  font-size: 0.8rem;
+  transition: transform 0.3s ease;
+}
+
+.btn-outline-hero:hover i {
+  transform: translateX(4px);
+}
+
+/* ── Trust Badges ── */
 .hero-trust-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+  transform-style: preserve-3d;
 }
 
 .trust-badge {
@@ -856,16 +1074,18 @@ button {
 }
 
 .trust-badge i {
-  width: 38px;
-  height: 38px;
-  background: #ffffff;
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.95rem;
-  color: #195a31;
-  box-shadow: var(--shadow-sm);
+  font-size: 0.85rem;
+  color: #7cc25b;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
 }
 
@@ -876,102 +1096,183 @@ button {
 }
 
 .trust-badge strong {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 700;
-  color: #ffffff;
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .trust-badge span {
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.65);
 }
 
-/* Hero Image */
-.hero-image-wrap {
-  display: none;
-}
-
-/* .hero-img-frame {
-   position: relative;
-  width: 100%;
-  max-width: 520px;
-  border-radius: var(--radius-xl);
-  overflow: visible;
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  max-width: 100%;
-  border-radius: 0;
-  overflow: hidden;
-  z-index: 1;
-} 
-*/
-.hero-img {
-  /* width: 100%;
-  height: 420px;
-  object-fit: cover;
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg); */
-
-  position: absolute;
-  /* ADD */
-  top: 0;
-  /* ADD */
-  left: 0;
-  /* ADD */
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  /* CHANGE to cover */
-  object-position: left center;
-  /* anchors image to left edge */
-  display: block;
-  border-radius: 0;
-  box-shadow: none;
-  max-width: none;
-}
-
+/* ── Hero Badge Float (inside hero-content) ── */
 .hero-badge-float {
-  /* position: absolute;
-  bottom: 28px; right: -18px;
-  background: var(--green-dark);
-  color: var(--white);
-  padding: 14px 18px;
-  border-radius: var(--radius-md);
-  display: flex; align-items: center; gap: 10px;
-  box-shadow: var(--shadow-md);
-  font-size: .9rem; */
-
   position: absolute;
-  /* must be absolute */
-  bottom: 24px;
-  right: 24px;
-  z-index: 10;
-  background: #1a5c2a;
-  color: white;
-  border-radius: 16px;
-  padding: 12px 20px;
+  bottom: 32px;
+  right: 32px;
+  z-index: 25;
   display: flex;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 18px;
+  padding: 14px 20px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.20);
+  color: #ffffff;
+  animation: badgeFloat 3s ease-in-out infinite;
+}
+
+@keyframes badgeFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
 }
 
 .hero-badge-float i {
-  font-size: 1.4rem;
-  color: var(--gold);
+  font-size: 1.3rem;
+  color: #f5d742;
 }
 
 .badge-float-top {
   display: block;
   font-size: 0.7rem;
-  opacity: 0.8;
+  opacity: 0.75;
+  line-height: 1.3;
 }
 
 .badge-float-bot {
   display: block;
   font-size: 1rem;
   font-weight: 700;
+  line-height: 1.3;
+}
+
+/* ── Mycelium Bioluminescent Glow Ring ── */
+.mycelium-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(212, 168, 75, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(124, 194, 91, 0.06) 20%, transparent 60%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.03) 40%, transparent 70%);
+  animation: myceliumPulse 4s ease-in-out infinite;
+}
+
+@keyframes myceliumPulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+    opacity: 1;
+  }
+}
+
+/* ── Spore Motes (CSS floating particles) ── */
+.spore-motes {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.spore-mote {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(212, 168, 75, 0.25);
+  box-shadow: 0 0 6px rgba(212, 168, 75, 0.15);
+  animation: sporeDrift linear infinite;
+}
+
+.spore-mote:nth-child(1)  { left: 15%;  bottom: -2%;  width: 3px;  height: 3px;  animation-duration: 14s; animation-delay: 0s;    opacity: 0.3; }
+.spore-mote:nth-child(2)  { left: 30%;  bottom: -5%;  width: 5px;  height: 5px;  animation-duration: 18s; animation-delay: 1.2s;  opacity: 0.2; }
+.spore-mote:nth-child(3)  { left: 50%;  bottom: -3%;  width: 3px;  height: 3px;  animation-duration: 12s; animation-delay: 2.5s;  opacity: 0.35; }
+.spore-mote:nth-child(4)  { left: 68%;  bottom: -6%;  width: 6px;  height: 6px;  animation-duration: 20s; animation-delay: 0.8s;  opacity: 0.15; }
+.spore-mote:nth-child(5)  { left: 82%;  bottom: -4%;  width: 4px;  height: 4px;  animation-duration: 16s; animation-delay: 3.2s;  opacity: 0.25; }
+.spore-mote:nth-child(6)  { left: 22%;  bottom: -10%; width: 3px;  height: 3px;  animation-duration: 22s; animation-delay: 4.5s;  opacity: 0.2;  }
+.spore-mote:nth-child(7)  { left: 58%;  bottom: -8%;  width: 5px;  height: 5px;  animation-duration: 15s; animation-delay: 1.8s;  opacity: 0.3;  }
+.spore-mote:nth-child(8)  { left: 40%;  bottom: -2%;  width: 4px;  height: 4px;  animation-duration: 19s; animation-delay: 5s;    opacity: 0.2;  }
+.spore-mote:nth-child(9)  { left: 75%;  bottom: -7%;  width: 3px;  height: 3px;  animation-duration: 13s; animation-delay: 2s;    opacity: 0.35; }
+.spore-mote:nth-child(10) { left: 10%;  bottom: -9%;  width: 5px;  height: 5px;  animation-duration: 17s; animation-delay: 3.8s;  opacity: 0.15; }
+.spore-mote:nth-child(11) { left: 62%;  bottom: -12%; width: 4px;  height: 4px;  animation-duration: 21s; animation-delay: 0.5s;  opacity: 0.25; }
+.spore-mote:nth-child(12) { left: 46%;  bottom: -3%;  width: 3px;  height: 3px;  animation-duration: 11s; animation-delay: 4s;    opacity: 0.3;  }
+
+@keyframes sporeDrift {
+  0% {
+    transform: translateY(0) translateX(0) scale(1);
+    opacity: 0;
+  }
+  10% {
+    opacity: var(--spore-opacity, 0.3);
+  }
+  80% {
+    opacity: var(--spore-opacity, 0.3);
+  }
+  90% {
+    transform: translateY(-110vh) translateX(30px) scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(-115vh) translateX(35px) scale(0.4);
+    opacity: 0;
+  }
+}
+
+/* ── Hero Content Bioluminescent Border Pulse ── */
+.hero-content::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 32px;
+  z-index: -1;
+  background: linear-gradient(135deg, rgba(212, 168, 75, 0.08), rgba(124, 194, 91, 0.04), rgba(212, 168, 75, 0.08));
+  opacity: 0;
+  animation: borderGlow 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes borderGlow {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.7; }
+}
+
+/* ── Growth emergence entrance (mushroom sprouting) ── */
+@keyframes growthEmergence {
+  0% {
+    opacity: 0;
+    transform: scale(0.85) translateY(20px);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.03) translateY(-2px);
+  }
+  70% {
+    transform: scale(0.98) translateY(1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.hero-content > * {
+  opacity: 0;
+  transform: scale(0.85) translateY(20px);
+  animation: growthEmergence 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* ============================================================
@@ -4204,15 +4505,13 @@ button {
 
   .hero-content {
     width: 100%;
-    padding: 40px 24px;
-  }
-
-  .hero-image-wrap {
-    display: none;
+    padding: 40px 28px;
   }
 
   .hero-badge-float {
-    right: 0;
+    bottom: 24px;
+    right: 24px;
+    padding: 10px 16px;
   }
 
   .training-inner {
@@ -4257,15 +4556,21 @@ button {
 
   .hero-content {
     width: 100% !important;
-    padding: 40px 24px !important;
+    padding: 32px 20px !important;
     order: 1;
+    border-radius: 24px !important;
+    backdrop-filter: blur(14px) saturate(1.2) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(1.2) !important;
+    margin: 12px 0 !important;
+    min-height: auto !important;
   }
 
-  .hero-image-wrap {
-    width: 100% !important;
-    min-height: 300px !important;
-    flex: none !important;
-    order: 2;
+  .hero-content:hover {
+    transform: none !important;
+  }
+
+  .hero-badge-float {
+    display: none !important;
   }
 
   .hero-trust-badges {
@@ -4274,6 +4579,29 @@ button {
 
   .trust-badge span {
     display: none;
+  }
+
+  .hero-blob-1,
+  .hero-blob-2,
+  .hero-blob-3 {
+    display: none;
+  }
+
+  .mycelium-glow {
+    display: none;
+  }
+
+  .spore-motes {
+    display: none;
+  }
+
+  .hero-content::after {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+
+  .hero-section::before {
+    animation: none !important;
   }
 
   .slider-arrow.left {
@@ -4331,6 +4659,26 @@ button {
 }
 
 @media (max-width: 480px) {
+  .hero-section {
+    min-height: 400px;
+  }
+
+  .hero-content {
+    padding: 24px 16px !important;
+    border-radius: 20px !important;
+    backdrop-filter: blur(10px) saturate(1.1) !important;
+    -webkit-backdrop-filter: blur(10px) saturate(1.1) !important;
+  }
+
+  .hero-badge {
+    font-size: 0.7rem;
+    padding: 6px 14px;
+  }
+
+  .hero-desc {
+    font-size: 0.9rem;
+  }
+
   .hero-btns {
     flex-direction: column;
   }
@@ -4339,6 +4687,20 @@ button {
   .btn-primary-hero {
     width: 100%;
     justify-content: center;
+  }
+
+  .hero-trust-badges {
+    gap: 8px;
+  }
+
+  .trust-badge i {
+    width: 30px;
+    height: 30px;
+    font-size: 0.75rem;
+  }
+
+  .trust-badge strong {
+    font-size: 0.68rem;
   }
 
   .category-card {

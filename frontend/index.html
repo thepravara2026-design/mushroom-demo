@@ -349,6 +349,29 @@
   <div id="shop-page" class="page-section active">
     <!-- HERO SECTION -->
     <section class="hero-section" id="hero-section">
+      <!-- Three.js particle canvas (hero background) -->
+      <canvas id="hero-three-canvas"></canvas>
+      <!-- Bioluminescent mycelium glow ring -->
+      <div class="mycelium-glow"></div>
+      <!-- Floating spore motes -->
+      <div class="spore-motes">
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+        <span class="spore-mote"></span>
+      </div>
+      <!-- Decorative floating blobs -->
+      <div class="hero-blob hero-blob-1"></div>
+      <div class="hero-blob hero-blob-2"></div>
+      <div class="hero-blob hero-blob-3"></div>
       <div class="hero-inner">
         <div class="hero-content">
           <div class="hero-badge">
@@ -398,9 +421,6 @@
               </div>
             </div>
           </div>
-        </div>
-        <div class="hero-image-wrap">
-          <img src="/images/hero_mushroom.png" alt="Premium Fresh Mushrooms" class="hero-img" />
           <div class="hero-badge-float">
             <i class="fa-solid fa-certificate"></i>
             <div>
@@ -3166,8 +3186,6 @@
   <div style="display: none" aria-hidden="true">
     <!-- Hero btn stub -->
     <a id="hero-shop-btn" href="#shop"></a>
-    <!-- Three.js canvas stub -->
-    <canvas id="hero-three-canvas"></canvas>
     <!-- Calculator stubs -->
     <div id="calculator-anchor" class="calc-header">
       <button id="btn-calculate-substrate"></button>
