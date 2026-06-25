@@ -5926,90 +5926,146 @@ function initThreeJS() {
   const canvas = document.getElementById('hero-three-canvas');
   if (!canvas) return;
 
+  const hero = canvas.closest('.hero-section') || document.getElementById('hero-section');
+  const heroW = hero ? hero.clientWidth : window.innerWidth;
+  const heroH = hero ? hero.clientHeight : window.innerHeight;
+
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(
     75,
-    window.innerWidth / window.innerHeight,
+    heroW / heroH,
     0.1,
     1000,
   );
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
 
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(heroW, heroH);
   renderer.setClearColor(0x000000, 0.1);
   camera.position.z = 3;
 
-  // Spore Cloud 1
-  const count = 2000;
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
+  // ── Spore Cloud 1: Bioluminescent golden-amber spores ──
+  const count1 = 1800;
+  const positions = new Float32Array(count1 * 3);
+  const colors = new Float32Array(count1 * 3);
 
-  for (let i = 0; i < count * 3; i += 3) {
-    positions[i] = (Math.random() - 0.5) * 20;
-    positions[i + 1] = (Math.random() - 0.5) * 20;
-    positions[i + 2] = (Math.random() - 0.5) * 20;
+  for (let i = 0; i < count1 * 3; i += 3) {
+    // Distribute in a wider, slightly flattened sphere
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = 4 + Math.random() * 8;
+    positions[i] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i + 1] = (r * 0.7) * Math.cos(phi);
+    positions[i + 2] = r * Math.sin(phi) * Math.sin(theta);
 
-    colors[i] = 0.2 + Math.random() * 0.5;
-    colors[i + 1] = 0.8 + Math.random() * 0.2;
-    colors[i + 2] = 0.4 + Math.random() * 0.3;
+    // Warm golden-amber bioluminescent tones
+    colors[i] = 0.85 + Math.random() * 0.15;
+    colors[i + 1] = 0.60 + Math.random() * 0.30;
+    colors[i + 2] = 0.15 + Math.random() * 0.25;
   }
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const geo1 = new THREE.BufferGeometry();
+  geo1.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo1.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-  const material = new THREE.PointsMaterial({
-    size: 0.08,
+  const mat1 = new THREE.PointsMaterial({
+    size: 0.07,
     vertexColors: true,
     transparent: true,
-    opacity: 0.8,
+    opacity: 0.75,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
-
-  const sporeCloud1 = new THREE.Points(geometry, material);
+  const sporeCloud1 = new THREE.Points(geo1, mat1);
   scene.add(sporeCloud1);
 
-  // Spore Cloud 2 (Slower moving)
-  const positions2 = new Float32Array(count * 3);
-  const colors2 = new Float32Array(count * 3);
+  // ── Spore Cloud 2: Soft forest-green background haze ──
+  const count2 = 1500;
+  const positions2 = new Float32Array(count2 * 3);
+  const colors2 = new Float32Array(count2 * 3);
 
-  for (let i = 0; i < count * 3; i += 3) {
-    positions2[i] = (Math.random() - 0.5) * 25;
-    positions2[i + 1] = (Math.random() - 0.5) * 25;
-    positions2[i + 2] = (Math.random() - 0.5) * 25;
+  for (let i = 0; i < count2 * 3; i += 3) {
+    const r = 6 + Math.random() * 12;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions2[i] = r * Math.sin(phi) * Math.cos(theta);
+    positions2[i + 1] = (r * 0.6) * Math.cos(phi);
+    positions2[i + 2] = r * Math.sin(phi) * Math.sin(theta);
 
-    colors2[i] = 0.1 + Math.random() * 0.3;
-    colors2[i + 1] = 0.6 + Math.random() * 0.4;
-    colors2[i + 2] = 0.3 + Math.random() * 0.4;
+    // Soft green-cyan
+    colors2[i] = 0.15 + Math.random() * 0.25;
+    colors2[i + 1] = 0.55 + Math.random() * 0.35;
+    colors2[i + 2] = 0.30 + Math.random() * 0.30;
   }
 
-  const geometry2 = new THREE.BufferGeometry();
-  geometry2.setAttribute('position', new THREE.BufferAttribute(positions2, 3));
-  geometry2.setAttribute('color', new THREE.BufferAttribute(colors2, 3));
+  const geo2 = new THREE.BufferGeometry();
+  geo2.setAttribute('position', new THREE.BufferAttribute(positions2, 3));
+  geo2.setAttribute('color', new THREE.BufferAttribute(colors2, 3));
 
-  const material2 = new THREE.PointsMaterial({
-    size: 0.05,
+  const mat2 = new THREE.PointsMaterial({
+    size: 0.04,
     vertexColors: true,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.60,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
-
-  const sporeCloud2 = new THREE.Points(geometry2, material2);
+  const sporeCloud2 = new THREE.Points(geo2, mat2);
   scene.add(sporeCloud2);
 
-  // Central Wireframe Cluster
-  const coreGeo = new THREE.IcosahedronGeometry(0.7, 2);
+  // ── Spore Cluster 3: Large bright golden spore clusters ──
+  const count3 = 300;
+  const positions3 = new Float32Array(count3 * 3);
+  const colors3 = new Float32Array(count3 * 3);
+
+  for (let i = 0; i < count3 * 3; i += 3) {
+    const r = 2 + Math.random() * 6;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions3[i] = r * Math.sin(phi) * Math.cos(theta);
+    positions3[i + 1] = (r * 0.5) * Math.cos(phi);
+    positions3[i + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+    // Bright golden-white core
+    colors3[i] = 1.0;
+    colors3[i + 1] = 0.75 + Math.random() * 0.25;
+    colors3[i + 2] = 0.30 + Math.random() * 0.30;
+  }
+
+  const geo3 = new THREE.BufferGeometry();
+  geo3.setAttribute('position', new THREE.BufferAttribute(positions3, 3));
+  geo3.setAttribute('color', new THREE.BufferAttribute(colors3, 3));
+
+  const mat3 = new THREE.PointsMaterial({
+    size: 0.15,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.70,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const sporeCluster = new THREE.Points(geo3, mat3);
+  scene.add(sporeCluster);
+
+  // ── Central Mushroom Nucleus ──
+  const coreGeo = new THREE.IcosahedronGeometry(0.6, 1);
   const coreMat = new THREE.MeshBasicMaterial({
-    color: 0x38b17b,
+    color: 0xd4a84b,
     wireframe: true,
     transparent: true,
-    opacity: 0.25,
+    opacity: 0.35,
   });
   const nucleus = new THREE.Mesh(coreGeo, coreMat);
   scene.add(nucleus);
+
+  // Inner golden glow core
+  const innerGeo = new THREE.IcosahedronGeometry(0.35, 0);
+  const innerMat = new THREE.MeshBasicMaterial({
+    color: 0xf5d742,
+    transparent: true,
+    opacity: 0.15,
+  });
+  const innerCore = new THREE.Mesh(innerGeo, innerMat);
+  scene.add(innerCore);
 
   // Interactive Drag Control
   let isDragging = false;
@@ -6065,8 +6121,9 @@ function initThreeJS() {
 
   // Window Resize
   const handleResize = () => {
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
+    const parent = canvas.closest('.hero-section') || document.getElementById('hero-section');
+    const width = parent ? parent.clientWidth : window.innerWidth;
+    const height = parent ? parent.clientHeight : window.innerHeight;
 
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
@@ -6082,21 +6139,36 @@ function initThreeJS() {
 
     const elapsedTime = clock.getElapsedTime();
 
-    sporeCloud1.rotation.y = elapsedTime * 0.08 + dragRotation.y;
-    sporeCloud1.rotation.x = elapsedTime * 0.03 + dragRotation.x;
+    // Slow organic rotation for spore clouds
+    sporeCloud1.rotation.y = elapsedTime * 0.05 + dragRotation.y;
+    sporeCloud1.rotation.x = Math.sin(elapsedTime * 0.02) * 0.1 + dragRotation.x;
 
-    sporeCloud2.rotation.y = -elapsedTime * 0.12 + dragRotation.y;
-    sporeCloud2.rotation.x = -elapsedTime * 0.05 + dragRotation.x;
+    sporeCloud2.rotation.y = -elapsedTime * 0.07 + dragRotation.y;
+    sporeCloud2.rotation.x = Math.sin(elapsedTime * 0.015 + 1) * 0.08 + dragRotation.x;
 
-    nucleus.rotation.y = elapsedTime * 0.15 + dragRotation.y;
-    nucleus.rotation.x = elapsedTime * 0.1 + dragRotation.x;
+    sporeCluster.rotation.y = elapsedTime * 0.03 + dragRotation.y * 0.5;
+    sporeCluster.rotation.x = Math.sin(elapsedTime * 0.01 + 2) * 0.06 + dragRotation.x * 0.5;
 
-    sporeCloud1.position.y = -scrollTargetY * 0.0008;
-    sporeCloud2.position.y = -scrollTargetY * 0.0005;
-    nucleus.position.y = -scrollTargetY * 0.0003;
+    nucleus.rotation.y = elapsedTime * 0.12 + dragRotation.y;
+    nucleus.rotation.x = Math.sin(elapsedTime * 0.025) * 0.15 + dragRotation.x;
+    innerCore.rotation.y = -elapsedTime * 0.08 + dragRotation.y;
+    innerCore.rotation.x = Math.sin(elapsedTime * 0.02 + 0.5) * 0.1 + dragRotation.x;
 
-    const scaleFactor = 1.0 + Math.sin(elapsedTime * 2.0) * 0.05;
-    nucleus.scale.set(scaleFactor, scaleFactor, scaleFactor);
+    // Gentle floating motion
+    sporeCloud1.position.y = -scrollTargetY * 0.0008 + Math.sin(elapsedTime * 0.1) * 0.1;
+    sporeCloud2.position.y = -scrollTargetY * 0.0005 + Math.sin(elapsedTime * 0.08 + 1) * 0.08;
+    sporeCluster.position.y = -scrollTargetY * 0.0006 + Math.sin(elapsedTime * 0.12 + 2) * 0.15;
+    nucleus.position.y = -scrollTargetY * 0.0003 + Math.sin(elapsedTime * 0.06) * 0.05;
+    innerCore.position.y = nucleus.position.y;
+
+    // Gentle breathing scale for nucleus
+    const nucleusBreath = 1.0 + Math.sin(elapsedTime * 0.6) * 0.06;
+    nucleus.scale.set(nucleusBreath, nucleusBreath, nucleusBreath);
+    innerCore.scale.set(nucleusBreath * 1.2, nucleusBreath * 1.2, nucleusBreath * 1.2);
+
+    // Spore cluster subtle size pulse
+    const clusterPulse = 0.70 + Math.sin(elapsedTime * 0.4) * 0.10;
+    sporeCluster.material.opacity = clusterPulse;
 
     renderer.render(scene, camera);
   };
