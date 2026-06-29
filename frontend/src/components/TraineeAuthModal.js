@@ -243,13 +243,28 @@ class TraineeAuthModal {
         this.currentView = 'signup';
     }
 
-    showVerify(contact) {
+    showVerify(contact, mockOtp = null) {
         this._hideAllViews();
         document.getElementById('trainee-verify-view').classList.remove('hidden');
         this.currentView = 'verify';
         const subtitle = document.getElementById('trainee-verify-subtitle');
-        if (subtitle) subtitle.textContent = `Enter the 6-digit code sent to ${contact}`;
-        document.getElementById('trainee-otp')?.focus();
+        if (subtitle) {
+            if (mockOtp) {
+                subtitle.textContent = `Mock OTP: ${mockOtp} — entering automatically`;
+            } else {
+                subtitle.textContent = `Enter the 6-digit code sent to ${contact}`;
+            }
+        }
+        const otpInput = document.getElementById('trainee-otp');
+        if (otpInput) {
+            otpInput.value = mockOtp || '';
+            otpInput.focus();
+            if (mockOtp) {
+                setTimeout(() => {
+                    this.handleVerifyOtp();
+                }, 300);
+            }
+        }
     }
 
     showSignupSuccess() {
@@ -286,12 +301,13 @@ class TraineeAuthModal {
     // PHONE OTP LOGIN
     // ======================
     async handlePhoneOtpRequest() {
-        const phone = document.getElementById('trainee-phone')?.value.trim();
+        const raw = document.getElementById('trainee-phone')?.value;
+        const digits = (raw || '').replace(/\D/g, '').slice(-10);
         const country = document.getElementById('trainee-phone-country')?.value || '+91';
-        const fullPhone = `${country}${phone}`;
+        const fullPhone = `${country}${digits}`;
         const errorEl = document.getElementById('trainee-phone-error');
 
-        if (!isValidIndianPhone(phone)) {
+        if (!digits || !/^[6-9]\d{9}$/.test(digits)) {
             if (errorEl) { errorEl.textContent = 'Enter a valid Indian phone number (e.g. +91 9876543210).'; errorEl.classList.remove('hidden'); }
             return;
         }
@@ -312,7 +328,7 @@ class TraineeAuthModal {
             this._pendingEmail = data.email || null;
             errorEl?.classList.add('hidden');
             showSuccessToast('OTP sent to your registered email!');
-            this.showVerify(fullPhone);
+            this.showVerify(fullPhone, data.otp || null);
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message || 'Failed to process phone number.'; errorEl.classList.remove('hidden'); }
         } finally {
@@ -348,7 +364,7 @@ class TraineeAuthModal {
             errorEl?.classList.add('hidden');
             showSuccessToast('OTP sent to your email!');
             this._pendingEmail = email;
-            this.showVerify(email);
+            this.showVerify(email, data.otp || null);
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message || 'Failed to send OTP.'; errorEl.classList.remove('hidden'); }
         } finally {

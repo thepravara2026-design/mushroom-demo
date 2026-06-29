@@ -240,20 +240,20 @@ class ProfileModal {
           </div>
           <div class="pm-grid-2">
             <div class="pm-field">
-              <label>Full name</label>
-              <input id="profile-fullname" value="${user.fullName || ''}" class="pm-input">
+              <label>Full name <i class="fa-solid fa-lock" style="font-size:0.6rem;color:#94a3b8;margin-left:4px;"></i></label>
+              <div class="pm-static-value"><i class="fa-solid fa-user"></i> ${user.fullName || '—'}</div>
             </div>
             <div class="pm-field">
-              <label>Email</label>
-              <input id="profile-email" value="${user.email || ''}" class="pm-input">
+              <label>Email <i class="fa-solid fa-lock" style="font-size:0.6rem;color:#94a3b8;margin-left:4px;"></i></label>
+              <div class="pm-static-value"><i class="fa-solid fa-envelope"></i> ${user.email || '—'}</div>
             </div>
             <div class="pm-field">
-              <label>Phone</label>
-              <input id="profile-phone" value="${user.whatsappNumber || ''}" class="pm-input" ${loginMethod === 'phone' ? 'disabled' : ''}>
+              <label>Phone <i class="fa-solid fa-lock" style="font-size:0.6rem;color:#94a3b8;margin-left:4px;"></i></label>
+              <div class="pm-static-value"><i class="fa-solid fa-phone"></i> ${user.whatsappNumber || '—'}</div>
             </div>
             <div class="pm-field">
               <label>Role</label>
-              <input value="${user.role || 'buyer'}" disabled class="pm-input">
+              <div class="pm-static-value"><span class="pm-role-badge" style="font-size:0.78rem;">${(user.role || 'buyer').toUpperCase()}</span></div>
             </div>
           </div>
         </section>
@@ -421,22 +421,22 @@ class ProfileModal {
     const cancelNote = o.delivery_status === 'cancelled' && o.cancel_reason
       ? `<div class="pm-cancel-note"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`
       : '';
-    const terminalStates = ['CANCEL_REQUESTED', 'CANCEL_APPROVED', 'CANCEL_REJECTED', 'cancelled'];
+    const terminalStates = ['CANCEL_REQUESTED', 'CANCEL_APPROVED', 'CANCEL_REJECTED', 'cancelled', 'refunded'];
     const canCancelAlloweDelivery = ['placed', 'processing', 'paid', 'inoculating', 'pending', 'pending_upi_verification'];
     const canCancel = canCancelAlloweDelivery.includes(status) &&
       !terminalStates.includes(o.status) &&
       !o.status.startsWith('REFUND_');
 
     const refundStates = ['CANCEL_REQUESTED', 'CANCEL_APPROVED', 'CANCEL_REJECTED', 'REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
-    const isRefundOrder = refundStates.includes(o.status);
+    const isRefundOrder = refundStates.includes(o.status) || (o.status === 'cancelled' && o.refund_status && o.refund_status !== 'none');
 
     let refundPill = '';
     if (o.status === 'CANCEL_REQUESTED') {
-      refundPill = `<div class="pm-refund-pill warning"><i class="fa-solid fa-clock"></i> Cancellation pending admin approval</div>`;
+      refundPill = `<div class="pm-refund-pill warning"><i class="fa-solid fa-clock"></i> Cancellation pending admin approval — For queries: <a href="mailto:support@sporekart.com" style="color:#d97706;text-decoration:underline;">support@sporekart.com</a></div>`;
     } else if (o.status === 'CANCEL_APPROVED') {
-      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-check-circle"></i> Cancellation approved — refund being initiated</div>`;
+      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-check-circle"></i> Cancellation approved — manual refund tracking started</div>`;
     } else if (o.status === 'REFUND_PENDING') {
-      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-hourglass-half"></i> Refund pending</div>`;
+      refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-hourglass-half"></i> Refund pending — For queries: <a href="mailto:support@sporekart.com" style="color:#3b82f6;text-decoration:underline;">support@sporekart.com</a></div>`;
     } else if (o.status === 'REFUND_INITIATED' || o.status === 'REFUND_PROCESSING') {
       refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-arrows-rotate fa-spin"></i> Refund in progress</div>`;
     } else if (o.status === 'REFUND_COMPLETED' || o.status === 'refunded') {
@@ -449,6 +449,11 @@ class ProfileModal {
       refundPill = `<div class="pm-refund-pill info"><i class="fa-solid fa-hourglass-half"></i> Manual refund initiated — processing offline</div>`;
     } else if (o.status === 'MANUAL_REFUND_COMPLETED') {
       refundPill = `<div class="pm-refund-pill success"><i class="fa-solid fa-circle-check"></i> Manual refund completed</div>`;
+    } else if (o.status === 'cancelled' && o.refund_status) {
+      const refundLabel = o.refund_status.charAt(0).toUpperCase() + o.refund_status.slice(1);
+      const refundIcon = o.refund_status === 'completed' ? 'fa-circle-check' : 'fa-hourglass-half';
+      const pillClass = o.refund_status === 'completed' ? 'success' : o.refund_status === 'failed' ? 'danger' : 'info';
+      refundPill = `<div class="pm-refund-pill ${pillClass}"><i class="fa-solid ${refundIcon}"></i> Refund: ${refundLabel} — Contact <a href="mailto:support@sporekart.com" style="color:inherit;text-decoration:underline;">support@sporekart.com</a> / +91 80 4991 3800</div>`;
     }
 
     let refundTimelineHtml = '';
@@ -463,9 +468,12 @@ class ProfileModal {
         .join('')}</div>`
       : '';
 
+    const rs = o.refund_status;
     const barColor = o.status === 'CANCEL_REQUESTED' || o.status === 'CANCEL_APPROVED' || o.status === 'REFUND_PENDING' || o.status === 'REFUND_INITIATED' || o.status === 'REFUND_PROCESSING' || o.status === 'MANUAL_REFUND_INITIATED' ? '#f59e0b'
       : o.status === 'REFUND_COMPLETED' || o.status === 'refunded' || o.status === 'MANUAL_REFUND_COMPLETED' ? '#10b981'
       : o.status === 'REFUND_FAILED' || o.status === 'CANCEL_REJECTED' ? '#ef4444'
+      : o.status === 'cancelled' && rs === 'completed' ? '#10b981'
+      : o.status === 'cancelled' && rs ? '#f59e0b'
       : o.status === 'cancelled' ? '#6b7280'
       : o.status === 'delivered' ? '#059669'
       : o.status === 'shipped' || o.status === 'in_transit' ? '#3b82f6'
@@ -482,6 +490,7 @@ class ProfileModal {
         <i class="fa-regular fa-calendar"></i> ${placed}
         <span class="pm-dot">·</span>
         ${items.length} item${items.length !== 1 ? 's' : ''}
+        ${o.fulfillment_status && !['cancelled','delivered'].includes(o.delivery_status) ? `<span class="pm-dot">·</span> <span class="pm-order-fulfillment">${o.fulfillment_status.replace(/_/g, ' ')}</span>` : ''}
         ${o.expected_delivery_date && ['shipped', 'in_transit'].includes(o.delivery_status) ? `<span class="pm-dot">·</span> <span class="pm-order-eta">Expected ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</span>` : ''}
       </div>
       ${itemsHtmlV2}
@@ -503,6 +512,22 @@ class ProfileModal {
 
   renderRefundTimeline(o) {
     const steps = [];
+
+    // Handle new manual refund flow (status=cancelled, tracked via refund_status)
+    if (o.status === 'cancelled' && o.refund_status && o.refund_status !== 'none') {
+      steps.push({ label: 'Cancellation Approved', done: true });
+      steps.push({ label: 'Refund Pending', done: true });
+      if (o.refund_status === 'initiated' || o.refund_status === 'processing' || o.refund_status === 'completed') {
+        steps.push({ label: 'Refund Initiated', done: true });
+      }
+      if (o.refund_status === 'processing' || o.refund_status === 'completed') {
+        steps.push({ label: 'Refund Processing', done: true });
+      }
+      if (o.refund_status === 'completed') {
+        steps.push({ label: 'Refund Completed', done: true });
+      }
+      return this._buildTimelineHtml(steps);
+    }
 
     if (o.status === 'CANCEL_REQUESTED' || o.status === 'CANCEL_APPROVED' || o.status === 'CANCEL_REJECTED' || o.status.startsWith('REFUND_') || o.status.startsWith('MANUAL_REFUND_')) {
       steps.push({ label: 'Cancellation Requested', done: o.status !== 'CANCEL_REJECTED' });
@@ -538,6 +563,10 @@ class ProfileModal {
 
     if (!steps.length) return '';
 
+    return this._buildTimelineHtml(steps);
+  }
+
+  _buildTimelineHtml(steps) {
     const lines = steps.map(s => `
       <div class="pm-timeline-row ${s.done ? 'pm-timeline-done' : ''}">
         <div class="pm-timeline-dot ${s.done ? 'done' : 'pending'}"></div>
@@ -724,9 +753,6 @@ class ProfileModal {
   }
 
   saveProfile() {
-    const fullName = this.modal.querySelector('#profile-fullname')?.value.trim() || '';
-    const email = this.modal.querySelector('#profile-email')?.value.trim() || '';
-    const phone = this.modal.querySelector('#profile-phone')?.value.trim() || '';
     const addressLine1 = this.modal.querySelector('#profile-address-line1')?.value.trim() || '';
     const addressLine2 = this.modal.querySelector('#profile-address-line2')?.value.trim() || '';
     const landmark = this.modal.querySelector('#profile-landmark')?.value.trim() || '';
@@ -734,26 +760,6 @@ class ProfileModal {
     const stateVal = this.modal.querySelector('#profile-state')?.value.trim() || '';
     const pincodeVal = this.modal.querySelector('#profile-pincode')?.value.trim() || '';
 
-    if (!fullName) {
-      showErrorToast('Full name is required.');
-      return;
-    }
-    if (!email) {
-      showErrorToast('Email is required.');
-      return;
-    }
-    if (!isValidEmail(email)) {
-      showErrorToast('Enter a valid email address.');
-      return;
-    }
-    if (!phone) {
-      showErrorToast('Phone number is required.');
-      return;
-    }
-    if (!isValidIndianPhone(phone)) {
-      showErrorToast('Enter a valid Indian phone number (e.g. +91 9876543210).');
-      return;
-    }
     if (!addressLine1 || !addressLine2 || !landmark || !city || !stateVal || !pincodeVal) {
       showErrorToast('All address fields (Line 1, Line 2, Landmark, Pincode, City, State) are mandatory.');
       return;
@@ -767,9 +773,6 @@ class ProfileModal {
     const addressVal = addressParts.join(', ');
 
     const user = { ...(state.user || {}) };
-    user.email = email;
-    if (user.loginMethod !== 'phone') user.whatsappNumber = phone;
-    user.fullName = fullName;
     if (this.tempAvatarData) {
       user.avatarUrl = this.tempAvatarData;
     }
@@ -779,15 +782,12 @@ class ProfileModal {
       (async () => {
         try {
           const payload = {
-            fullName: user.fullName,
             address_line1: addressLine1,
             address_line2: addressLine2,
             landmark: landmark,
             city: city,
             state: stateVal,
           };
-          payload.email = user.email;
-          if (user.loginMethod !== 'phone') payload.whatsappNumber = user.whatsappNumber;
           if (this.tempAvatarData) payload.avatar_url = this.tempAvatarData;
           if (typeof pincodeVal === 'string') payload.default_pincode = pincodeVal;
           if (typeof addressVal === 'string') payload.default_address = addressVal;

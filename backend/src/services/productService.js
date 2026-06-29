@@ -106,6 +106,13 @@ async function createProduct(payload) {
     stock,
     id,
     weight_pricing,
+    storage_handling,
+    warranty_policy,
+    return_policy,
+    shipping_info,
+    compliance_info,
+    highlights,
+    certificates,
   } = payload;
   if (!name || !description || !category) {
     const err = new Error(
@@ -212,7 +219,7 @@ async function createProduct(payload) {
   // Generate a unique product ID if not provided
   let productId = id;
   if (!productId) {
-    const prefix = categoryUid || "prod";
+    const prefix = categoryUid || category;
     const { data: allProds } = await productRepo.findAll();
     const numbers = (Array.isArray(allProds) ? allProds : [])
       .map(p => {
@@ -223,17 +230,19 @@ async function createProduct(payload) {
     productId = `${prefix}-pid-${String(nextNum).padStart(5, '0')}`;
   }
 
-  // Validate ID format
-  const expectedPrefix = categoryUid || category;
-  const idPattern = new RegExp(
-    `^${escapeRegExp(expectedPrefix)}-pid-\\d{5}$`,
-  );
-  if (!idPattern.test(productId)) {
-    const err = new Error(
-      `Product ID must be formatted as ${expectedPrefix}-pid-00001.`,
+  // Validate ID format — only for auto-generated IDs; user-provided IDs are trusted
+  if (!id && productId) {
+    const expectedPrefix = categoryUid || category;
+    const idPattern = new RegExp(
+      `^${escapeRegExp(expectedPrefix)}-pid-\\d{5}$`,
     );
-    err.status = 400;
-    throw err;
+    if (!idPattern.test(productId)) {
+      const err = new Error(
+        `Product ID must be formatted as ${expectedPrefix}-pid-00001.`,
+      );
+      err.status = 400;
+      throw err;
+    }
   }
   const { data: existingProduct, error: existingError } =
     await productRepo.findById(productId);
@@ -263,6 +272,13 @@ async function createProduct(payload) {
     gst_rate: parseInt(gst_rate, 10) || 5,
     stock: parseInt(stock, 10) || 100,
     weight_pricing,
+    storage_handling: storage_handling || '',
+    warranty_policy: warranty_policy || '',
+    return_policy: return_policy || '',
+    shipping_info: shipping_info || '',
+    compliance_info: compliance_info || '',
+    highlights: highlights || [],
+    certificates: certificates || [],
   };
 
   const { data: newProduct, error } = await productRepo.create(insertData);
@@ -330,6 +346,14 @@ async function updateProduct(productId, updates) {
   if (updates.gst_rate !== undefined)
     toUpdate.gst_rate = parseInt(updates.gst_rate, 10);
   if (updates.stock !== undefined) toUpdate.stock = parseInt(updates.stock, 10);
+  if (updates.storage_handling !== undefined) toUpdate.storage_handling = updates.storage_handling;
+  if (updates.warranty_policy !== undefined) toUpdate.warranty_policy = updates.warranty_policy;
+  if (updates.return_policy !== undefined) toUpdate.return_policy = updates.return_policy;
+  if (updates.shipping_info !== undefined) toUpdate.shipping_info = updates.shipping_info;
+  if (updates.compliance_info !== undefined) toUpdate.compliance_info = updates.compliance_info;
+  if (updates.highlights !== undefined) toUpdate.highlights = updates.highlights;
+  if (updates.certificates !== undefined) toUpdate.certificates = updates.certificates;
+
   if (updates.weight_pricing !== undefined) {
     // Check for duplicate weight variants within this product
     const weightKeys = updates.weight_pricing.map(w => `${w.weight}${w.unit}`);

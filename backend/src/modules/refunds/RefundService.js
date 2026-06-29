@@ -1,11 +1,70 @@
 const crypto = require("crypto");
 const repo = require("./RefundRepository");
-const { OrderStates, isValidTransition, restockOrderItems } = require("../orders/OrderStateService");
+const { OrderStates, isValidTransition, restockOrderItems, isWithCarrier } = require("../orders/OrderStateService");
 const { generateRefundIdempotencyKey, initiateRazorpayRefund } = require("../payments/PaymentService");
 const { logRefundAction } = require("./RefundAuditService");
 const { sendWhatsAppMessage } = require("../../services/notificationService");
 const razorpay = require("../../config/razorpay");
+const db = require("../../config/db");
 const logger = require("../../utils/logger");
+
+/**
+ * Cancel carrier shipment if one exists for the order.
+ * Called by all cancellation paths.
+ */
+async function cancelCarrierShipment(orderId, reason) {
+  try {
+    const { data: shipment } = await db
+      .from("shipments")
+      .select("*")
+      .eq("order_id", orderId)
+      .single();
+    if (!shipment || shipment.status === 'cancelled' || shipment.status === 'delivered') return;
+
+    const { getDefaultProvider } = require("../shipping/ProviderRegistry");
+    const provider = await getDefaultProvider();
+    if (provider && (shipment.provider_shipment_id || shipment.provider_response?.shipment_id)) {
+      const carrierId = shipment.provider_shipment_id || shipment.provider_response?.shipment_id;
+      try {
+        await provider.adapter.cancelShipment(carrierId);
+      } catch (carrierErr) {
+        logger.warn(`[RefundService] Carrier cancel failed for order ${orderId}: ${carrierErr.message}`);
+      }
+    }
+
+    await db.from("shipments").update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancellation_reason: reason || 'Order cancelled',
+      updated_at: new Date().toISOString(),
+    }).eq("id", shipment.id);
+
+    await db.from("shipment_tracking_events").insert({
+      shipment_id: shipment.id,
+      status: 'cancelled',
+      description: 'Shipment cancelled due to order cancellation',
+      occurred_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.warn(`[RefundService] Failed to cancel shipment for order ${orderId}: ${err.message}`);
+  }
+}
+
+/**
+ * Log a fulfillment_status change to order_status_history.
+ */
+async function logStatusHistory(orderId, field, oldVal, newVal, changedBy) {
+  try {
+    await db.from("order_status_history").insert({
+      order_id: orderId,
+      field_name: field,
+      old_value: oldVal != null ? String(oldVal) : null,
+      new_value: String(newVal),
+      changed_by: changedBy || "system",
+      changed_at: new Date().toISOString(),
+    });
+  } catch (e) { /* ignore */ }
+}
 
 /**
  * Send WhatsApp notification to user based on refund events
@@ -20,22 +79,22 @@ async function sendRefundNotification(order, actionType, metadata = {}) {
 
   switch (actionType) {
     case "CANCELLATION_REQUESTED":
-      message = `🚨 *Cancellation Requested* \n\nYour cancellation request for Order *#${orderIdShort}* has been received and is pending admin review.`;
+      message = `🚨 *Cancellation Requested* \n\nYour cancellation request for Order *#${orderIdShort}* has been received and is pending admin review. For refund queries, contact support@sporekart.com or call +91 80 4991 3800.`;
       break;
     case "APPROVED":
-      message = `✅ *Cancellation Approved* \n\nYour cancellation request for Order *#${orderIdShort}* has been approved. We are initiating your refund of ${amountStr}.`;
+      message = `✅ *Cancellation Approved* \n\nYour cancellation request for Order *#${orderIdShort}* has been approved. Your order has been cancelled. For refund queries, please contact us at support@sporekart.com or call +91 80 4991 3800.`;
       break;
     case "REJECTED":
       message = `❌ *Cancellation Rejected* \n\nYour cancellation request for Order *#${orderIdShort}* was not approved. Your order is processing and will be shipped shortly. Reason: ${metadata.reason || "N/A"}`;
       break;
     case "REFUND_INITIATED":
-      message = `🔄 *Refund Initiated* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* has been initiated via ${order.payment_method || "Razorpay"}. Expected settlement time: 5-7 business days. Reference: ${metadata.refundId || "N/A"}`;
+      message = `🔄 *Refund Initiated* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* has been initiated manually by our team. Expected settlement: 5-7 business days. For queries, contact support@sporekart.com or +91 80 4991 3800.`;
       break;
     case "REFUND_COMPLETED":
-      message = `🎉 *Refund Successful* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* has been successfully processed! \nRef Number: ${metadata.rzpRefundId || "N/A"}`;
+      message = `🎉 *Refund Successful* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* has been successfully processed! If you have any questions, contact support@sporekart.com or +91 80 4991 3800. \nRef Number: ${metadata.rzpRefundId || "N/A"}`;
       break;
     case "REFUND_FAILED":
-      message = `⚠️ *Refund Failed* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* failed to process. Our support team is looking into this manually.`;
+      message = `⚠️ *Refund Failed* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* failed to process. Please contact support@sporekart.com or call +91 80 4991 3800 for assistance.`;
       break;
     case "TECHNICAL_RECOVERY":
       message = `🔧 *Order Recovery Refund* \n\nWe detected a technical glitch with your order *#${orderIdShort}*. Your payment was received but order creation was disrupted. An automatic refund of ${amountStr} has been initiated.`;
@@ -76,8 +135,8 @@ async function requestCustomerCancellation(orderId, userId, reason) {
     throw new Error("Only unpaid or paid orders can be cancelled");
   }
 
-  if (order.delivery_status !== "processing" && order.delivery_status !== "placed" && order.delivery_status !== "pending" && order.delivery_status !== "inoculating") {
-    throw new Error("Order can only be cancelled before it is shipped");
+  if (isWithCarrier(order)) {
+    throw new Error("Order cannot be cancelled after it has been handed to the carrier. Please contact support for RTO assistance.");
   }
 
   // Validate state machine transition
@@ -256,7 +315,7 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
 }
 
 /**
- * Admin approves user cancellation request
+ * Admin approves user cancellation request (auto-triggers gateway refund)
  */
 async function approveCancellation(orderId, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
@@ -266,9 +325,17 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
     throw new Error(`Order cancellation request must be in CANCEL_REQUESTED status. Current: ${order.status}`);
   }
 
-  // Update status to CANCEL_APPROVED
+  // Cancel carrier shipment if one exists (pre-shipment cancellation)
+  await cancelCarrierShipment(orderId, order.cancel_reason || "cancellation approved");
+
+  // Update status to CANCELLED
   await repo.updateOrder(orderId, {
-    status: OrderStates.CANCEL_APPROVED
+    status: OrderStates.CANCELLED,
+    delivery_status: "cancelled",
+    fulfillment_status: null,
+    refund_status: "pending",
+    cancelled_by: "customer",
+    cancelled_at: new Date().toISOString()
   });
 
   const auditPerformer = adminUser || "ADMIN";
@@ -277,25 +344,46 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
     orderId,
     action: "CANCEL_APPROVED",
     performedBy: auditPerformer,
-    metadata: { adminNote }
+    metadata: { adminNote, refundType: "auto" }
   });
 
   // Notify cancellation approval
   await sendRefundNotification(order, "APPROVED", { amount: order.total });
 
-  // If order has no payment ID, cancel it directly without gateway refund
-  if (!order.razorpay_payment_id) {
-    await repo.updateOrder(orderId, {
-      status: OrderStates.CANCELLED,
-      refund_status: "none"
-    });
-    await restockOrderItems(order);
-    const cancelledOrder = await repo.findOrderById(orderId);
-    return { success: true, order: cancelledOrder, refund: null };
+  const cancelledOrder = await repo.findOrderById(orderId);
+
+  // Auto-initiate gateway refund (executeRefundProcess handles restock internally)
+  let refundRecord = null;
+  try {
+    const refundResult = await executeRefundProcess(order, order.total, "customer", order.cancel_reason || "approved cancellation request", adminNote, auditPerformer);
+    refundRecord = refundResult.refund;
+  } catch (refundErr) {
+    logger.error(`[RefundService] Auto-refund failed on approveCancellation for order ${order.id}: ${refundErr.message}`);
+    // Fall back to pending refund record so admin can retry manually
+    try {
+      refundRecord = await repo.createRefund({
+        order_id: order.id,
+        user_id: order.user_id,
+        razorpay_payment_id: order.razorpay_payment_id || null,
+        razorpay_refund_id: null,
+        amount: order.total,
+        refund_reason: order.cancel_reason || "approved cancellation request",
+        status: "pending",
+        cancelled_by: "customer",
+        admin_note: adminNote
+      });
+      await logRefundAction({
+        orderId: order.id,
+        action: "MANUAL_REFUND_PENDING",
+        performedBy: auditPerformer,
+        metadata: { refundRecordId: refundRecord.id, reason: "admin approved cancellation (auto-refund failed)", amount: order.total }
+      });
+    } catch (createErr) {
+      logger.warn(`[RefundService] Failed to create fallback refunds table row for order ${order.id}: ${createErr.message}`);
+    }
   }
 
-  // Initiate full refund
-  return executeRefundProcess(order, order.total, "admin", order.cancel_reason || "User Cancelled", adminNote, auditPerformer);
+  return { success: true, order: cancelledOrder, refund: refundRecord };
 }
 
 /**
@@ -330,50 +418,74 @@ async function rejectCancellation(orderId, reason = "", adminUser = null) {
 }
 
 /**
- * Admin cancels order directly (due to inventory, errors, etc.)
+ * Admin cancels order directly (manual refund only - no auto gateway refund)
  */
 async function adminDirectCancellation(orderId, reason, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  if (["shipped", "in_transit", "delivered", "cancelled"].includes(order.delivery_status)) {
-    throw new Error("Order cannot be cancelled after it has been shipped.");
+  // Block cancel after handover to carrier
+  if (isWithCarrier(order)) {
+    throw new Error("Order cannot be cancelled after it has been handed to the carrier. Use RTO flow instead.");
   }
 
-  // Direct cancellation sets status to CANCEL_APPROVED directly
+  const isPaid = order.status === "paid" && order.razorpay_payment_id;
+  const auditPerformer = adminUser || "ADMIN";
+
+  // Cancel carrier shipment if one exists (pre-shipment cancellation)
+  await cancelCarrierShipment(orderId, reason);
+
+  // Direct cancellation sets status to CANCELLED
   const cancelledOrder = await repo.updateOrder(orderId, {
-    status: OrderStates.CANCEL_APPROVED,
+    status: OrderStates.CANCELLED,
     delivery_status: "cancelled",
+    fulfillment_status: null,
     cancel_reason: reason,
     cancelled_by: "admin",
-    cancelled_at: new Date().toISOString()
+    cancelled_at: new Date().toISOString(),
+    refund_status: isPaid ? "pending" : "none"
   });
-
-  const auditPerformer = adminUser || "ADMIN";
 
   await logRefundAction({
     orderId,
     action: "CANCEL_APPROVED",
     performedBy: auditPerformer,
-    metadata: { reason, adminNote }
+    metadata: { reason, adminNote, refundType: "manual" }
   });
 
-  // Notify approval
-  await sendRefundNotification(cancelledOrder, "APPROVED", { amount: order.total });
+  // Notify cancellation (distinct from customer-requested approval)
+  await sendRefundNotification(cancelledOrder, "ADMIN_CANCELLED", { amount: order.total });
 
-  // If order is not paid, cancel it directly without gateway refund
-  if (order.status !== "paid" || !order.razorpay_payment_id) {
-    logger.info(`[RefundService] Order ${orderId} is unpaid or pending verification. Cancelling without refund.`);
-    await repo.updateOrder(orderId, {
-      status: OrderStates.CANCELLED,
-      refund_status: "none"
-    });
-    await restockOrderItems(order);
-    return { success: true, order: cancelledOrder, refund: null };
+  // Auto-initiate gateway refund if paid (executeRefundProcess handles restock internally)
+  let refundRecord = null;
+  if (isPaid) {
+    try {
+      const refundResult = await executeRefundProcess(order, order.total, "admin", reason, adminNote, auditPerformer);
+      refundRecord = refundResult.refund;
+    } catch (refundErr) {
+      logger.error(`[RefundService] Auto-refund failed for admin-cancelled order ${order.id}: ${refundErr.message}`);
+      // Fall back to pending refund record so admin can retry manually
+      refundRecord = await repo.createRefund({
+        order_id: order.id,
+        user_id: order.user_id,
+        razorpay_payment_id: order.razorpay_payment_id || null,
+        razorpay_refund_id: null,
+        amount: order.total,
+        refund_reason: reason,
+        status: "pending",
+        cancelled_by: "admin",
+        admin_note: adminNote
+      });
+      await logRefundAction({
+        orderId: order.id,
+        action: "MANUAL_REFUND_PENDING",
+        performedBy: auditPerformer,
+        metadata: { refundRecordId: refundRecord.id, reason, amount: order.total }
+      });
+    }
   }
 
-  // Initiate full refund
-  return executeRefundProcess(cancelledOrder, order.total, "admin", reason, adminNote, auditPerformer);
+  return { success: true, order: cancelledOrder, refund: refundRecord };
 }
 
 /**
@@ -500,6 +612,110 @@ async function runAutoRefundSweep() {
   }
 }
 
+/**
+ * Progress manual refund through a specific step
+ * Steps: pending → initiated → processing → completed
+ */
+async function progressManualRefundStep(orderId, targetStep, adminUser = null) {
+  const allowedSteps = ['initiated', 'processing', 'completed'];
+  if (!allowedSteps.includes(targetStep)) {
+    throw new Error(`Invalid refund step "${targetStep}". Must be one of: ${allowedSteps.join(', ')}`);
+  }
+
+  const order = await repo.findOrderById(orderId);
+  if (!order) throw new Error("Order not found");
+
+  if (order.status !== 'cancelled') {
+    throw new Error(`Manual refund can only be processed on cancelled orders. Current status: ${order.status}`);
+  }
+
+  const currentRefundStatus = order.refund_status || 'pending';
+
+  // Define valid transitions for refund_status
+  const stepTransitions = {
+    'pending': ['initiated'],
+    'initiated': ['processing', 'completed'],
+    'processing': ['completed'],
+    'completed': []
+  };
+
+  const allowedNext = stepTransitions[currentRefundStatus] || [];
+  if (!allowedNext.includes(targetStep)) {
+    throw new Error(`Cannot move from refund status "${currentRefundStatus}" to "${targetStep}". Allowed: ${allowedNext.join(', ') || 'none'}`);
+  }
+
+  const auditPerformer = adminUser || "ADMIN";
+
+  // Build update payload
+  const updates = {
+    refund_status: targetStep,
+    updated_at: new Date().toISOString()
+  };
+
+  // When marking as completed, set the refunded amount
+  if (targetStep === 'completed') {
+    updates.total_refunded_amount = Number(order.total || 0);
+  }
+
+  const updatedOrder = await repo.updateOrder(orderId, updates);
+
+  // ── Sync the refunds-table row status ──
+  try {
+    const existingRefunds = await repo.findRefundsByOrderId(orderId);
+    const openRefund = existingRefunds.find(r => !["completed", "failed", "superseded"].includes(r.status));
+    if (openRefund) {
+      const refundUpdates = { status: targetStep };
+      if (targetStep === 'completed') {
+        refundUpdates.processed_at = new Date().toISOString();
+      }
+      await repo.updateRefund(openRefund.id, refundUpdates);
+    }
+  } catch (syncErr) {
+    logger.warn(`[RefundService] Failed to sync refunds table row for order ${orderId}: ${syncErr.message}`);
+  }
+
+  // Log audit
+  await logRefundAction({
+    orderId,
+    action: `MANUAL_REFUND_${targetStep.toUpperCase()}`,
+    performedBy: auditPerformer,
+    metadata: { step: targetStep, previousStatus: currentRefundStatus }
+  });
+
+  // Notify user on each step
+  if (targetStep === 'initiated') {
+    await sendRefundNotification(updatedOrder, "REFUND_INITIATED", { amount: order.total });
+  } else if (targetStep === 'completed') {
+    await sendRefundNotification(updatedOrder, "REFUND_COMPLETED", { amount: order.total });
+  }
+
+  return updatedOrder;
+}
+
+/**
+ * Stub: Initiate manual refund (bypass gateway) — used by separate controller route.
+ * The primary flow goes through adminDirectCancellation + progressManualRefundStep.
+ */
+async function manualRefundInitiate(orderId, paymentMode, paymentDetails, adminNote, adminUser) {
+  const order = await repo.findOrderById(orderId);
+  if (!order) throw new Error("Order not found");
+
+  // Delegate to progressManualRefundStep('initiated')
+  return progressManualRefundStep(orderId, 'initiated', adminUser);
+}
+
+/**
+ * Stub: Complete manual refund (bypass gateway) — used by separate controller route.
+ * The primary flow goes through progressManualRefundStep('completed').
+ */
+async function manualRefundComplete(orderId, adminNote, adminUser) {
+  const order = await repo.findOrderById(orderId);
+  if (!order) throw new Error("Order not found");
+
+  // Delegate to progressManualRefundStep('completed')
+  return progressManualRefundStep(orderId, 'completed', adminUser);
+}
+
 module.exports = {
   requestCustomerCancellation,
   approveCancellation,
@@ -509,5 +725,9 @@ module.exports = {
   retryFailedRefund,
   runAutoRefundSweep,
   sendRefundNotification,
-  executeRefundProcess
+  executeRefundProcess,
+  progressManualRefundStep,
+  manualRefundInitiate,
+  manualRefundComplete,
+  cancelCarrierShipment
 };

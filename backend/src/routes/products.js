@@ -71,6 +71,7 @@ router.post(
   adminOnly,
   validateBody(
     Joi.object({
+      id: Joi.string().optional(),
       name: Joi.string().required(),
       description: Joi.string().required(),
       price: Joi.number().optional(),
@@ -90,6 +91,18 @@ router.post(
           stock: Joi.number().min(0).optional(),
         }),
       ).min(1).optional(),
+      storage_handling: Joi.string().optional().allow(''),
+      warranty_policy: Joi.string().optional().allow(''),
+      return_policy: Joi.string().optional().allow(''),
+      shipping_info: Joi.string().optional().allow(''),
+      compliance_info: Joi.string().optional().allow(''),
+      highlights: Joi.array().items(Joi.string()).optional(),
+      certificates: Joi.array().items(
+        Joi.object({
+          icon: Joi.string().optional().allow(''),
+          label: Joi.string().required(),
+        }),
+      ).optional(),
     }),
   ),
   async (req, res) => {
@@ -124,6 +137,18 @@ const updateProductSchema = Joi.object({
       price: Joi.number().required(),
       mrp_price: Joi.number().optional(),
       stock: Joi.number().min(0).optional(),
+    }),
+  ).optional(),
+  storage_handling: Joi.string().optional().allow(''),
+  warranty_policy: Joi.string().optional().allow(''),
+  return_policy: Joi.string().optional().allow(''),
+  shipping_info: Joi.string().optional().allow(''),
+  compliance_info: Joi.string().optional().allow(''),
+  highlights: Joi.array().items(Joi.string()).optional(),
+  certificates: Joi.array().items(
+    Joi.object({
+      icon: Joi.string().optional().allow(''),
+      label: Joi.string().required(),
     }),
   ).optional(),
 });

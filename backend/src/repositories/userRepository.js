@@ -13,15 +13,23 @@ async function findByEmail(email) {
 }
 
 async function findByPhone(phone) {
-  const { data, error } = await db
+  const cleaned = phone.replace(/^\+91/, "").replace(/\s/g, "").trim();
+  // Try without +91 prefix (normalized storage)
+  let { data, error } = await db
     .from("users")
     .select("*")
-    .eq("whatsapp_number", phone.replace(/^\+91/, "").replace(/\s/g, "").trim())
+    .eq("whatsapp_number", cleaned)
     .single();
-  if (error && (error.message === "No rows found" || error.code === "PGRST116")) {
-    return { data: null, error: null };
+  if (data) return { data, error: null };
+  if (error && error.message !== "No rows found" && error.code !== "PGRST116") {
+    return { data: null, error };
   }
-  return { data, error };
+  // Fallback: try with +91 prefix (legacy storage from OTP-created users)
+  return db
+    .from("users")
+    .select("*")
+    .eq("whatsapp_number", `+91${cleaned}`)
+    .single();
 }
 
 async function findById(id) {

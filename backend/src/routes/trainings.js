@@ -35,8 +35,12 @@ const updateTrainingSchema = Joi.object({
   price_actual: Joi.number().min(0).optional(),
 });
 
+const enrollSchema = Joi.object({
+  role: Joi.string().valid("buyer", "grower", "trainee").optional(),
+});
+
 // POST /api/trainings/:id/enroll (requires auth)
-router.post("/:id/enroll", authMiddleware, async (req, res) => {
+router.post("/:id/enroll", authMiddleware, validateBody(enrollSchema), async (req, res) => {
   try {
     const trainingId = req.params.id;
     const userId = req.user && req.user.userId;

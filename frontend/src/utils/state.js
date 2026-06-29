@@ -2,10 +2,21 @@
 const savedToken = (() => { try { return sessionStorage.getItem('jwt_token'); } catch { return null; } })();
 const savedUser = (() => { try { const u = sessionStorage.getItem('user_data'); return u ? JSON.parse(u) : null; } catch { return null; } })();
 
+// Restore persisted cart from localStorage (only for active sessions)
+const savedCart = (() => {
+  try {
+    if (!savedToken) return [];
+    const c = localStorage.getItem('cart_data');
+    return c ? JSON.parse(c) : [];
+  } catch {
+    return [];
+  }
+})();
+
 export const state = {
   token: savedToken,
   user: savedUser,
-  cart: [],
+  cart: savedCart,
   products: [],
   orders: [],
   activePromo: null,
@@ -39,7 +50,8 @@ export function saveCart() {
 export function clearAuth() {
   saveAuth(null, null);
   state.orders = [];
-  // Cart is preserved across logout so unfinished shopping survives
+  state.cart = [];
+  try { localStorage.removeItem('cart_data'); } catch (e) { /* quota */ }
 }
 
 export function clearCart() {

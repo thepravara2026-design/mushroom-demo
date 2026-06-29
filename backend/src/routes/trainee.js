@@ -207,24 +207,19 @@ router.post("/request-phone-otp", validateBody(traineePhoneRequestSchema), async
   try {
     const { phone } = req.body;
 
-    const cleanPhone = phone.replace(/\s/g, "").trim();
+    // BUG-11: normalize consistently at route level (strip +91 prefix)
+    const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
 
     // Look up user — do NOT reveal whether phone is registered
     const { data: user } = await userRepo.findByPhone(cleanPhone);
 
-    if (!user) {
+    if (!user || user.role !== "trainee") {
+      // BUG-5: return the same generic response for both "not found" and "wrong role"
+      // to prevent information leakage about whether a phone is registered
       return success(res, {
         message:
           "If this phone number is registered with us, you will receive an OTP shortly.",
       });
-    }
-
-    if (user.role !== "trainee") {
-      return respondError(
-        res,
-        "This account is not registered as a trainee. Please use user login.",
-        403,
-      );
     }
 
     // Use the user's email as the OTP destination, but flag it as phone login
@@ -317,7 +312,8 @@ router.post("/verify-phone-otp", validateBody(traineeVerifyPhoneOtpSchema), asyn
     const { data: user } = await userRepo.findByPhone(cleanPhone);
 
     if (!user) {
-      return respondError(res, "User not found with this phone number.", 404);
+      // BUG-6: use a generic message to avoid leaking whether the phone is registered
+      return respondError(res, "Invalid OTP or phone number.", 401);
     }
 
     if (user.role !== "trainee") {

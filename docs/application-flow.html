@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sporekart — Application Flow Diagrams</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0f1a14; color: #e0e8e4; font-family: 'Segoe UI', system-ui, sans-serif; padding: 2rem; }
+  h1 { color: #a8e6cf; font-size: 2rem; margin-bottom: 0.5rem; }
+  h2 { color: #7dcea0; font-size: 1.4rem; margin: 2rem 0 1rem; border-bottom: 1px solid #2a3d32; padding-bottom: 0.3rem; }
+  h3 { color: #a8e6cf; font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .subtitle { color: #8a9e94; margin-bottom: 2rem; }
+  .diagram-container { background: #1a2d22; border-radius: 10px; padding: 1.5rem; margin: 1rem 0; border: 1px solid #2a4a38; overflow-x: auto; }
+  .diagram-container svg { max-width: 100%; height: auto; }
+  .note { color: #8a9e94; font-size: 0.85rem; margin: 0.5rem 0 1rem; padding: 0.5rem 1rem; background: #1a2d22; border-left: 3px solid #2a6a48; border-radius: 4px; }
+  .legend { display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 1rem 0; padding: 1rem; background: #1a2d22; border-radius: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+  .legend-box { width: 16px; height: 16px; border-radius: 3px; }
+  code { background: #2a3d32; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.85rem; color: #a8e6cf; }
+  .file-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0.5rem; margin: 1rem 0; }
+  .file-item { background: #1a2d22; padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #2a4a38; font-family: monospace; font-size: 0.85rem; }
+  .file-item .path { color: #8a9e94; }
+  .file-item .desc { color: #7dcea0; }
+  .key { display: inline-block; background: #2a4a38; padding: 0.1rem 0.5rem; border-radius: 4px; font-family: monospace; font-size: 0.8rem; color: #d4e8dc; }
+  hr { border: none; border-top: 1px solid #2a4a38; margin: 2rem 0; }
+</style>
+</head>
+<body>
+
+<h1>🍄 Sporekart — Application Flow Diagrams</h1>
+<p class="subtitle">Complete system architecture, routing, state machines &amp; data flows</p>
+
+<div class="legend">
+  <span class="legend-item"><span class="legend-box" style="background:#4ecdc4"></span> Frontend / UI</span>
+  <span class="legend-item"><span class="legend-box" style="background:#ffd166"></span> Backend / API</span>
+  <span class="legend-item"><span class="legend-box" style="background:#ef476f"></span> Database / Storage</span>
+  <span class="legend-item"><span class="legend-box" style="background:#06d6a0"></span> State Transitions</span>
+  <span class="legend-item"><span class="legend-box" style="background:#118ab2"></span> External Services</span>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1a4a38',
+      primaryTextColor: '#e0e8e4',
+      primaryBorderColor: '#2a6a48',
+      lineColor: '#4ecdc4',
+      secondaryColor: '#2a3d32',
+      tertiaryColor: '#1a2d22',
+      clusterBkg: '#1a2d22',
+      clusterBorder: '#2a4a38',
+      nodeBorder: '#2a6a48',
+      mainBkg: '#1a2d22',
+      activationBorderColor: '#06d6a0',
+      sequenceNumberColor: '#e0e8e4',
+    }
+  });
+</script>
+
+<!-- ============================================================ -->
+<h2>1. System Architecture Overview</h2>
+<div class="note">High-level view of frontend, backend, database, and external service integration.</div>
+<div class="diagram-container">
+<pre class="mermaid">
+graph TB
+    subgraph BROWSER["🌐 Browser SPA"]
+        APP["app.js<br/>Hash Router"] 
+        ADMIN["admin.html<br/>admin.js Panel"]
+        CSS["style.css<br/>admin-premium.css"]
+    end
+    
+    subgraph BACKEND["⚙️ Express.js Server (server.js)"]
+        MIDDLEWARE["Middleware<br/>authMiddleware<br/>validateBody<br/>rateLimit"]
+        
+        subgraph ROUTES["API Routes"]
+            ORDERS["/api/orders<br/>checkout, fulfillment<br/>cancel, track"]
+            REFUNDS["/api/refunds<br/>cancel requests<br/>refund management"]
+            SHIPPING["/api/shipping<br/>create, track<br/>cancel shipment"]
+            WEBHOOKS["/api/webhooks<br/>carrier events"]
+            AUTH["/api/auth<br/>login, OTP, profile"]
+            PRODUCTS["/api/products"]
+            CATEGORIES["/api/categories"]
+            BLOGS["/api/blogs"]
+            TRAININGS["/api/trainings"]
+        end
+        
+        subgraph MODULES["Business Logic"]
+            REFUND_SVC["RefundService<br/>cancelCarrierShipment<br/>executeRefundProcess<br/>approveCancellation"]
+            ORDER_SVC["OrderStateService<br/>state machine<br/>restockOrderItems<br/>isWithCarrier"]
+            PAYMENT_SVC["PaymentService<br/>Razorpay integration<br/>idempotency keys"]
+            AUDIT_SVC["RefundAuditService<br/>immutable audit logs"]
+        end
+        
+        subgraph SERVICES["Service Layer"]
+            NOTIFY["notificationService<br/>Email + SMS + WhatsApp"]
+            SHIP_PROV["shipping/ProviderRegistry<br/>ShiprocketAdapter"]
+            AUTH_SVC["authService<br/>JWT + OTP"]
+        end
+        
+        subgraph CONFIG["Config"]
+            DB_CFG["db.js<br/>mock / Supabase"]
+            JWT_CFG["jwt.js"]
+            RAZORPAY_CFG["razorpay.js"]
+        end
+    end
+    
+    subgraph DATABASE["🗄️ Database"]
+        ORDERS_DB["orders"]
+        SHIPMENTS_DB["shipments"]
+        REFUNDS_DB["refunds"]
+        PRODUCTS_DB["products"]
+        USERS_DB["users"]
+        HISTORY_DB["order_status_history"]
+        FULFILL_DB["fulfillment_tasks"]
+        SHIP_PROV_DB["shipping_providers"]
+        AUDIT_DB["refund_audits"]
+    end
+    
+    subgraph EXTERNAL["🌍 External"]
+        RAZOR["Razorpay<br/>Payment Gateway"]
+        SHIPROCKET["Shiprocket<br/>Shipping Carrier"]
+        SUPABASE["Supabase<br/>(production only)"]
+    end
+    
+    APP --> ORDERS
+    APP --> AUTH
+    APP --> PRODUCTS
+    APP --> CATEGORIES
+    ADMIN --> ORDERS
+    ADMIN --> REFUNDS
+    ADMIN --> SHIPPING
+    
+    ORDERS --> ORDER_SVC
+    ORDERS --> REFUND_SVC
+    ORDERS --> PAYMENT_SVC
+    REFUNDS --> REFUND_SVC
+    SHIPPING --> SHIP_PROV
+    WEBHOOKS --> SHIP_PROV
+    WEBHOOKS --> ORDER_SVC
+    AUTH --> AUTH_SVC
+    
+    REFUND_SVC --> ORDER_SVC
+    REFUND_SVC --> PAYMENT_SVC
+    REFUND_SVC --> AUDIT_SVC
+    REFUND_SVC --> NOTIFY
+    
+    ORDER_SVC --> DB_CFG
+    REFUND_SVC --> DB_CFG
+    
+    DB_CFG --> ORDERS_DB
+    DB_CFG --> SHIPMENTS_DB
+    DB_CFG --> REFUNDS_DB
+    DB_CFG --> PRODUCTS_DB
+    DB_CFG --> USERS_DB
+    DB_CFG --> HISTORY_DB
+    DB_CFG --> FULFILL_DB
+    
+    PAYMENT_SVC --> RAZOR
+    SHIP_PROV --> SHIPROCKET
+    DB_CFG --> SUPABASE
+
+    style BROWSER fill:#1a3a2a,stroke:#4ecdc4,color:#e0e8e4
+    style BACKEND fill:#2a2a1a,stroke:#ffd166,color:#e0e8e4
+    style DATABASE fill:#2a1a1a,stroke:#ef476f,color:#e0e8e4
+    style EXTERNAL fill:#1a1a2a,stroke:#118ab2,color:#e0e8e4
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>2. Frontend Hash Routing</h2>
+<div class="note">Single-page app routing via <code>window.location.hash</code>. The <code>handleRouting()</code> function dispatches to page sections.</div>
+<div class="diagram-container">
+<pre class="mermaid">
+graph TD
+    START["User navigates<br/>window.location.hash"] --> ROUTER["handleRouting()"]
+    
+    ROUTER --> SHOP["#shop / ''<br/>Activate: shop-page<br/>hero-section<br/>(products + categories)"]
+    ROUTER --> ABOUT["#about<br/>Activate: about-page<br/>Hide hero"]
+    ROUTER --> CHECKOUT["#checkout<br/>Activate: checkout-page<br/>renderCheckoutPage()"]
+    ROUTER --> TRACK["#track / #track-{id}<br/>Activate: tracker-page<br/>fetchOrders() + poll"]
+    ROUTER --> STORIES["#stories<br/>Activate: stories-page<br/>renderStoriesGrid()"]
+    ROUTER --> STORY["#story-{id}<br/>Activate: story-detail-page<br/>renderStoryDetail(id)"]
+    ROUTER --> BLOGS["#blogs / #blog-{slug}<br/>Blogs grid / detail"]
+    ROUTER --> TRAINING["#training-section<br/>#training-courses<br/>Scroll + auth modal"]
+    ROUTER --> FALLBACK["anything else<br/>Fallback to shop-page"]
+    
+    SHOP --> CAT_NAV["Category Filter<br/>navigateToCategory(cat)<br/>state.activeCategory=cat<br/>fetchProducts(?category=cat)"]
+    CAT_NAV --> FETCH["fetchProducts()<br/>→ GET /api/products<br/>renderProducts()"]
+    
+    style ROUTER fill:#2a4a38,stroke:#4ecdc4,color:#e0e8e4
+    style CAT_NAV fill:#1a3a2a,stroke:#06d6a0,color:#e0e8e4
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>3. Checkout &amp; Payment Flow</h2>
+<div class="diagram-container">
+<pre class="mermaid">
+sequenceDiagram
+    actor Buyer
+    participant CartUI as Cart UI
+    participant Checkout as Checkout Page
+    participant Payment as Payment Screen
+    participant Backend as Express API
+    participant Razorpay as Razorpay
+    
+    Buyer->>CartUI: Click "Place Order"
+    CartUI->>CartUI: handleCheckoutInitiation()
+    CartUI->>Checkout: window.location.hash = '#checkout'
+    
+    Checkout->>Backend: GET /orders/shipping-settings
+    Backend-->>Checkout: shipping charge
+    
+    Buyer->>Checkout: Fill address form
+    Buyer->>Checkout: Click "Continue to Payment"
+    Checkout->>Backend: POST /orders/checkout
+    Backend->>Backend: create order (status='pending')
+    Backend-->>Checkout: { razorpay_order_id, order }
+    
+    Checkout->>Payment: renderInlinePaymentScreen()
+    
+    alt Razorpay (Card / UPI / Netbanking)
+        Payment->>Razorpay: rzp.open()
+        Razorpay-->>Payment: onSuccess(response)
+        Payment->>Backend: POST /orders/verify-payment
+        Backend->>Backend: status='paid'
+        Backend-->>Payment: { order }
+        Payment->>Payment: clearCart()
+        Payment->>Payment: state.activeCategory='all'
+        Payment->>Payment: fetchProducts()
+        Payment->>Payment: showPopupModal('#shop')
+        Payment-->>Buyer: "Thank you! Order confirmed"
+    
+    else COD
+        Payment->>Backend: POST /orders/confirm-cod-payment
+        Backend-->>Payment: ok
+        Payment->>Payment: clearCart() + reset category
+        Payment->>Payment: showPopupModal('#shop')
+    
+    else UPI QR
+        Payment->>Backend: POST /orders/confirm-upi-payment
+        Backend-->>Payment: ok
+        Payment->>Payment: clearCart() + reset category
+        Payment->>Payment: showPopupModal('#shop')
+    end
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>4. Order Fulfillment Pipeline</h2>
+<div class="note">Replaces the old manual <code>delivery_status</code> progression. Admin moves orders through stages; carrier creation auto-triggers at <code>ready_to_ship</code>.</div>
+<div class="diagram-container">
+<pre class="mermaid">
+graph LR
+    APPROVED["Admin Approves<br/>POST /admin/approve/:id"] --> PF["pending_fulfillment<br/><br/>Default state after<br/>admin approval"]
+    
+    PF --> PR["packing_required<br/><br/>Admin clicks<br/>'Start Packing'"]
+    PR --> PD["packed<br/><br/>Admin clicks<br/>'Mark Packed'"]
+    PD --> RTS["ready_to_ship<br/><br/>Admin clicks<br/>'Create Shipment'"]
+    
+    RTS --> AUTO{"Auto-create<br/>Shipment"}
+    AUTO -->|Success| WC["with_carrier<br/><br/>Shipped via carrier"]
+    AUTO -->|Fail| RTS_STUCK["⚠️ Stays at<br/>ready_to_ship<br/>Retry button shown"]
+    
+    WC --> WEBHOOK{"Carrier Webhook"}
+    WEBHOOK -->|delivered| DEL["delivered<br/><br/>sets delivered_at"]
+    WEBHOOK -->|RTO / return| RTO_PATH["fulfillment_status=null<br/>auto-cancel + refund"]
+    
+    style PF fill:#1a4a38,stroke:#4ecdc4,color:#e0e8e4
+    style PR fill:#1a4a38,stroke:#ffd166,color:#e0e8e4
+    style PD fill:#1a4a38,stroke:#ffd166,color:#e0e8e4
+    style RTS fill:#1a4a38,stroke:#06d6a0,color:#e0e8e4
+    style WC fill:#1a4a38,stroke:#118ab2,color:#e0e8e4
+    style DEL fill:#2a4a2a,stroke:#06d6a0,color:#e0e8e4
+    style RTS_STUCK fill:#3a2a1a,stroke:#ffd166,color:#e0e8e4
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>5. Order State Machine</h2>
+<div class="note">Defined in <code>OrderStateService.js</code>. All transitions are validated via <code>isValidTransition()</code>.</div>
+<div class="diagram-container">
+<pre class="mermaid">
+stateDiagram-v2
+    [*] --> PENDING : Order created
+    
+    PENDING --> PAID : Payment success
+    PENDING --> FAILED : Payment failure
+    PENDING --> CANCEL_REQUESTED : Customer requests
+    PENDING --> CANCELLED : Admin direct
+    
+    PAID --> CANCEL_REQUESTED : Customer requests
+    PAID --> CANCELLED : Admin direct
+    
+    CANCEL_REQUESTED --> CANCELLED : Admin approves
+    CANCEL_REQUESTED --> CANCEL_REJECTED : Admin rejects
+    
+    CANCEL_REJECTED --> PAID : Revert to paid
+    
+    CANCELLED --> REFUND_PENDING : Initiate refund
+    
+    REFUND_PENDING --> REFUND_INITIATED : Gateway refund started
+    REFUND_PENDING --> REFUND_FAILED : Refund failed
+    
+    REFUND_INITIATED --> REFUND_PROCESSING : Processing
+    REFUND_INITIATED --> REFUND_COMPLETED : Instant complete
+    REFUND_INITIATED --> REFUND_FAILED : Refund failed
+    
+    REFUND_PROCESSING --> REFUND_COMPLETED : Webhook confirms
+    REFUND_PROCESSING --> REFUND_FAILED : Webhook failure
+    
+    REFUND_FAILED --> REFUND_PENDING : Retry
+    REFUND_FAILED --> REFUND_INITIATED : Retry (direct)
+    
+    REFUND_COMPLETED --> [*]
+    
+    note right of CANCEL_REQUESTED : assertCancellable()<br/>blocks if isWithCarrier()
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>6. Cancellation &amp; Refund: Detailed Flow</h2>
+<div class="note">Three entry points: customer request, admin approval of request, admin direct cancel. All converge on <code>cancelCarrierShipment()</code> + <code>executeRefundProcess()</code>.</div>
+<div class="diagram-container">
+<pre class="mermaid">
+graph TB
+    subgraph CUSTOMER["🙋 Customer"]
+        REQ["POST /orders/:id/request-cancel<br/>reason: string"]
+    end
+    
+    subgraph ADMIN["🔧 Admin Panel"]
+        APPROVE["POST /refunds/cancel-requests/:id/approve<br/>adminNote: string"]
+        DIRECT["POST /refunds/admin-cancel/:id<br/>reason + adminNote"]
+        REJECT["POST /refunds/cancel-requests/:id/reject<br/>reason: string"]
+    end
+    
+    subgraph REFUND_SVC["RefundService"]
+        REQ --> REQ_FN["requestCustomerCancellation()"]
+        APPROVE --> APP_FN["approveCancellation()"]
+        DIRECT --> DIR_FN["adminDirectCancellation()"]
+        REJECT --> REJ_FN["rejectCancellation()"]
+        
+        REQ_FN --> GUARD1{"isWithCarrier(order)?"}
+        GUARD1 -->|Yes| BLOCK1["❌ Error: Contact support for RTO"]
+        GUARD1 -->|No| SET_CANCEL_REQ["status = CANCEL_REQUESTED<br/>cancelled_by = user"]
+        
+        APP_FN --> GUARD2{"status ===<br/>CANCEL_REQUESTED?"}
+        GUARD2 -->|No| BLOCK2["❌ Error"]
+        GUARD2 -->|Yes| CANCEL_SHIP["cancelCarrierShipment()"]
+        
+        DIR_FN --> GUARD3{"isWithCarrier(order)?"}
+        GUARD3 -->|Yes| BLOCK3["❌ Error: Use RTO flow"]
+        GUARD3 -->|No| CANCEL_SHIP2["cancelCarrierShipment()"]
+        
+        REJ_FN --> REVERT["status = PAID<br/>delivery_status = processing"]
+    end
+    
+    subgraph SHARED["Shared Helpers"]
+        CANCEL_SHIP --> CANCEL_HELPER["cancelCarrierShipment()<br/><br/>1. Find shipment by order_id<br/>2. Call carrier API cancel<br/>3. Update shipments table<br/>4. Insert tracking event"]
+        CANCEL_SHIP2 --> CANCEL_HELPER
+        
+        CANCEL_HELPER --> SET_CANCELLED["Set order: status = CANCELLED<br/>fulfillment_status = null<br/>cancelled_by = admin/customer"]
+        SET_CANCELLED --> RESTOCK["restockOrderItems()<br/>(idempotent via restocked guard)"]
+        RESTOCK --> NOTIFY["sendRefundNotification()"]
+        NOTIFY --> REFUND_START
+    end
+    
+    subgraph REFUND_PIPE["Refund Pipeline"]
+        REFUND_START["executeRefundProcess()"] --> INIT_REFUND["Initiate Razorpay refund<br/>with idempotency key"]
+        INIT_REFUND --> UPDATE_ORDER["Update order status<br/>REFUND_PENDING → REFUND_INITIATED"]
+        UPDATE_ORDER --> CREATE_REFUND_REC["INSERT refunds record"]
+    end
+    
+    subgraph FALLBACK["Fallback (if auto-refund fails)"]
+        INIT_REFUND -->|Error| FALLBACK_REFUND["Create pending refund record<br/>status = pending<br/>Admin can retry later"]
+    end
+    
+    subgraph WEBHOOK_REFUND["Carrier / Webhook Path"]
+        CARRIER_WEBHOOK["POST /api/webhooks/:providerKey"] --> DETECT_RTO{"Status =<br/>returned/cancelled?"}
+        DETECT_RTO -->|Yes| AUTO_CANCEL["Set fulfillment_status = null<br/>executeRefundProcess()"]
+    end
+
+    style CUSTOMER fill:#1a2a3a,stroke:#4ecdc4,color:#e0e8e4
+    style ADMIN fill:#2a3a1a,stroke:#ffd166,color:#e0e8e4
+    style REFUND_SVC fill:#2a1a2a,stroke:#ef476f,color:#e0e8e4
+    style SHARED fill:#1a3a2a,stroke:#06d6a0,color:#e0e8e4
+    style REFUND_PIPE fill:#1a2a2a,stroke:#118ab2,color:#e0e8e4
+    style FALLBACK fill:#3a2a1a,stroke:#ffd166,color:#e0e8e4
+    style WEBHOOK_REFUND fill:#2a2a1a,stroke:#ffd166,color:#e0e8e4
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>7. Admin Panel Structure</h2>
+<div class="diagram-container">
+<pre class="mermaid">
+graph TB
+    subgraph ADMIN_PANEL["Admin Panel (admin.html + admin.js)"]
+        
+        subgraph TABS["Tab Navigation"]
+            TAB_ORDERS["📋 Orders"]
+            TAB_CATALOG["📦 Catalog"]
+            TAB_REFUNDS["💰 Refunds"]
+            TAB_SHIPMENTS["🚚 Shipments"]
+        end
+        
+        subgraph ORDERS_TAB["Orders Tab"]
+            O_FETCH["fetchAdminOrders()<br/>GET /api/orders/all-orders"]
+            O_CARD["For each order: render card"]
+            
+            subgraph CARD["Order Card"]
+                HEADER["Header: ID, Customer, Total, Status"]
+                FULFILL["Fulfillment Pipeline<br/>Progress Bar + Action Buttons"]
+                BUTTONS["[Start Packing] [Mark Packed]<br/>[Create Shipment] [Cancel & Refund]"]
+                APPROVE_BTNS["[Approve] [Reject]<br/>(for pending approval orders)"]
+                STATUS["Current fulfillment_status<br/>Refund status display"]
+            end
+        end
+        
+        subgraph REFUNDS_TAB["Refunds Tab"]
+            R_FETCH["loadRefundsDashboard()<br/>GET /api/refunds/dashboard"]
+            R_LIST["Refund records list"]
+            R_ACTIONS["[Progress Step] [Initiate] [Complete]<br/>[Retry Failed Refund]"]
+        end
+        
+        subgraph SHIPMENTS_TAB["Shipments Tab"]
+            S_FETCH["loadShipmentsTab()<br/>GET /api/shipping/all"]
+            S_LIST["All shipments table"]
+            S_ACTIONS["[Cancel Shipment]<br/>[Refresh Cache]"]
+        end
+        
+        subgraph KEY_FUNCTIONS["Key Functions"]
+            FU_UPDATE["updateFulfillment(id, status)<br/>PUT /orders/:id/fulfillment"]
+            FU_CANCEL["adminDirectCancelModal(id)<br/>POST /refunds/admin-cancel/:id"]
+            FU_SHIP_CANCEL["cancelShipmentFromTab(orderId)<br/>POST /shipping/cancel/:orderId"]
+            FU_REFRESH["refreshShipmentsCache()"]
+        end
+    end
+    
+    TAB_ORDERS --> ORDERS_TAB
+    TAB_REFUNDS --> REFUNDS_TAB
+    TAB_SHIPMENTS --> SHIPMENTS_TAB
+    
+    BUTTONS --> FU_UPDATE
+    BUTTONS --> FU_CANCEL
+    S_ACTIONS --> FU_SHIP_CANCEL
+    S_ACTIONS --> FU_REFRESH
+    
+    style ADMIN_PANEL fill:#1a2a1a,stroke:#4ecdc4,color:#e0e8e4
+    style ORDERS_TAB fill:#1a3a2a,stroke:#ffd166,color:#e0e8e4
+    style REFUNDS_TAB fill:#1a3a2a,stroke:#ef476f,color:#e0e8e4
+    style SHIPMENTS_TAB fill:#1a3a2a,stroke:#118ab2,color:#e0e8e4
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>8. Database Schema Relationships</h2>
+<div class="note">Key tables and their foreign key relationships.</div>
+<div class="diagram-container">
+<pre class="mermaid">
+erDiagram
+    orders {
+        id text PK
+        user_id text FK
+        status text
+        delivery_status text
+        fulfillment_status text
+        admin_approval_status text
+        shipment_id text FK
+        restocked boolean
+        refund_status text
+        total_refunded_amount numeric
+        razorpay_payment_id text
+        razorpay_order_id text
+        shipped_at timestamp
+        delivered_at timestamp
+        cancelled_at timestamp
+        cancel_reason text
+        cancelled_by text
+    }
+    
+    users {
+        id text PK
+        email text
+        full_name text
+        role text
+        whatsapp_number text
+    }
+    
+    shipments {
+        id text PK
+        order_id text FK
+        shipping_provider_id text FK
+        awb_code text
+        status text
+        provider_shipment_id text
+        service_type text
+        rate numeric
+        label_generated boolean
+        pickup_requested boolean
+        cancelled_at timestamp
+        cancellation_reason text
+    }
+    
+    shipping_providers {
+        id text PK
+        provider_key text UK
+        name text
+        is_active boolean
+        is_default boolean
+        config jsonb
+    }
+    
+    refunds {
+        id text PK
+        order_id text FK
+        user_id text FK
+        razorpay_payment_id text
+        razorpay_refund_id text
+        amount numeric
+        status text
+        refund_reason text
+        cancelled_by text
+        failure_reason text
+    }
+    
+    products {
+        id text PK
+        name text
+        price numeric
+        mrp_price numeric
+        stock integer
+        category text
+        image_url text
+    }
+    
+    order_status_history {
+        id text PK
+        order_id text FK
+        field_name text
+        old_value text
+        new_value text
+        changed_by text
+        changed_at timestamp
+    }
+    
+    fulfillment_tasks {
+        id text PK
+        order_id text FK
+        task_type text
+        status text
+        assigned_to text
+        completed_at timestamp
+    }
+    
+    refund_audits {
+        id text PK
+        refund_id text
+        order_id text FK
+        action text
+        performed_by text
+        timestamp timestamp
+        metadata jsonb
+    }
+    
+    shipment_tracking_events {
+        id text PK
+        shipment_id text FK
+        status text
+        location text
+        description text
+        occurred_at timestamp
+    }
+    
+    orders ||--o{ shipments : "has"
+    orders ||--o{ refunds : "has"
+    orders ||--o{ order_status_history : "audited by"
+    orders ||--o{ fulfillment_tasks : "tasks for"
+    orders }o--|| users : "belongs to"
+    shipments }o--|| shipping_providers : "uses"
+    shipments ||--o{ shipment_tracking_events : "has events"
+    refunds ||--o{ refund_audits : "audited by"
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>9. Complete End-to-End: Order Lifecycle</h2>
+<div class="diagram-container">
+<pre class="mermaid">
+sequenceDiagram
+    actor Buyer
+    actor Admin
+    actor Carrier as Shiprocket
+    participant FE as Frontend SPA
+    participant BE as Express API
+    participant DB as Database
+    participant RZ as Razorpay
+    
+    Note over Buyer,RZ: ── 1. SHOP & CHECKOUT ──
+    Buyer->>FE: Browse, add to cart
+    Buyer->>FE: Place Order
+    FE->>BE: POST /orders/checkout
+    BE->>DB: INSERT orders (status=pending)
+    BE-->>FE: razorpay_order_id
+    Buyer->>FE: Pay via Razorpay
+    FE->>RZ: rzp.open()
+    RZ-->>FE: onSuccess()
+    FE->>BE: POST /orders/verify-payment
+    BE->>DB: UPDATE orders (status=paid, admin_approval_status=pending)
+    BE-->>FE: Order confirmed
+    FE->>FE: Clear cart, reset category to 'all'
+    FE->>FE: Redirect to #shop
+    
+    Note over Buyer,RZ: ── 2. ADMIN APPROVAL ──
+    Admin->>FE: Open admin panel
+    Admin->>FE: Click Approve
+    FE->>BE: POST /admin/approve/:id
+    BE->>DB: UPDATE (admin_approval_status=approved, fulfillment_status=pending_fulfillment)
+    BE-->>FE: Approved
+    
+    Note over Buyer,RZ: ── 3. FULFILLMENT PIPELINE ──
+    Admin->>FE: Click "Start Packing"
+    FE->>BE: PUT /orders/:id/fulfillment {status: packing_required}
+    BE->>DB: UPDATE fulfillment_status
+    
+    Admin->>FE: Click "Mark Packed"
+    FE->>BE: PUT /orders/:id/fulfillment {status: packed}
+    BE->>DB: UPDATE fulfillment_status
+    
+    Admin->>FE: Click "Create Shipment"
+    FE->>BE: PUT /orders/:id/fulfillment {status: ready_to_ship}
+    BE->>BE: Auto: createShipment()
+    BE->>BE: assignCourier() + schedulePickup() + generateLabel()
+    BE->>DB: INSERT shipment
+    BE->>DB: UPDATE order (fulfillment_status=with_carrier, shipment_id=...)
+    BE-->>FE: {order, message}
+    
+    Note over Buyer,RZ: ── 4. CARRIER DELIVERY ──
+    Carrier->>BE: POST /api/webhooks/shiprocket (delivered)
+    BE->>DB: UPDATE shipment (status=delivered)
+    BE->>DB: UPDATE order (fulfillment_status=delivered, delivered_at=NOW())
+    BE->>DB: INSERT order_status_history
+    
+    Note over Buyer,RZ: ── 5. ALTERNATIVE: CANCELLATION ──
+    Buyer->>FE: Request cancellation
+    FE->>BE: POST /orders/:id/request-cancel
+    BE->>BE: assertCancellable() → isWithCarrier? → No
+    BE->>DB: UPDATE order (status=CANCEL_REQUESTED)
+    BE-->>FE: Request submitted
+    
+    Admin->>FE: Approve cancellation
+    FE->>BE: POST /refunds/cancel-requests/:id/approve
+    BE->>BE: cancelCarrierShipment()
+    BE->>DB: UPDATE shipment (cancelled)
+    BE->>BE: restockOrderItems()
+    BE->>RZ: Refund API
+    BE->>DB: UPDATE order (status=CANCELLED → REFUND_PENDING → REFUND_INITIATED)
+    BE->>DB: INSERT refunds
+    BE-->>FE: Cancelled + Refund initiated
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>10. Key File Inventory</h2>
+<div class="file-list">
+  <div class="file-item"><span class="path">frontend/src/app.js</span><br/><span class="desc">SPA router, shop, checkout, payment, categories, products</span></div>
+  <div class="file-item"><span class="path">frontend/src/admin.js</span><br/><span class="desc">Admin panel: orders, catalog, refunds, shipments tabs</span></div>
+  <div class="file-item"><span class="path">frontend/admin.html</span><br/><span class="desc">Admin panel HTML structure</span></div>
+  <div class="file-item"><span class="path">frontend/style.css</span><br/><span class="desc">Shop styles</span></div>
+  <div class="file-item"><span class="path">frontend/admin-premium.css</span><br/><span class="desc">Admin panel premium styles incl. fulfillment pipeline</span></div>
+  <div class="file-item"><span class="path">backend/src/server.js</span><br/><span class="desc">Express entry point, route mounting, auto-migration DDL</span></div>
+  <div class="file-item"><span class="path">backend/src/routes/orders.js</span><br/><span class="desc">Checkout, fulfillment pipeline, cancel, track, invoice</span></div>
+  <div class="file-item"><span class="path">backend/src/routes/shipping.js</span><br/><span class="desc">Create shipment, track, cancel, provider selection</span></div>
+  <div class="file-item"><span class="path">backend/src/routes/shipping-webhooks.js</span><br/><span class="desc">Carrier webhook receiver (RTO, delivery updates)</span></div>
+  <div class="file-item"><span class="path">backend/src/modules/refunds/RefundService.js</span><br/><span class="desc">Core refund & cancellation business logic (738 lines)</span></div>
+  <div class="file-item"><span class="path">backend/src/modules/refunds/RefundController.js</span><br/><span class="desc">REST handlers for cancel/refund routes</span></div>
+  <div class="file-item"><span class="path">backend/src/modules/refunds/RefundWebhookHandler.js</span><br/><span class="desc">Razorpay webhook: refund.processed → status transitions</span></div>
+  <div class="file-item"><span class="path">backend/src/modules/orders/OrderStateService.js</span><br/><span class="desc">State machine, restock guard, cancellability checks</span></div>
+  <div class="file-item"><span class="path">backend/src/modules/payments/PaymentService.js</span><br/><span class="desc">Razorpay refund initiation with idempotency keys</span></div>
+  <div class="file-item"><span class="path">backend/src/middleware/auth.js</span><br/><span class="desc">JWT auth middleware (mock + Supabase dual-mode)</span></div>
+  <div class="file-item"><span class="path">backend/src/config/db.js</span><br/><span class="desc">Mock in-memory DB + Supabase client, query builder wrappers</span></div>
+  <div class="file-item"><span class="path">backend/src/config/jwt.js</span><br/><span class="desc">JWT secret config with random dev fallback</span></div>
+  <div class="file-item"><span class="path">backend/src/services/notificationService.js</span><br/><span class="desc">Email + SMS + WhatsApp multi-channel notifications</span></div>
+  <div class="file-item"><span class="path">backend/src/services/shipping/ProviderRegistry.js</span><br/><span class="desc">Default provider resolver, adapter factory</span></div>
+  <div class="file-item"><span class="path">backend/src/services/shipping/adapters/ShiprocketAdapter.js</span><br/><span class="desc">Shiprocket carrier integration + mock fallback</span></div>
+  <div class="file-item"><span class="path">backend/migrations/004_add_fulfillment_pipeline.sql</span><br/><span class="desc">order_status_history, fulfillment_tasks, new columns</span></div>
+  <div class="file-item"><span class="path">backend/migrations/005_add_restock_guard.sql</span><br/><span class="desc">restocked boolean on orders table</span></div>
+</div>
+
+<hr/>
+
+<div style="text-align:center;color:#8a9e94;padding:2rem;font-size:0.85rem;">
+  Generated from codebase analysis — Last updated: June 29, 2026<br/>
+  All diagrams rendered with Mermaid.js — open in any browser to view interactive SVG charts.
+</div>
+
+</body>
+</html>

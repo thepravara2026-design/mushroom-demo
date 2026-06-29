@@ -68,3 +68,21 @@
 - **Growth Emergence Entrance**: Elements no longer just fade-up — they `scale(0.85→1.03→0.98→1)` with a slight overshoot, like mushrooms sprouting from the forest floor.
 - **Bioluminescent Border Pulse** (`.hero-content::after`): A subtle golden-green gradient border glow that fades `0→0.7→0` over 5s, giving the glass card a living, breathing edge.
 - **Mobile perf**: All motes, glow ring, and border pulse are disabled below 768px for smooth scrolling. Only the Three.js canvas + glass card remain active.
+
+---
+
+## Session Summary (Jun 29, 2026) — Cancellation/Refund Pipeline Refactoring
+
+### What was fixed / refactored
+
+**1. `RefundService.js` — Guard gates, auto-refund, shared helpers**
+- **`requestCustomerCancellation`**: guard changed from legacy `delivery_status` checks to `isWithCarrier(order)`. Rejects with guidance to contact support for RTO if carrier has the package.
+- **`adminDirectCancellation`**: guard changed from legacy `["shipped","in_transit","delivered","cancelled"].includes(order.delivery_status)` to `isWithCarrier(order)`. Notification action changed from `"APPROVED"` to `"ADMIN_CANCELLED"` to distinguish admin-initiated from approved customer requests. Auto-refund via `executeRefundProcess` on paid orders instead of only creating pending refund record; falls back to creating pending record if auto-refund fails.
+- **`approveCancellation`**: auto-refund via `executeRefundProcess` instead of only creating pending refund record; falls back to pending record on failure. `cancelled_by` set to `"customer"` (not `"admin"`).
+- **`cancelCarrierShipment`** — new shared helper used by both `approveCancellation` and `adminDirectCancellation` before any state mutations.
+- **`executeRefundProcess`**: restock idempotency handled by `restockOrderItems` internal guard (`order.restocked` check).
+- **`retryFailedRefund`**: reuses `executeRefundProcess`; restock skipped automatically by `restocked` guard. No changes needed.
+- **Imports**: added `isWithCarrier` to destructured require from `OrderStateService`.
+
+### Files changed
+- `backend/src/modules/refunds/RefundService.js` — guard gates, auto gateway refund on cancellation approval, shared `cancelCarrierShipment` helper, notification distinction

@@ -25,6 +25,30 @@ if (!isMock) {
 
 // In-memory data store for Mock Mode
 const mockStore = {
+  shipping_providers: [
+    {
+      id: 'sp-shiprocket',
+      provider_key: 'shiprocket',
+      name: 'Shiprocket',
+      is_active: true,
+      is_default: true,
+      config: { base_url: 'https://apiv2.shiprocket.in/v1/external' },
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 'sp-manual',
+      provider_key: 'manual_legacy',
+      name: 'Manual / Legacy',
+      is_active: false,
+      is_default: false,
+      config: {},
+      created_at: new Date().toISOString(),
+    },
+  ],
+  shipments: [],
+  shipment_tracking_events: [],
+  order_status_history: [],
+  fulfillment_tasks: [],
   users: [],
   categories: [
     {
@@ -52,7 +76,7 @@ const mockStore = {
       description: "Ready-to-grow mushroom fruiting kits",
     },
   ],
-  products: [
+    products: [
     {
       id: "prod-1",
       created_at: "2025-06-01T10:00:00.000Z",
@@ -67,6 +91,23 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 120,
+      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
+      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
+      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
+      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
+      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
+      highlights: [
+        'Cultured in sterile laboratory conditions',
+        'High germination rate — tested for viability',
+        'Packaged in sterile, contamination-proof containers',
+        'Shelf life: 6 months under proper storage',
+        'Suitable for both beginners and experienced growers',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
+        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
+        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
+      ],
       weight_pricing: [
         { weight: 100, unit: "g", price: 100, mrp_price: 149 },
         { weight: 200, unit: "g", price: 180, mrp_price: 269 },
@@ -92,6 +133,23 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 85,
+      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
+      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
+      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
+      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
+      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
+      highlights: [
+        'Cultured in sterile laboratory conditions',
+        'High germination rate — tested for viability',
+        'Packaged in sterile, contamination-proof containers',
+        'Shelf life: 6 months under proper storage',
+        'Suitable for both beginners and experienced growers',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
+        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
+        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
+      ],
     },
     {
       id: "prod-3",
@@ -107,6 +165,23 @@ const mockStore = {
       difficulty: "intermediate",
       gst_rate: 5,
       stock: 50,
+      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
+      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
+      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
+      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
+      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
+      highlights: [
+        'Cultured in sterile laboratory conditions',
+        'High germination rate — tested for viability',
+        'Packaged in sterile, contamination-proof containers',
+        'Shelf life: 6 months under proper storage',
+        'Suitable for both beginners and experienced growers',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
+        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
+        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
+      ],
     },
     {
       id: "prod-4",
@@ -122,6 +197,23 @@ const mockStore = {
       difficulty: "advanced",
       gst_rate: 5,
       stock: 60,
+      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
+      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
+      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
+      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
+      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
+      highlights: [
+        'Cultured in sterile laboratory conditions',
+        'High germination rate — tested for viability',
+        'Packaged in sterile, contamination-proof containers',
+        'Shelf life: 6 months under proper storage',
+        'Suitable for both beginners and experienced growers',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
+        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
+        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
+      ],
     },
     {
       id: "prod-5",
@@ -137,6 +229,23 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 40,
+      storage_handling: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
+      warranty_policy: '7-day freshness guarantee — replace if spoiled on arrival.',
+      return_policy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
+      shipping_info: 'Free shipping on orders above ₹499. Dispatched in insulated boxes with ice packs.',
+      compliance_info: 'Compliant with FSSAI (Food Safety and Standards Authority of India) regulations. Grown under Good Agricultural Practices (GAP). Lot-wise traceability maintained.',
+      highlights: [
+        'Hand-picked at peak freshness from certified farms',
+        'Cold-chain maintained throughout transit (2-4°C)',
+        'Shelf life: 5-7 days under refrigeration',
+        'Washed and trimmed, ready to cook',
+        'Grown using sustainable agricultural practices',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Certified' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Produce' },
+        { icon: 'fa-solid fa-check-circle', label: 'Non-GMO' },
+      ],
     },
     {
       id: "prod-6",
@@ -152,6 +261,23 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 45,
+      storage_handling: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
+      warranty_policy: '7-day freshness guarantee — replace if spoiled on arrival.',
+      return_policy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
+      shipping_info: 'Free shipping on orders above ₹499. Dispatched in insulated boxes with ice packs.',
+      compliance_info: 'Compliant with FSSAI (Food Safety and Standards Authority of India) regulations. Grown under Good Agricultural Practices (GAP). Lot-wise traceability maintained.',
+      highlights: [
+        'Hand-picked at peak freshness from certified farms',
+        'Cold-chain maintained throughout transit (2-4°C)',
+        'Shelf life: 5-7 days under refrigeration',
+        'Washed and trimmed, ready to cook',
+        'Grown using sustainable agricultural practices',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Certified' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Produce' },
+        { icon: 'fa-solid fa-check-circle', label: 'Non-GMO' },
+      ],
     },
     {
       id: "prod-7",
@@ -167,6 +293,23 @@ const mockStore = {
       difficulty: "advanced",
       gst_rate: 5,
       stock: 100,
+      storage_handling: 'Store in an airtight container in a cool, dry place away from direct sunlight. Refrigeration extends shelf life.',
+      warranty_policy: '30-day quality guarantee — replace if damaged or infested.',
+      return_policy: 'Unopened packages can be returned within 7 days. Opened packages replaced only if quality issues found.',
+      shipping_info: 'Free shipping on orders above ₹499. Lightweight, compact packaging.',
+      compliance_info: 'Manufactured in FSSAI-registered facility. Batch-tested for microbial contaminants. Meets food safety standards per FSSAI regulations.',
+      highlights: [
+        'Premium-grade sun-dried & air-dehydrated mushrooms',
+        'No preservatives, no artificial colours',
+        'Shelf life: 12 months in proper storage',
+        'Rehydrate in warm water for 20 mins before use',
+        'Sourced from organic-certified farms in India',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Approved' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Certified' },
+        { icon: 'fa-solid fa-shield', label: 'HACCP Compliant' },
+      ],
     },
     {
       id: "prod-8",
@@ -182,6 +325,23 @@ const mockStore = {
       difficulty: "intermediate",
       gst_rate: 5,
       stock: 75,
+      storage_handling: 'Store in an airtight container in a cool, dry place away from direct sunlight. Refrigeration extends shelf life.',
+      warranty_policy: '30-day quality guarantee — replace if damaged or infested.',
+      return_policy: 'Unopened packages can be returned within 7 days. Opened packages replaced only if quality issues found.',
+      shipping_info: 'Free shipping on orders above ₹499. Lightweight, compact packaging.',
+      compliance_info: 'Manufactured in FSSAI-registered facility. Batch-tested for microbial contaminants. Meets food safety standards per FSSAI regulations.',
+      highlights: [
+        'Premium-grade sun-dried & air-dehydrated mushrooms',
+        'No preservatives, no artificial colours',
+        'Shelf life: 12 months in proper storage',
+        'Rehydrate in warm water for 20 mins before use',
+        'Sourced from organic-certified farms in India',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Approved' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Certified' },
+        { icon: 'fa-solid fa-shield', label: 'HACCP Compliant' },
+      ],
     },
     {
       id: "prod-9",
@@ -197,6 +357,61 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 65,
+      storage_handling: 'Store at room temperature (20-30°C) away from direct sunlight. Use within 3 months of purchase for best results.',
+      warranty_policy: '30-day germination guarantee — free replacement if no growth.',
+      return_policy: 'Unused kits can be returned within 7 days. Used kits replaced only under warranty terms.',
+      shipping_info: 'Free shipping on all kit orders. Dispatched within 24 hrs in discreet packaging.',
+      compliance_info: 'Compliant with BIS standards for educational kits. Non-toxic materials certified. Meets CPCB guidelines for biodegradable packaging.',
+      highlights: [
+        'Complete DIY mushroom growing kit — ready to use',
+        'Includes substrate, spawn, and detailed instruction manual',
+        'First harvest in 10-14 days, continues for 2-3 flushes',
+        'Compact size — fits on any shelf or countertop',
+        '100% biodegradable packaging materials',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-flask', label: 'Lab Tested' },
+        { icon: 'fa-solid fa-child', label: 'Child-Safe Materials' },
+        { icon: 'fa-solid fa-recycle', label: 'Eco-Friendly Pack' },
+      ],
+    },
+    {
+      id: "prod-10",
+      created_at: "2026-06-20T10:00:00.000Z",
+      name: "Wild Forest Mushroom Mix (300g)",
+      description:
+        "A curated blend of hand-foraged wild forest mushrooms including porcini, chanterelles, and morels. Sourced from sustainable forest floors and dried to preserve rich, earthy flavors.",
+      price: 650.0,
+      mrp_price: 899.0,
+      image_url:
+        "https://images.unsplash.com/photo-1603791440384-56cd371ee9a4?auto=format&fit=crop&q=80&w=600",
+      image_urls: [
+        "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+        "https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&q=80&w=600",
+        "https://images.unsplash.com/photo-1597613214297-9697008d7851?auto=format&fit=crop&q=80&w=600",
+        "https://images.unsplash.com/photo-1559152134-5e022b9a0a77?auto=format&fit=crop&q=80&w=600",
+      ],
+      category: "fresh",
+      difficulty: "intermediate",
+      gst_rate: 5,
+      stock: 35,
+      storage_handling: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
+      warranty_policy: '7-day freshness guarantee — replace if spoiled on arrival.',
+      return_policy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
+      shipping_info: 'Free shipping on orders above ₹499. Dispatched in insulated boxes with ice packs.',
+      compliance_info: 'Compliant with FSSAI (Food Safety and Standards Authority of India) regulations. Grown under Good Agricultural Practices (GAP). Lot-wise traceability maintained.',
+      highlights: [
+        'Hand-picked at peak freshness from certified farms',
+        'Cold-chain maintained throughout transit (2-4°C)',
+        'Shelf life: 5-7 days under refrigeration',
+        'Washed and trimmed, ready to cook',
+        'Grown using sustainable agricultural practices',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Certified' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Produce' },
+        { icon: 'fa-solid fa-check-circle', label: 'Non-GMO' },
+      ],
     },
   ],
 
@@ -508,6 +723,8 @@ class MockQueryBuilder {
           newRow.refund_status = newRow.refund_status || "none";
           newRow.refund_id = newRow.refund_id || null;
           newRow.total_refunded_amount = newRow.total_refunded_amount || 0.00;
+          newRow.fulfillment_status = newRow.fulfillment_status || "pending_fulfillment";
+          newRow.restocked = newRow.restocked || false;
         }
         if (this.table === "refunds") {
           newRow.status = newRow.status || newRow.refund_status || "initiated";
@@ -775,6 +992,10 @@ function resetMockStore() {
   mockStore.refunds = [];
   mockStore.refund_audits = [];
   mockStore.enrollments = [];
+  mockStore.shipments = [];
+  mockStore.shipment_tracking_events = [];
+  mockStore.order_status_history = [];
+  mockStore.fulfillment_tasks = [];
 }
 
 module.exports = db;

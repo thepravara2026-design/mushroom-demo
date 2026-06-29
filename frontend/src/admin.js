@@ -15,6 +15,7 @@ let _adminTrainings = [];
 let _adminBlogs = [];
 let pendingCategoryEditId = null;
 let adminOrdersCache = [];
+let adminShipmentsCache = [];
 let adminHistoryPage = 1;
 let adminHistoryPageSize = 10;
 let adminHistorySort = 'date_desc';
@@ -1231,6 +1232,18 @@ function populateCapsuleCategorySelect() {
 function resetCapsuleAddForm() {
   const form = document.getElementById('form-admin-capsule-add');
   if (form) form.reset();
+  // Reset edit mode
+  document.getElementById('admin-capsule-edit-id').value = '';
+  const titleEl = document.getElementById('capsule-form-title');
+  if (titleEl) titleEl.textContent = 'Publish New Product';
+  const subEl = document.getElementById('capsule-form-subtitle');
+  if (subEl) subEl.textContent = 'Fill in the details below to list a new mushroom product';
+  const label = document.getElementById('capsule-submit-label');
+  if (label) label.textContent = 'Publish Product';
+  const pricingTypeWeight = document.querySelector('.pricing-type-btn[data-mode="weight"]');
+  const pricingTypeLitre = document.querySelector('.pricing-type-btn[data-mode="litre"]');
+  if (pricingTypeWeight) pricingTypeWeight.classList.add('active');
+  if (pricingTypeLitre) pricingTypeLitre.classList.remove('active');
   populateCapsuleCategorySelect();
   const preview = document.getElementById('admin-capsule-img-preview');
   if (preview) {
@@ -1315,20 +1328,63 @@ async function handleCapsuleAddSubmit(e) {
     return;
   }
 
+  // Check for duplicate weight variants within this product
+  const weightKeys = weightPricing.map(w => `${w.weight}${w.unit}`);
+  if (new Set(weightKeys).size !== weightKeys.length) {
+    if (feedback) { feedback.textContent = 'Duplicate variants are not allowed. Each option can only be added once per product.'; feedback.classList.remove('hidden'); }
+    return;
+  }
+
+  // Ensure all variants use the same unit type
+  const unitTypes = new Set(weightPricing.map(w => (w.unit === 'g' || w.unit === 'kg') ? 'weight' : 'litre'));
+  if (unitTypes.size > 1) {
+    if (feedback) { feedback.textContent = 'Cannot mix weight (g/kg) and litre (ml/l) units in the same product.'; feedback.classList.remove('hidden'); }
+    return;
+  }
+
+  // Helper to convert to base unit for sorting
+  function toBaseValue(weight, unit) {
+    if (unit === 'kg' || unit === 'l') return weight * 1000;
+    return weight;
+  }
+
+  // Ensure prices increase with quantity
+  const sorted = [...weightPricing].sort((a, b) => toBaseValue(a.weight, a.unit) - toBaseValue(b.weight, b.unit));
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].price <= sorted[i - 1].price) {
+      const prevLabel = `${sorted[i - 1].weight}${sorted[i - 1].unit}`;
+      const currLabel = `${sorted[i].weight}${sorted[i].unit}`;
+      if (feedback) { feedback.textContent = `Price for ${currLabel} (₹${sorted[i].price}) must be higher than price for ${prevLabel} (₹${sorted[i - 1].price}). Larger quantities must cost more.`; feedback.classList.remove('hidden'); }
+      return;
+    }
+  }
+
   // Ensure MRP is provided and > price for every variant (mandatory by law)
   for (const v of weightPricing) {
     if (v.mrp_price == null || isNaN(v.mrp_price)) {
       const label = `${v.weight}${v.unit}`;
-      feedback.textContent = `MRP (Maximum Retail Price) is mandatory for ${label}. Please enter a valid MRP as required by law.`;
-      feedback.classList.remove('hidden');
+      if (feedback) { feedback.textContent = `MRP (Maximum Retail Price) is mandatory for ${label}. Please enter a valid MRP as required by law.`; feedback.classList.remove('hidden'); }
       return;
     }
     if (v.mrp_price <= v.price) {
       const label = `${v.weight}${v.unit}`;
-      feedback.textContent = `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`;
-      feedback.classList.remove('hidden');
+      if (feedback) { feedback.textContent = `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`; feedback.classList.remove('hidden'); }
       return;
     }
+  }
+
+  // Check for duplicate product name within the same category
+  const editId = document.getElementById('admin-capsule-edit-id')?.value || '';
+  const isEdit = Boolean(editId);
+  const nameDup = _adminProducts.find(p =>
+    p.name.toLowerCase() === name.toLowerCase() &&
+    p.category === categoryId &&
+    p.id !== editId
+  );
+  if (nameDup) {
+    const catName = _adminCategories.find(c => c.id === categoryId)?.name || categoryId;
+    if (feedback) { feedback.textContent = `A product named "${name}" already exists in the "${catName}" category.`; feedback.classList.remove('hidden'); }
+    return;
   }
 
   let imageUrl = document.getElementById('admin-capsule-prod-image-url')?.value.trim() || '';
@@ -1343,8 +1399,24 @@ async function handleCapsuleAddSubmit(e) {
   }
   const galleryUrls = getGalleryUrls('capsule-gallery-grid');
 
-  const editId = document.getElementById('admin-capsule-edit-id')?.value || '';
-  const isEdit = Boolean(editId);
+  // Product details fields
+  const rawHighlights = document.getElementById('admin-capsule-prod-highlights')?.value.trim() || '';
+  const highlights = rawHighlights ? rawHighlights.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  const storageHandling = document.getElementById('admin-capsule-prod-storage')?.value.trim() || '';
+  const warrantyPolicy = document.getElementById('admin-capsule-prod-warranty')?.value.trim() || '';
+  const returnPolicy = document.getElementById('admin-capsule-prod-returns')?.value.trim() || '';
+  const shippingInfo = document.getElementById('admin-capsule-prod-shipping')?.value.trim() || '';
+  const complianceInfo = document.getElementById('admin-capsule-prod-compliance')?.value.trim() || '';
+  const rawCerts = document.getElementById('admin-capsule-prod-certificates')?.value.trim() || '';
+  const certificates = rawCerts ? rawCerts.split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx > 0 && colonIdx < line.length - 1) {
+      const icon = line.slice(0, colonIdx).trim();
+      const label = line.slice(colonIdx + 1).trim();
+      return { icon: `fa-solid fa-${icon.replace(/^fa-solid\s+fa-/i, '').replace(/^fa-/i, '')}`, label };
+    }
+    return { icon: 'fa-solid fa-certificate', label: line };
+  }) : [];
 
   const payload = {
     category: categoryId,
@@ -1353,6 +1425,13 @@ async function handleCapsuleAddSubmit(e) {
     gst_rate: gstRate,
     weight_pricing: weightPricing,
     image_urls: galleryUrls,
+    storage_handling: storageHandling,
+    warranty_policy: warrantyPolicy,
+    return_policy: returnPolicy,
+    shipping_info: shippingInfo,
+    compliance_info: complianceInfo,
+    highlights,
+    certificates,
   };
   if (imageUrl) payload.image_url = imageUrl;
 
@@ -1388,239 +1467,153 @@ async function handleCapsuleAddSubmit(e) {
 function adminEditProduct(productId) {
   const product = _adminProducts.find((item) => item.id === productId);
   if (!product) return;
-  activateAdminTab('add-product');
 
-  document.getElementById('admin-edit-id').value = product.id;
-  if (productIdDisplay) productIdDisplay.value = product.id;
-  document.getElementById('admin-prod-name').value = product.name;
-  document.getElementById('admin-prod-desc').value = product.description;
-  document.getElementById('admin-prod-category').value = product.category;
-  document.getElementById('admin-prod-gst').value = String(product.gst_rate);
-  const stockField = document.getElementById('admin-prod-stock');
-  if (stockField) stockField.value = product.stock ?? 100;
-  if (productImageUrl) productImageUrl.value = product.image_url || '';
-  if (productImageFile) productImageFile.value = '';
+  // Stay on Products tab and switch to add-product capsule
+  activateAdminTab('products');
+  document.querySelectorAll('.admin-capsule').forEach(b => b.classList.remove('active'));
+  const addCapsule = document.querySelector('.admin-capsule[data-capsule="add-product"]');
+  if (addCapsule) addCapsule.classList.add('active');
+  _activeCapsule = 'add-product';
+  resetCapsuleAddForm();
+  renderAdminInventory();
 
-  const preview = document.getElementById('admin-img-preview');
-  if (preview) {
-    preview.innerHTML = `<img src="${product.image_url}" alt="Preview">`;
-    productImagePreviewValid = true;
+  // Set edit mode
+  document.getElementById('admin-capsule-edit-id').value = product.id;
+  document.getElementById('admin-capsule-prod-category').value = product.category;
+  document.getElementById('admin-capsule-prod-name').value = product.name;
+  document.getElementById('admin-capsule-prod-desc').value = product.description;
+  document.getElementById('admin-capsule-prod-gst').value = String(product.gst_rate);
+  populateCapsuleCategorySelect();
+  if (document.getElementById('admin-capsule-prod-category')) {
+    document.getElementById('admin-capsule-prod-category').value = product.category;
   }
 
-  // Load weight pricing if available
-  setWeightPricingData(product.weight_pricing || null);
+  // Update header
+  const titleEl = document.getElementById('capsule-form-title');
+  if (titleEl) titleEl.textContent = 'Edit Product';
+  const subEl = document.getElementById('capsule-form-subtitle');
+  if (subEl) subEl.textContent = 'Update the product details below';
 
-  // Load gallery images
-  const galleryUrls = product.image_urls || [];
-  resetGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge');
-  if (galleryUrls.length > 0) {
-    const grid = document.getElementById('admin-gallery-grid');
-    if (grid) grid.innerHTML = '';
-    galleryUrls.forEach((url, i) => {
-      // remove any existing slot at this index first
-      const grid2 = document.getElementById('admin-gallery-grid');
-      if (grid2 && i > 0) {
-        const btn = document.getElementById('btn-gallery-add-main');
-        if (btn) btn.click();
-      } else if (grid2 && i === 0) {
-        // fill first slot
-        const firstInput = grid2.querySelector('.gallery-url-input');
-        if (firstInput) {
-          firstInput.value = url;
-          firstInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      }
-    });
-    // Now fill in values for all slots (they were added via the add button)
-    const grid3 = document.getElementById('admin-gallery-grid');
-    if (grid3) {
-      const inputs = grid3.querySelectorAll('.gallery-url-input');
-      inputs.forEach((inp, idx) => {
-        if (galleryUrls[idx]) {
-          inp.value = galleryUrls[idx];
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      });
-    }
-    updateGalleryCount('admin-gallery-grid', 'gallery-count-badge');
-  }
-
-  const label = document.getElementById('admin-submit-label');
+  // Update submit button label
+  const label = document.getElementById('capsule-submit-label');
   if (label) label.textContent = 'Update Product';
-}
 
-async function handleAdminAddProduct(event) {
-  event.preventDefault();
-  const feedback = document.getElementById('admin-add-feedback');
-  feedback.classList.add('hidden');
-
-  const editId = document.getElementById('admin-edit-id').value;
-  const name = document.getElementById('admin-prod-name').value.trim();
-  const category = document.getElementById('admin-prod-category').value;
-  const description = document.getElementById('admin-prod-desc').value.trim();
-  const gst_rate = document.getElementById('admin-prod-gst').value;
-  const selectedCategoryUid = document.getElementById('admin-prod-category')?.selectedOptions?.[0]?.dataset?.categoryUid || '';
-  let productId = productIdDisplay?.value.trim() || '';
-  const productImageUrlValue = productImageUrl?.value.trim() || '';
-  const imageFile = productImageFile?.files?.[0];
-  let image_url = productImageUrlValue;
-
-  try {
-    if (!name) {
-      feedback.textContent = 'Product name is required.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-    if (!category) {
-      feedback.textContent = 'Please select a category.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-    if (!description) {
-      feedback.textContent = 'Product description is required.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-
-    const expectedPrefix = selectedCategoryUid ? `${selectedCategoryUid}-pid-` : '';
-    if (!productId || (expectedPrefix && !productId.startsWith(expectedPrefix))) {
-      try {
-        const res = await fetchWithAuth(`/products/next-id${selectedCategoryUid ? `?category=${encodeURIComponent(document.getElementById('admin-prod-category')?.value || '')}` : ''}`);
-        productId = res.productId;
-      } catch {
-        productId = generateProductId(selectedCategoryUid);
-      }
-      if (productIdDisplay) productIdDisplay.value = productId;
-    }
-
-    if (imageFile) image_url = await readFileAsDataUrl(imageFile);
-
-    if (!productImagePreviewValid) {
-      feedback.textContent = 'Please provide a valid product image preview. Upload a local image file or paste a direct image URL (e.g. ending with .jpg, .png, .webp) that loads successfully, not a Google share page or HTML link.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-
-    const weightPricing = getWeightPricingData();
-    if (!Array.isArray(weightPricing) || weightPricing.length === 0) {
-      feedback.textContent = 'Please add at least one weight-based pricing variant.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-
-    // Check for duplicate weight variants within this product
-    const weightKeys = weightPricing.map(w => `${w.weight}${w.unit}`);
-    if (new Set(weightKeys).size !== weightKeys.length) {
-      feedback.textContent = 'Duplicate variants are not allowed. Each option can only be added once per product.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-
-    // Ensure all variants use the same unit type
-    const unitTypes = new Set(weightPricing.map(w => (w.unit === 'g' || w.unit === 'kg') ? 'weight' : 'litre'));
-    if (unitTypes.size > 1) {
-      feedback.textContent = 'Cannot mix weight (g/kg) and litre (ml/l) units in the same product.';
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-
-    // Helper to convert to base unit for sorting
-    function toBaseValue(weight, unit) {
-      if (unit === 'kg' || unit === 'l') return weight * 1000;
-      return weight; // g or ml
-    }
-
-    // Ensure prices increase with quantity
-    const sorted = [...weightPricing].sort((a, b) => toBaseValue(a.weight, a.unit) - toBaseValue(b.weight, b.unit));
-    for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i].price <= sorted[i - 1].price) {
-        const prevLabel = variantLabel(sorted[i - 1]);
-        const currLabel = variantLabel(sorted[i]);
-        feedback.textContent = `Price for ${currLabel} (₹${sorted[i].price}) must be higher than price for ${prevLabel} (₹${sorted[i - 1].price}). Larger quantities must cost more.`;
-        feedback.classList.remove('hidden');
-        feedback.style.color = 'var(--color-danger)';
-        return;
-      }
-    }
-
-    // Ensure MRP is provided and > price for every variant (mandatory by law)
-    for (const v of weightPricing) {
-      if (v.mrp_price == null || isNaN(v.mrp_price)) {
-        const label = variantLabel(v);
-        feedback.textContent = `MRP (Maximum Retail Price) is mandatory for ${label}. Please enter a valid MRP as required by law.`;
-        feedback.classList.remove('hidden');
-        feedback.style.color = 'var(--color-danger)';
-        return;
-      }
-      if (v.mrp_price <= v.price) {
-        const label = variantLabel(v);
-        feedback.textContent = `MRP (₹${v.mrp_price}) for ${label} must be greater than the selling price (₹${v.price}).`;
-        feedback.classList.remove('hidden');
-        feedback.style.color = 'var(--color-danger)';
-        return;
-      }
-    }
-
-    // Check for duplicate product name within the same category
-    const nameDup = _adminProducts.find(p =>
-      p.name.toLowerCase() === name.toLowerCase() &&
-      p.category === category &&
-      p.id !== editId
-    );
-    if (nameDup) {
-      const catName = _adminCategories.find(c => c.id === category)?.name || category;
-      feedback.textContent = `A product named "${name}" already exists in the "${catName}" category.`;
-      feedback.classList.remove('hidden');
-      feedback.style.color = 'var(--color-danger)';
-      return;
-    }
-
-    const method = editId ? 'PUT' : 'POST';
-    const url = editId ? `${API_BASE}/products/${editId}` : `${API_BASE}/products`;
-    const stock = weightPricing.reduce((sum, v) => sum + (v.stock || 0), 0);
-
-    // Parse gallery URLs from gallery grid
-    let image_urls = getGalleryUrls('admin-gallery-grid');
-
-    const body = buildProductBody({ name, category, description, gstRate: gst_rate, image_url, productId, editId, weightPricing, stock, image_urls });
-
-    const { res, data: respData } = await submitJson(url, method, body);
-    if (res.ok) {
-      showSuccessToast(editId ? '✅ Product updated successfully!' : '✅ Product published successfully!');
-      resetAdminForm();
-      // Update local cache instead of re-fetching all products
-      if (editId) {
-        const idx = _adminProducts.findIndex(p => p.id === editId);
-        if (idx !== -1) _adminProducts[idx] = { ..._adminProducts[idx], ...body, id: editId };
-      } else {
-        // Check if product was already added (from next-id flow)
-        if (!_adminProducts.some(p => p.id === productId)) {
-          _adminProducts.push({ id: productId, ...body });
-        }
-      }
-      renderAdminInventory();
-      try {
-        bcProducts?.postMessage({ type: 'products:updated' });
-      } catch (e) {
-        console.warn(e);
-      }
-    } else {
-      feedback.textContent = respData.error || 'Failed to save product.';
-      feedback.classList.remove('hidden');
-    }
-  } catch (err) {
-    feedback.textContent = 'Server error.';
-    feedback.classList.remove('hidden');
-    console.error(err);
+  // Main image
+  const capsuleImageUrl = document.getElementById('admin-capsule-prod-image-url');
+  if (capsuleImageUrl) capsuleImageUrl.value = product.image_url || '';
+  const capsulePreview = document.getElementById('admin-capsule-img-preview');
+  if (capsulePreview && product.image_url) {
+    capsulePreview.innerHTML = `<img src="${product.image_url}" alt="Preview">`;
   }
+  const capsuleZone = document.getElementById('capsule-image-zone');
+  if (capsuleZone && product.image_url) capsuleZone.classList.add('has-image');
+  const capsuleOverlay = capsuleZone?.querySelector('.premium-img-overlay');
+  if (capsuleOverlay && product.image_url) capsuleOverlay.style.display = '';
+
+  // Load weight pricing into capsule form
+  const wc = document.getElementById('admin-capsule-weight-container');
+  if (wc && product.weight_pricing && product.weight_pricing.length > 0) {
+    wc.innerHTML = '';
+    product.weight_pricing.forEach((v, i) => {
+      const unitLabel = v.unit === 'kg' ? 'kg' : v.unit === 'l' ? 'l' : v.unit === 'ml' ? 'ml' : 'g';
+      const optVal = v.unit === 'kg' || v.unit === 'l' ? `${v.weight}${unitLabel}` : `${v.weight}${unitLabel}`;
+      const row = document.createElement('div');
+      row.className = 'premium-weight-row';
+      row.innerHTML = `
+        <select class="admin-capsule-weight-select pw-select">
+          <option value="">Select weight / volume</option>
+          <optgroup label="— Weight —">
+            <option value="100g">100 g</option>
+            <option value="200g">200 g</option>
+            <option value="250g">250 g</option>
+            <option value="400g">400 g</option>
+            <option value="500g">500 g</option>
+            <option value="1kg">1 kg</option>
+            <option value="2kg">2 kg</option>
+            <option value="5kg">5 kg</option>
+          </optgroup>
+          <optgroup label="— Volume —">
+            <option value="10ml">10 ml</option>
+            <option value="20ml">20 ml</option>
+            <option value="50ml">50 ml</option>
+            <option value="100ml">100 ml</option>
+            <option value="200ml">200 ml</option>
+            <option value="500ml">500 ml</option>
+            <option value="1l">1 l</option>
+            <option value="2l">2 l</option>
+            <option value="5l">5 l</option>
+          </optgroup>
+        </select>
+        <div class="premium-weight-fields">
+          <div class="pw-field">
+            <label>Selling Price</label>
+            <input type="number" step="0.01" class="admin-capsule-weight-price" value="${v.price}" />
+          </div>
+          <div class="pw-field">
+            <label>MRP</label>
+            <input type="number" step="0.01" class="admin-capsule-weight-mrp" value="${v.mrp_price || ''}" />
+          </div>
+          <div class="pw-field">
+            <label>Stock</label>
+            <input type="number" class="admin-capsule-weight-stock admin-weight-stock" value="${v.stock || 0}" min="0" />
+          </div>
+        </div>
+        <button type="button" class="premium-weight-remove"><i class="fa-solid fa-xmark"></i></button>`;
+      wc.appendChild(row);
+      const sel = row.querySelector('.admin-capsule-weight-select');
+      if (sel) sel.value = optVal;
+    });
+    wpwAttach(wc);
+    updateCapsuleTotalStock();
+    // Set pricing type toggle based on unit
+    const unit = product.weight_pricing[0]?.unit;
+    if (unit === 'ml' || unit === 'l') {
+      const litreBtn = document.querySelector('.pricing-type-btn[data-mode="litre"]');
+      const weightBtn = document.querySelector('.pricing-type-btn[data-mode="weight"]');
+      if (litreBtn) litreBtn.classList.add('active');
+      if (weightBtn) weightBtn.classList.remove('active');
+    }
+  }
+
+  // Load gallery images into capsule gallery
+  const galleryUrls = product.image_urls || [];
+  const capsuleGalleryGrid = document.getElementById('capsule-gallery-grid');
+  if (capsuleGalleryGrid) {
+    capsuleGalleryGrid.innerHTML = '';
+    galleryUrls.forEach((url, i) => {
+      const slot = document.createElement('div');
+      slot.className = 'premium-gallery-slot';
+      slot.dataset.slot = i;
+      slot.innerHTML = `
+        <div class="gallery-placeholder" style="display:none;"><i class="fa-regular fa-image"></i><span>#${i + 1}</span></div>
+        <input type="url" class="gallery-url-input gallery-input-hidden" value="${url}" data-slot="${i}" />
+        <button type="button" class="gallery-remove-overlay" data-slot="${i}"><i class="fa-solid fa-xmark"></i></button>`;
+      capsuleGalleryGrid.appendChild(slot);
+    });
+  }
+  updateGalleryCount('capsule-gallery-grid', 'capsule-gallery-count-badge');
+
+  // Load product details fields
+  const highlightsEl = document.getElementById('admin-capsule-prod-highlights');
+  if (highlightsEl) highlightsEl.value = (product.highlights || []).join('\n');
+  const storageEl = document.getElementById('admin-capsule-prod-storage');
+  if (storageEl) storageEl.value = product.storage_handling || '';
+  const warrantyEl = document.getElementById('admin-capsule-prod-warranty');
+  if (warrantyEl) warrantyEl.value = product.warranty_policy || '';
+  const returnsEl = document.getElementById('admin-capsule-prod-returns');
+  if (returnsEl) returnsEl.value = product.return_policy || '';
+  const shippingEl = document.getElementById('admin-capsule-prod-shipping');
+  if (shippingEl) shippingEl.value = product.shipping_info || '';
+  const complianceEl = document.getElementById('admin-capsule-prod-compliance');
+  if (complianceEl) complianceEl.value = product.compliance_info || '';
+  const certsEl = document.getElementById('admin-capsule-prod-certificates');
+  if (certsEl) certsEl.value = (product.certificates || []).map(c => {
+    const iconPart = c.icon ? c.icon.replace(/^fa-solid\s+fa-/i, '').replace(/^fa-/i, '') : '';
+    return iconPart && iconPart !== 'certificate' ? `${iconPart}:${c.label}` : c.label;
+  }).join('\n');
 }
+
+
 
 async function fetchAdminOrders() {
   const list = document.getElementById('admin-orders-list');
@@ -1633,12 +1626,13 @@ async function fetchAdminOrders() {
     if (statOrders) statOrders.textContent = orders.length;
     adminOrdersCache = orders;
 
-    // Update pending cancellation badge count
-    const pendingCancels = orders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED');
+    // Update nav badge with fresh (placed) orders count
+    const refundExclude = ['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
+    const freshOrders = orders.filter(o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundExclude.includes(o.status));
     const badge = document.getElementById('admin-orders-cancel-badge');
     if (badge) {
-      if (pendingCancels.length > 0) {
-        badge.textContent = pendingCancels.length;
+      if (freshOrders.length > 0) {
+        badge.textContent = freshOrders.length;
         badge.classList.remove('hidden');
       } else {
         badge.classList.add('hidden');
@@ -1648,6 +1642,18 @@ async function fetchAdminOrders() {
     updateSectionCounts(orders);
     renderCurrentSection();
     renderAdminHistory();
+
+    // Also fetch shipments for the Shipments tab and order card enrichment
+    try {
+      const shipmentData = await fetchWithAuth('/shipping/all');
+      if (Array.isArray(shipmentData)) {
+        adminShipmentsCache = shipmentData;
+      } else {
+        adminShipmentsCache = [];
+      }
+    } catch (e) {
+      adminShipmentsCache = [];
+    }
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
     if (list) list.innerHTML = '<div class="admin-loading" style="color:#e74c3c;"></div>';
@@ -1680,17 +1686,8 @@ function renderAdminOrders(orders) {
     return;
   }
 
-  const statusSteps = ['placed', 'processing', 'shipped', 'in_transit', 'delivered'];
-  const statusLabels = {
-    placed: 'Placed',
-    processing: 'Processing',
-    shipped: 'Shipped',
-    in_transit: 'In Transit',
-    delivered: 'Delivered',
-  };
-
-  // Prepend Pending Cancellations section if any exist
-  const pendingCancels = orders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED');
+  // Prepend Pending Cancellations section if any exist (scan full cache, not just filtered list)
+  const pendingCancels = (adminOrdersCache || []).filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED');
   let pendingSectionHtml = '';
   if (pendingCancels.length > 0) {
     pendingSectionHtml = `
@@ -1752,12 +1749,21 @@ function renderAdminOrders(orders) {
       <div class="aoc-prod-list">${itemRows}</div>
     `;
 
-      const currentStage = statusSteps.indexOf(o.delivery_status || 'placed');
-      const progressSteps = statusSteps
+      const fulfillmentSteps = ['pending_fulfillment', 'packing_required', 'packed', 'ready_to_ship', 'with_carrier', 'delivered'];
+      const fulfillmentLabels = {
+        pending_fulfillment: 'Pending',
+        packing_required: 'Packing',
+        packed: 'Packed',
+        ready_to_ship: 'Ready to Ship',
+        with_carrier: 'With Carrier',
+        delivered: 'Delivered',
+      };
+      const currentFulfillmentStage = fulfillmentSteps.indexOf(o.fulfillment_status || 'pending_fulfillment');
+      const progressSteps = fulfillmentSteps
         .map(
           (step, index) => `
-      <div class="aoc-pstep ${index <= currentStage ? 'aoc-pstep--active' : ''}" title="${statusLabels[step]}"></div>
-      ${index < statusSteps.length - 1 ? `<div class="aoc-pline ${index < currentStage ? 'aoc-pline--fill' : ''}"></div>` : ''}
+      <div class="aoc-pstep ${index <= currentFulfillmentStage ? 'aoc-pstep--active' : ''}" title="${fulfillmentLabels[step] || step}"></div>
+      ${index < fulfillmentSteps.length - 1 ? `<div class="aoc-pline ${index < currentFulfillmentStage ? 'aoc-pline--fill' : ''}"></div>` : ''}
     `,
         )
         .join('');
@@ -1769,6 +1775,7 @@ function renderAdminOrders(orders) {
       const statusEmoji = {
         placed: '📋',
         processing: '⚙️',
+        inoculating: '🧪',
         shipped: '📦',
         in_transit: '🚚',
         delivered: '✅',
@@ -1782,7 +1789,7 @@ function renderAdminOrders(orders) {
       const isRefundState = refundStatuses.includes(o.status);
       const isCancelState = cancelStatuses.includes(o.status);
 
-      function getAdminBadge(status) {
+      function getAdminBadge(status, refundStatus) {
         const map = {
           'CANCEL_REQUESTED': { bg: '#fffbeb', color: '#d97706', label: '⚠️ Cancel Requested' },
           'CANCEL_APPROVED': { bg: '#ecfdf5', color: '#10b981', label: '✅ Cancel Approved' },
@@ -1795,12 +1802,25 @@ function renderAdminOrders(orders) {
           'MANUAL_REFUND_INITIATED': { bg: '#fffbeb', color: '#d97706', label: '🔄 Manual Refund Initiated' },
           'MANUAL_REFUND_COMPLETED': { bg: '#ecfdf5', color: '#10b981', label: '✅ Manual Refund Completed' },
         };
+        // Handle new manual refund flow (status=cancelled, tracked via refund_status)
+        if (status === 'cancelled' && refundStatus) {
+          const refundMap = {
+            'pending': { bg: '#eff6ff', color: '#3b82f6', label: '🔄 Refund Pending' },
+            'initiated': { bg: '#f5f3ff', color: '#8b5cf6', label: '🔄 Refund Initiated' },
+            'processing': { bg: '#f5f3ff', color: '#8b5cf6', label: '🔄 Refund Processing' },
+            'completed': { bg: '#ecfdf5', color: '#10b981', label: '✅ Refund Completed' },
+          };
+          return refundMap[refundStatus] || null;
+        }
         return map[status] || null;
       }
 
       let badgeHtml;
       if (isCancelRequested) {
         badgeHtml = `<span class="aoc-badge aoc-badge--warning" style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700;">⚠️ Cancel Requested</span>`;
+      } else if (o.status === 'cancelled' && o.refund_status && o.refund_status !== 'none') {
+        const b = getAdminBadge(o.status, o.refund_status);
+        badgeHtml = b ? `<span class="aoc-badge" style="background:${b.bg};color:${b.color};border:1px solid;font-weight:700;">${b.label}</span>` : '';
       } else if (isRefundState || isCancelState) {
         const b = getAdminBadge(o.status);
         badgeHtml = b ? `<span class="aoc-badge" style="background:${b.bg};color:${b.color};border:1px solid;font-weight:700;">${b.label}</span>` : '';
@@ -1836,6 +1856,23 @@ function renderAdminOrders(orders) {
                   ${o.expected_delivery_date
           ? `<span class="aoc-ship-del"><strong>ETA:</strong> ${new Date(o.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${o.delivery_days_text ? ' (' + o.delivery_days_text + ')' : ''}</span>`
           : ''}
+                  ${(function() {
+                    const s = (adminShipmentsCache || []).find(x => x.order_id === o.id || x.id === o.shipment_id);
+                    if (!s) return '';
+                    const statusLabel = s.status || '';
+                    const awb = s.awb_code || '';
+                    const courier = s.courier_name || '';
+                    const trackUrl = s.tracking_url || '';
+                    const labelUrl = s.label_url || '';
+                    return `
+                      <div class="aoc-shipment-info">
+                        ${awb ? `<span class="aoc-ship-line"><span class="aoc-ship-label">AWB:</span> ${awb}${trackUrl ? ` <a href="${trackUrl}" target="_blank" class="aoc-ship-link" title="Track"><i class="fa-solid fa-up-right-from-square"></i></a>` : ''}</span>` : ''}
+                        ${courier ? `<span class="aoc-ship-line"><span class="aoc-ship-label">Courier:</span> ${courier}</span>` : ''}
+                        ${statusLabel ? `<span class="aoc-ship-line"><span class="aoc-ship-label">Status:</span> <span class="aoc-ship-status ${statusLabel}">${statusLabel.replace(/_/g, ' ')}</span></span>` : ''}
+                        ${labelUrl ? `<span class="aoc-ship-line"><a href="${labelUrl}" target="_blank" class="aoc-ship-link"><i class="fa-solid fa-file-lines"></i> Download Label</a></span>` : ''}
+                      </div>
+                    `;
+                  })()}
                 </div>
 
                 <div class="aoc-dlabel">ITEMS</div>
@@ -1901,6 +1938,37 @@ function renderAdminOrders(orders) {
                     </div>
                   </div>
                 `
+          : o.delivery_status === 'cancelled' && o.status === 'cancelled' && o.refund_status && o.refund_status !== 'none' && o.refund_status !== 'completed'
+          ? `
+                  <div class="aoc-cancelled-box">
+                    <span class="aoc-cancelled-title" style="color:#d97706;">🔄 Manual Refund: ${o.refund_status.charAt(0).toUpperCase() + o.refund_status.slice(1)}</span>
+                    ${o.cancel_reason ? `<span class="aoc-cancelled-why">${o.cancel_reason}</span>` : ''}
+                    <span class="aoc-cancelled-why" style="margin-top:6px;color:#8b5cf6;"><strong>Refund Status:</strong> ${o.refund_status.replace(/_/g, ' ')}${o.total_refunded_amount ? ' — ₹' + Number(o.total_refunded_amount).toFixed(2) : ''}</span>
+                    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                      ${o.refund_status === 'pending' ? `
+                        <button class="btn btn-primary" style="background:#3b82f6;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminProgressRefundStep('${o.id}','initiated')">
+                          <i class="fa-solid fa-play"></i> Mark Initiated
+                        </button>
+                      ` : ''}
+                      ${o.refund_status === 'initiated' ? `
+                        <button class="btn btn-primary" style="background:#8b5cf6;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminProgressRefundStep('${o.id}','processing')">
+                          <i class="fa-solid fa-hourglass-half"></i> Mark Processing
+                        </button>
+                        <button class="btn btn-primary" style="background:#10b981;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminProgressRefundStep('${o.id}','completed')">
+                          <i class="fa-solid fa-circle-check"></i> Mark Completed
+                        </button>
+                      ` : ''}
+                      ${o.refund_status === 'processing' ? `
+                        <button class="btn btn-primary" style="background:#10b981;border:none;padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminProgressRefundStep('${o.id}','completed')">
+                          <i class="fa-solid fa-circle-check"></i> Mark Completed
+                        </button>
+                      ` : ''}
+                      <button class="btn btn-secondary" style="padding:6px 12px;font-size:0.8rem;" onclick="globalThis.adminViewRefundDetails('${o.id}')">
+                        <i class="fa-solid fa-eye"></i> View Details
+                      </button>
+                    </div>
+                  </div>
+                `
           : o.delivery_status === 'cancelled' || isRefundState || isCancelState
           ? `
                   <div class="aoc-cancelled-box">
@@ -1910,22 +1978,45 @@ function renderAdminOrders(orders) {
                   </div>
                 `
           : `
-                  <div class="aoc-status-row">
-                    <select class="aoc-ship-select" id="admin-ship-select-${o.id}" onchange="globalThis.onAdminStatusChange('${o.id}', this)">
-                      <option value="placed" ${o.delivery_status === 'placed' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 0 ? 'disabled' : ''}>Placed</option>
-                      <option value="processing" ${o.delivery_status === 'processing' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 1 ? 'disabled' : ''}>Processing</option>
-                      <option value="shipped" ${o.delivery_status === 'shipped' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 2 ? 'disabled' : ''}>Shipped</option>
-                      <option value="in_transit" ${o.delivery_status === 'in_transit' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 3 ? 'disabled' : ''}>In Transit</option>
-                      <option value="delivered" ${o.delivery_status === 'delivered' ? 'selected' : ''} ${statusSteps.indexOf(o.delivery_status || 'placed') > 4 ? 'disabled' : ''}>Delivered</option>
-                    </select>
-                    <div class="aoc-del-wrap" id="admin-delivery-wrap-${o.id}" style="${['shipped', 'in_transit'].includes(o.delivery_status) ? '' : 'display:none;'}">
-                      <select id="admin-delivery-days-${o.id}" class="aoc-days-select" onchange="globalThis.adminUpdateShipping('${o.id}', document.getElementById('admin-ship-select-${o.id}').value)">
-                        <option value="">Delivery in</option>
-                        ${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d} day${d > 1 ? 's' : ''}" ${o.delivery_days_text === `${d} day${d > 1 ? 's' : ''}` ? 'selected' : ''}>${d} day${d > 1 ? 's' : ''}</option>`).join('')}
-                      </select>
+                  <div class="aoc-fulfillment-pipeline">
+                    <div class="aoc-fulfillment-label">Fulfillment Pipeline</div>
+                    <div class="aoc-fulfillment-buttons">
+                      ${o.fulfillment_status === 'pending_fulfillment' ? `
+                        <button class="aoc-ful-btn" onclick="globalThis.updateFulfillment('${o.id}','packing_required')" title="Start packing process">
+                          <i class="fa-solid fa-box"></i> Start Packing
+                        </button>
+                      ` : ''}
+                      ${o.fulfillment_status === 'packing_required' || o.fulfillment_status === 'packed' ? `
+                        <button class="aoc-ful-btn ${o.fulfillment_status === 'packed' ? 'aoc-ful-btn-active' : ''}" onclick="globalThis.updateFulfillment('${o.id}','packed')" title="Mark as packed">
+                          <i class="fa-solid fa-box-open"></i> ${o.fulfillment_status === 'packed' ? '✓ Packed' : 'Mark Packed'}
+                        </button>
+                      ` : ''}
+                      ${o.fulfillment_status === 'packed' ? `
+                        <button class="aoc-ful-btn aoc-ful-btn-primary" onclick="globalThis.updateFulfillment('${o.id}','ready_to_ship')" title="Create shipment with carrier">
+                          <i class="fa-solid fa-truck"></i> Create Shipment
+                        </button>
+                      ` : ''}
+                      ${o.fulfillment_status === 'with_carrier' ? `
+                        <button class="aoc-ful-btn aoc-ful-btn-active" disabled>
+                          <i class="fa-solid fa-check-circle"></i> With Carrier
+                        </button>
+                      ` : ''}
+                      ${o.fulfillment_status === 'ready_to_ship' ? `
+                        <button class="aoc-ful-btn aoc-ful-btn-primary" onclick="globalThis.updateFulfillment('${o.id}','ready_to_ship')" title="Retry shipment creation">
+                          <i class="fa-solid fa-rotate"></i> Retry Shipment
+                        </button>
+                      ` : ''}
+                      ${o.fulfillment_status === 'delivered' ? `
+                        <button class="aoc-ful-btn aoc-ful-btn-done" disabled>
+                          <i class="fa-solid fa-circle-check"></i> Delivered
+                        </button>
+                      ` : ''}
+                    </div>
+                    <div class="aoc-fulfillment-status-text">
+                      Current: <strong>${(o.fulfillment_status || 'pending_fulfillment').replace(/_/g, ' ')}</strong>
                     </div>
                   </div>
-                  ${!["shipped", "in_transit", "delivered", "cancelled"].includes(o.delivery_status) && !isRefundState && !isCancelState ? `
+                  ${!o.delivery_status !== 'cancelled' && !isRefundState && !isCancelState ? `
                   <div class="aoc-cancel-controls">
                     <button class="aoc-btn-cancel" style="background:#ef4444;border-color:#ef4444;color:#fff;padding:8px 16px;font-size:0.82rem;" onclick="globalThis.adminDirectCancelModal('${o.id}')">
                       <i class="fa-solid fa-ban"></i> Cancel & Refund
@@ -1977,14 +2068,16 @@ let currentSection = 'all';
 
 function updateSectionCounts(orders) {
   const allOrders = orders || adminOrdersCache;
+  const refundExclude = ['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
   const countMap = {
-    new_orders: allOrders.filter(o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
-    placed: allOrders.filter(o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
-    processing: allOrders.filter(o => o.delivery_status === 'processing' && !['cancelled'].includes(o.delivery_status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
+    all: allOrders.filter(o => o.delivery_status === 'placed' && !refundExclude.includes(o.status)).length,
+    new_orders: allOrders.filter(o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !refundExclude.includes(o.status)).length,
+    placed: allOrders.filter(o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundExclude.includes(o.status)).length,
+    processing: allOrders.filter(o => ['processing', 'inoculating'].includes(o.delivery_status) && !['cancelled'].includes(o.delivery_status) && !refundExclude.includes(o.status)).length,
     shipping: allOrders.filter(o => ['shipped','in_transit'].includes(o.delivery_status)).length,
     delivered: allOrders.filter(o => o.delivery_status === 'delivered').length,
     cancel_requests: allOrders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED').length,
-    cancelled: allOrders.filter(o => o.delivery_status === 'cancelled' && !['REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'].includes(o.status)).length,
+    cancelled: allOrders.filter(o => o.delivery_status === 'cancelled').length,
   };
   Object.entries(countMap).forEach(([key, count]) => {
     const el = document.getElementById(`sec-count-${key}`);
@@ -2010,27 +2103,23 @@ function renderCurrentSection() {
   const shippingStatuses = ['shipped','in_transit'];
 
   const sectionFilters = {
+    all: o => o.delivery_status === 'placed' && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','cancelled'].includes(o.status),
     new_orders: o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !refundStatuses.includes(o.status),
     placed: o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundStatuses.includes(o.status) && o.status !== 'CANCEL_REQUESTED',
-    processing: o => o.delivery_status === 'processing' && !refundStatuses.includes(o.status),
+    processing: o => ['processing', 'inoculating'].includes(o.delivery_status) && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED'].includes(o.status),
     shipping: o => shippingStatuses.includes(o.delivery_status),
     delivered: o => o.delivery_status === 'delivered',
     cancel_requests: o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED',
-    cancelled: o => o.delivery_status === 'cancelled' && !refundStatuses.includes(o.status),
+    cancelled: o => o.delivery_status === 'cancelled',
   };
 
-  const filterFn = sectionFilters[section];
-  if (!filterFn) {
-    // Fallback for refund sections — use existing refund filter
-    renderAdminOrders(orders);
-    return;
-  }
+  const filterFn = sectionFilters[currentSection];
 
   const filtered = orders.filter(filterFn);
 
-  if (section === 'new_orders') {
+  if (currentSection === 'new_orders') {
     renderNewOrdersSection(filtered);
-  } else if (section === 'cancel_requests') {
+  } else if (currentSection === 'cancel_requests') {
     renderCancelRequestsSection(filtered);
   } else {
     renderAdminOrders(filtered);
@@ -2322,62 +2411,29 @@ function copyInvoiceLink(token) {
   }
 } */
 
-function onAdminStatusChange(orderId, selectEl) {
-  const status = selectEl.value;
-  const wrap = document.getElementById(`admin-delivery-wrap-${orderId}`);
-
-  if (status === 'shipped' || status === 'in_transit') {
-    if (wrap) {
-      wrap.style.display = '';
-      const daysSelect = document.getElementById(`admin-delivery-days-${orderId}`);
-      if (daysSelect && !daysSelect.value) {
-        return;
-      }
-    }
-  } else {
-    if (wrap) wrap.style.display = 'none';
-  }
-
-  adminUpdateShipping(orderId, status);
-}
-globalThis.onAdminStatusChange = onAdminStatusChange;
-
-async function adminUpdateShipping(orderId, status) {
+async function updateFulfillment(orderId, fulfillmentStatus) {
   try {
-    let delivery_days_text = '';
-    if (status === 'shipped' || status === 'in_transit') {
-      const input = document.getElementById(`admin-delivery-days-${orderId}`);
-      if (input) delivery_days_text = input.value.trim();
-    }
-
-    if (status === 'shipped' && !delivery_days_text) {
-      showErrorToast('Please select delivery days before marking as shipped.');
-      return;
-    }
-
-    const body = { delivery_status: status };
-    if (delivery_days_text) body.delivery_days_text = delivery_days_text;
-
-    const res = await fetch(`${API_BASE}/orders/${orderId}/status`, {
+    const res = await fetch(`${API_BASE}/orders/${orderId}/fulfillment`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${state.token}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ fulfillment_status: fulfillmentStatus }),
     });
-    if (!res.ok) throw new Error('Failed');
-    showSuccessToast(`📦 Shipment status updated to "${status}"`);
-    if (status === 'delivered') {
-      window.location.href = '/';
-    } else {
-      fetchAdminOrders();
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to update fulfillment');
     }
+    const statusLabel = fulfillmentStatus.replace(/_/g, ' ');
+    showSuccessToast(`✅ Fulfillment moved to "${statusLabel}"`);
+    fetchAdminOrders();
   } catch (err) {
     console.error(err);
-    showErrorToast('Failed to update shipping status.');
+    showErrorToast(err.message || 'Failed to update fulfillment');
   }
 }
+globalThis.updateFulfillment = updateFulfillment;
 
 function adminToggleCancelReason(orderId, value) {
   const otherInput = document.getElementById(`admin-cancel-other-${orderId}`);
@@ -3748,28 +3804,6 @@ async function adminDeleteCategory(catId) {
   }
 }
 
-function resetAdminForm() {
-  productForm?.reset();
-  document.getElementById('admin-edit-id').value = '';
-  if (productIdDisplay) productIdDisplay.value = '';
-  if (productImageUrl) productImageUrl.value = '';
-  if (productImageFile) productImageFile.value = '';
-  productImagePreviewValid = false;
-  const stockField = document.getElementById('admin-prod-stock');
-  if (stockField) stockField.value = 100;
-  const label = document.getElementById('admin-submit-label');
-  if (label) label.textContent = 'Publish Product';
-  const preview = document.getElementById('admin-img-preview');
-  if (preview) preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span><small>Upload an image or paste a URL</small>';
-  const feedback = document.getElementById('admin-add-feedback');
-  if (feedback) feedback.classList.add('hidden');
-  updateProductIdDisplay();
-  // Reset weight pricing to single empty row
-  setWeightPricingData(null);
-  updateMainTotalStock();
-  resetGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge');
-}
-
 function updateImagePreview() {
   const preview = document.getElementById('admin-img-preview');
   if (!preview) return;
@@ -4067,12 +4101,8 @@ async function adminApproveRefundModal(orderId) {
       <p style="margin:0 0 16px;font-size:0.88rem;color:#94a3b8;line-height:1.5;">
         You are approving the cancellation request for Order #<strong style="color:#38b17b;">${orderId}</strong>.
       </p>
-      <div class="input-field" style="margin-bottom:14px;">
-        <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Refund Type</label>
-        <select id="admin-approve-refund-type" style="width:100%;padding:10px;border-radius:8px;background:#152e25;border:1px solid rgba(56,177,123,0.3);color:#e2e8f0;">
-          <option value="auto">Auto Refund (Razorpay) — 3-7 business days</option>
-          <option value="manual">Manual Refund (Offline) — Bank / UPI / Cash</option>
-        </select>
+      <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:12px;margin-bottom:16px;font-size:0.8rem;color:#f59e0b;">
+        <i class="fa-solid fa-hand-holding-dollar"></i> <strong>Manual Refund Only</strong> — No auto-refund. Admin must process refund manually via order card steps: Initiated → Processing → Completed.
       </div>
       <div class="input-field" style="margin-bottom:20px;">
         <label style="color:#94a3b8;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:6px;display:block;">Admin Note (Optional)</label>
@@ -4080,7 +4110,7 @@ async function adminApproveRefundModal(orderId) {
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;">
         <button class="btn btn-secondary" onclick="document.getElementById('admin-approve-refund-modal').remove()">Cancel</button>
-        <button class="btn btn-primary" id="admin-approve-refund-confirm" style="background:#38b17b;border:none;">Approve & Refund</button>
+        <button class="btn btn-primary" id="admin-approve-refund-confirm" style="background:#38b17b;border:none;">Approve & Cancel Order</button>
       </div>
     </div>
   `;
@@ -4088,15 +4118,14 @@ async function adminApproveRefundModal(orderId) {
 
   modal.querySelector('#admin-approve-refund-confirm').addEventListener('click', async () => {
     const adminNote = modal.querySelector('#admin-approve-refund-note').value.trim();
-    const refundType = modal.querySelector('#admin-approve-refund-type').value;
     modal.remove();
 
     try {
       await fetchWithAuth(`/refunds/cancel-requests/${orderId}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ adminNote, refundType }),
+        body: JSON.stringify({ adminNote }),
       });
-      showSuccessToast(`✅ Cancellation approved. ${refundType === 'manual' ? 'Manual refund initiated.' : 'Auto refund initiated.'}`);
+      showSuccessToast(`✅ Cancellation approved. Manual refund tracking started — use the order card to progress refund steps.`);
       fetchAdminOrders();
       loadRefundsDashboard();
     } catch (err) {
@@ -4281,6 +4310,25 @@ function adminManualRefundComplete(orderId) {
 }
 globalThis.adminManualRefundComplete = adminManualRefundComplete;
 
+/**
+ * Admin: Progress manual refund step (initiated → processing → completed)
+ */
+async function adminProgressRefundStep(orderId, step) {
+  try {
+    const result = await fetchWithAuth(`/refunds/manual-refund/${orderId}/progress`, {
+      method: 'POST',
+      body: JSON.stringify({ step }),
+    });
+    const stepLabels = { initiated: 'Initiated', processing: 'Processing', completed: 'Completed' };
+    showSuccessToast(`✅ Manual refund marked as "${stepLabels[step] || step}".`);
+    fetchAdminOrders();
+    loadRefundsDashboard();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to update refund step.');
+  }
+}
+globalThis.adminProgressRefundStep = adminProgressRefundStep;
+
 async function adminPartialRefundModal(orderId) {
   const existing = document.getElementById('admin-partial-refund-modal');
   if (existing) existing.remove();
@@ -4361,20 +4409,43 @@ async function adminViewRefundDetails(orderId) {
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 
   try {
-    const [dashData, auditData] = await Promise.all([
-      fetchWithAuth(`/refunds/dashboard?search=${encodeURIComponent(orderId)}`),
-      fetchWithAuth(`/refunds/audit-logs?orderId=${encodeURIComponent(orderId)}`),
-    ]);
-
-    const refund = (dashData.refunds || []).find(r => r.order_id === orderId) || dashData.refunds?.[0];
-    if (!refund) throw new Error('Refund record not found.');
-
-    // Fetch the full order for items breakdown
+    // Fetch order data FIRST so we can fallback even without refunds-table row
     let orderData = null;
     try {
       const orderRes = await fetchWithAuth(`/orders/${orderId}`, { method: 'GET' });
       orderData = orderRes;
     } catch (e) { /* order fetch is optional */ }
+
+    const [dashData, auditData] = await Promise.all([
+      fetchWithAuth(`/refunds/dashboard?search=${encodeURIComponent(orderId)}`),
+      fetchWithAuth(`/refunds/audit-logs?orderId=${encodeURIComponent(orderId)}`),
+    ]);
+
+    let refund = (dashData.refunds || []).find(r => r.order_id === orderId) || dashData.refunds?.[0];
+
+    // Fallback: build a minimal refund object from order data
+    if (!refund && orderData) {
+      refund = {
+        order_id: orderId,
+        user_id: orderData.user_id,
+        user_email: orderData.user_email || '-',
+        user_name: orderData.user_name || orderData.shipping_name || '-',
+        refund_amount: orderData.total || 0,
+        order_total: orderData.total || 0,
+        order_status: orderData.status || 'cancelled',
+        order_cancel_reason: orderData.cancel_reason || '',
+        refund_status: orderData.refund_status || 'pending',
+        razorpay_payment_id: orderData.razorpay_payment_id || null,
+        razorpay_refund_id: null,
+        created_at: orderData.cancelled_at || orderData.created_at,
+        processed_at: null,
+        cancel_reason: orderData.cancel_reason || '',
+        reason: orderData.cancel_reason || '',
+        refund_reason: orderData.cancel_reason || ''
+      };
+    }
+
+    if (!refund) throw new Error('Refund record not found.');
 
     const body = document.getElementById('admin-refund-detail-body');
 
@@ -4436,7 +4507,7 @@ async function adminViewRefundDetails(orderId) {
         ['Refund ID', refund.razorpay_refund_id ? `<span style="font-family:monospace;font-size:0.75rem;">${refund.razorpay_refund_id.substring(0, 20)}</span>` : '<span style="color:#f59e0b;">Pending</span>'],
         ['Initiated At', refund.created_at ? new Date(refund.created_at).toLocaleString('en-IN') : '-'],
         ['Processed At', refund.processed_at ? new Date(refund.processed_at).toLocaleString('en-IN') : '-'],
-        ['Reason', refund.cancel_reason || refund.reason || '-'],
+        ['Reason', refund.cancel_reason || refund.reason || refund.order_cancel_reason || refund.refund_reason || '-'],
       ].map(([label, val]) => `
           <div style="background:rgba(56,177,123,0.04);border:1px solid rgba(56,177,123,0.08);border-radius:8px;padding:10px;">
             <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:600;margin-bottom:4px;">${label}</div>
@@ -4467,42 +4538,22 @@ async function adminDirectCancelModal(orderId) {
   const modal = document.createElement('div');
   modal.id = 'admin-direct-cancel-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:16px;';
-  modal.innerHTML = `
+    modal.innerHTML = `
     <div style="background:#0d1f1a;border:1px solid rgba(239,68,68,0.3);border-radius:16px;max-width:520px;width:100%;padding:28px;color:#e2e8f0;box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-        <h3 style="margin:0;font-size:1.15rem;color:#f87171;"><i class="fa-solid fa-ban"></i> Cancel & Refund</h3>
+        <h3 style="margin:0;font-size:1.15rem;color:#f87171;"><i class="fa-solid fa-ban"></i> Cancel Order</h3>
         <button onclick="document.getElementById('admin-direct-cancel-modal').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.3rem;">&times;</button>
       </div>
       <p style="margin:0 0 12px;font-size:0.85rem;color:#94a3b8;line-height:1.5;">
-        Order #<strong style="color:#f87171;">${orderId}</strong> will be cancelled with auto refund via Razorpay.
+        Order #<strong style="color:#f87171;">${orderId}</strong> will be cancelled. Refund must be processed manually by the admin through the order card.
       </p>
 
-      <div style="display:flex;gap:10px;margin-bottom:18px;padding:12px 14px;background:rgba(15,23,42,0.6);border-radius:12px;border:1px solid rgba(56,177,123,0.12);">
-        <div style="flex:1;text-align:center;">
-          <div style="width:32px;height:32px;border-radius:50%;background:rgba(239,68,68,0.15);color:#f87171;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:0.85rem;"><i class="fa-solid fa-ban"></i></div>
-          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#f87171;">Cancel</div>
-          <div style="font-size:0.62rem;color:#64748b;margin-top:2px;">Order stopped</div>
-        </div>
-        <div style="display:flex;align-items:center;color:#475569;"><i class="fa-solid fa-chevron-right" style="font-size:0.7rem;"></i></div>
-        <div style="flex:1;text-align:center;">
-          <div style="width:32px;height:32px;border-radius:50%;background:rgba(56,177,123,0.15);color:#38b17b;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:0.85rem;"><i class="fa-solid fa-rotate"></i></div>
-          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#38b17b;">Auto Refund</div>
-          <div style="font-size:0.62rem;color:#64748b;margin-top:2px;">Razorpay → Customer</div>
-        </div>
-        <div style="display:flex;align-items:center;color:#475569;"><i class="fa-solid fa-chevron-right" style="font-size:0.7rem;"></i></div>
-        <div style="flex:1;text-align:center;">
-          <div style="width:32px;height:32px;border-radius:50%;background:rgba(245,158,11,0.15);color:#fbbf24;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;font-size:0.85rem;"><i class="fa-solid fa-hand-holding-dollar"></i></div>
-          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#fbbf24;">Manual (If Fails)</div>
-          <div style="font-size:0.62rem;color:#64748b;margin-top:2px;">Bank / UPI / Cash</div>
-        </div>
-      </div>
-
       <div style="margin-bottom:16px;">
-        <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#94a3b8;margin-bottom:8px;">Refund Process:</div>
+        <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;color:#94a3b8;margin-bottom:8px;">Manual Refund Process:</div>
         <div style="display:flex;flex-direction:column;gap:5px;">
-          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#cbd5e1;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(56,177,123,0.2);color:#38b17b;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-check"></i></span> Razorpay auto-refund initiated immediately</div>
-          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#cbd5e1;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(56,177,123,0.2);color:#38b17b;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-check"></i></span> Order items auto-restocked</div>
-          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#94a3b8;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(245,158,11,0.15);color:#fbbf24;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-triangle-exclamation"></i></span> If auto refund fails → <strong style="color:#fbbf24;">Manual Refund</strong> button appears in order card</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#cbd5e1;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(56,177,123,0.2);color:#38b17b;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-check"></i></span> Order cancelled — items auto-restocked</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#cbd5e1;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(56,177,123,0.2);color:#38b17b;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-check"></i></span> No auto-refund — admin processes refund manually</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#94a3b8;"><span style="width:18px;height:18px;border-radius:50%;background:rgba(245,158,11,0.15);color:#fbbf24;display:flex;align-items:center;justify-content:center;font-size:0.55rem;flex-shrink:0;"><i class="fa-solid fa-hand-holding-dollar"></i></span> After cancel → use <strong style="color:#fbbf24;">Manual Refund steps</strong> in order card to progress: Initiated → Processing → Completed</div>
         </div>
       </div>
 
@@ -4526,7 +4577,7 @@ async function adminDirectCancelModal(orderId) {
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;">
         <button class="btn btn-secondary" onclick="document.getElementById('admin-direct-cancel-modal').remove()">Cancel</button>
-        <button class="btn btn-primary" id="admin-direct-cancel-confirm" style="background:#ef4444;border:none;">Confirm Cancel & Refund</button>
+        <button class="btn btn-primary" id="admin-direct-cancel-confirm" style="background:#ef4444;border:none;">Confirm Cancellation</button>
       </div>
     </div>
   `;
@@ -4556,7 +4607,7 @@ async function adminDirectCancelModal(orderId) {
         method: 'POST',
         body: JSON.stringify({ reason, adminNote }),
       });
-      showSuccessToast('✅ Order cancelled by admin. Refund initiated.');
+      showSuccessToast('✅ Order cancelled. Manual refund tracking started — progress via order card.');
       fetchAdminOrders();
       loadRefundsDashboard();
     } catch (err) {
@@ -4566,6 +4617,143 @@ async function adminDirectCancelModal(orderId) {
 }
 globalThis.adminDirectCancelModal = adminDirectCancelModal;
 globalThis.adminDirectCancel = adminDirectCancelModal;
+
+/* ── Shipments Tab ── */
+async function loadShipmentsTab() {
+  const container = document.getElementById('admin-shipments-table-container');
+  if (!container) return;
+  container.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading shipments...</div>';
+
+  try {
+    let shipments = adminShipmentsCache;
+    if (!shipments.length) {
+      const orders = adminOrdersCache;
+      shipments = orders.map(o => ({
+        order_id: o.id,
+        awb_code: o.shipment_awb || (o.shipment ? o.shipment.awb_code : null) || null,
+        courier_name: o.shipment_courier || (o.shipment ? o.shipment.courier_name : null) || null,
+        status: o.shipment_status || (o.shipment ? o.shipment.status : null) || o.delivery_status,
+        tracking_url: o.shipment_tracking_url || (o.shipment ? o.shipment.tracking_url : null) || null,
+        label_url: o.shipment_label_url || (o.shipment ? o.shipment.label_url : null) || null,
+        shipped_at: o.shipped_at || null,
+        delivered_at: o.delivered_at || null,
+        customer_name: o.customer_name || '',
+      })).filter(s => s.awb_code || !['placed', 'processing', 'inoculating'].includes(s.status));
+    }
+
+    const searchVal = (document.getElementById('admin-shipments-search')?.value || '').toLowerCase();
+    const filterVal = document.getElementById('admin-shipments-filter-status')?.value || '';
+
+    let filtered = shipments;
+    if (searchVal) {
+      filtered = filtered.filter(s =>
+        s.order_id.toLowerCase().includes(searchVal) ||
+        (s.awb_code || '').toLowerCase().includes(searchVal) ||
+        (s.courier_name || '').toLowerCase().includes(searchVal)
+      );
+    }
+    if (filterVal) {
+      filtered = filtered.filter(s => s.status === filterVal);
+    }
+
+    // Update stats
+    document.getElementById('admin-shipment-stat-total').textContent = shipments.length;
+    document.getElementById('admin-shipment-stat-pending').textContent = shipments.filter(s => ['pending', 'pickup_scheduled'].includes(s.status)).length;
+    document.getElementById('admin-shipment-stat-transit').textContent = shipments.filter(s => ['shipped', 'in_transit', 'out_for_delivery'].includes(s.status)).length;
+    document.getElementById('admin-shipment-stat-delivered').textContent = shipments.filter(s => s.status === 'delivered').length;
+    document.getElementById('admin-shipment-stat-ndr').textContent = shipments.filter(s => s.status === 'ndr').length;
+
+    if (!filtered.length) {
+      container.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;"><i class="fa-solid fa-box-open" style="font-size:2rem;display:block;margin-bottom:12px;opacity:0.4;"></i>No shipments found.</div>';
+      return;
+    }
+
+    const statusColors = {
+      pending: '#f59e0b',
+      pickup_scheduled: '#3b82f6',
+      picked_up: '#8b5cf6',
+      shipped: '#10b981',
+      in_transit: '#3b82f6',
+      out_for_delivery: '#8b5cf6',
+      delivered: '#10b981',
+      cancelled: '#ef4444',
+      returned: '#ef4444',
+      ndr: '#dc2626',
+    };
+
+    const rows = filtered.map(s => `
+      <tr>
+        <td><strong>#${s.order_id}</strong></td>
+        <td>${s.customer_name || '—'}</td>
+        <td>${s.awb_code ? `<code class="aoc-ship-awb">${s.awb_code}</code>` : '<span style="color:#94a3b8;">—</span>'}</td>
+        <td>${s.courier_name || '<span style="color:#94a3b8;">—</span>'}</td>
+        <td><span class="aoc-ship-status ${s.status}" style="background:${statusColors[s.status] || '#64748b'}20;color:${statusColors[s.status] || '#64748b'};border:1px solid ${statusColors[s.status] || '#64748b'}30;border-radius:999px;padding:2px 10px;font-size:0.78rem;font-weight:600;white-space:nowrap;">${(s.status || 'unknown').replace(/_/g, ' ')}</span></td>
+        <td>${s.shipped_at ? new Date(s.shipped_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
+        <td>
+          <div style="display:flex;gap:6px;">
+            ${s.tracking_url ? `<a href="${s.tracking_url}" target="_blank" class="aoc-btn" title="Track"><i class="fa-solid fa-location-dot"></i></a>` : ''}
+            ${s.label_url ? `<a href="${s.label_url}" target="_blank" class="aoc-btn" title="Label"><i class="fa-solid fa-file-lines"></i></a>` : ''}
+            ${s.status && s.status !== 'cancelled' && s.status !== 'delivered' ? `
+              <button class="aoc-btn" style="color:#ef4444;" onclick="globalThis.cancelShipmentFromTab('${s.order_id}')" title="Cancel Shipment">
+                <i class="fa-solid fa-ban"></i>
+              </button>
+            ` : ''}
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    container.innerHTML = `
+      <div style="overflow-x:auto;">
+        <table class="admin-shipments-table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>AWB</th>
+              <th>Courier</th>
+              <th>Status</th>
+              <th>Shipped</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="admin-loading" style="color:#e74c3c;">Failed to load shipments.</div>`;
+  }
+}
+
+// Cancel shipment from the Shipments tab
+async function cancelShipmentFromTab(orderId) {
+  if (!confirm(`Cancel shipment for order #${orderId}? This cannot be undone.`)) return;
+  try {
+    const res = await fetchWithAuth(`/shipping/cancel/${orderId}`, { method: 'POST' });
+    showSuccessToast(`✅ Shipment cancelled for order #${orderId}`);
+    fetchAdminOrders(); // refresh cache
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to cancel shipment');
+  }
+}
+globalThis.cancelShipmentFromTab = cancelShipmentFromTab;
+
+// Refresh shipments cache
+async function refreshShipmentsCache() {
+  try {
+    const data = await fetchWithAuth('/shipping/all');
+    if (Array.isArray(data)) adminShipmentsCache = data;
+  } catch (e) { /* ignore */ }
+}
+globalThis.refreshShipmentsCache = refreshShipmentsCache;
+
+// Wire up shipments search/filter
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'admin-shipments-search' || e.target.id === 'admin-shipments-filter-status') {
+    loadShipmentsTab();
+  }
+});
 
 function activateAdminTab(tabName) {
   document.querySelectorAll('.admin-tab').forEach((btn) => {
@@ -4580,6 +4768,9 @@ function activateAdminTab(tabName) {
   // Load refund dashboard data when tab is activated
   if (tabName === 'refunds') {
     loadRefundsDashboard();
+  }
+  if (tabName === 'shipments') {
+    loadShipmentsTab();
   }
 }
 
@@ -4635,6 +4826,10 @@ function setupAdminEventHandlers() {
         if (result?.otp && sentEl) {
           sentEl.textContent = `Demo OTP: ${result.otp}`;
           document.getElementById('admin-auth-otp').value = result.otp;
+          // Auto-submit OTP verification
+          setTimeout(() => {
+            loginForm.dispatchEvent(new Event('submit'));
+          }, 300);
         } else if (sentEl) {
           sentEl.textContent = 'OTP sent to registered mobile';
         }
@@ -4674,8 +4869,6 @@ function setupAdminEventHandlers() {
   }
 
   // Product form
-  if (productForm) productForm.addEventListener('submit', handleAdminAddProduct);
-  if (resetFormBtn) resetFormBtn.addEventListener('click', resetAdminForm);
   if (btnAddWeightRow) {
     btnAddWeightRow.addEventListener('click', () => {
       weightPricingContainer.appendChild(createWeightRow(null));
@@ -4787,32 +4980,7 @@ function setupAdminEventHandlers() {
   document.getElementById('admin-train-end-date')?.addEventListener('change', updateDuration);
 
   // Product/category image preview wiring
-  if (productImageBrowse) productImageBrowse.addEventListener('click', () => productImageFile?.click());
   if (categoryImageBrowse) categoryImageBrowse.addEventListener('click', () => categoryImageFile?.click());
-  if (productImageFile) productImageFile.addEventListener('change', updateImagePreview);
-  if (productImageUrl) {
-    productImageUrl.addEventListener('input', () => {
-      if (productImageFile?.files?.length) productImageFile.value = '';
-      updateImagePreview();
-    });
-  }
-  // Premium image zone — click to upload, drag-and-drop
-  const adminImageZone = document.getElementById('admin-image-zone');
-  if (adminImageZone && productImageFile) {
-    adminImageZone.addEventListener('click', (e) => {
-      if (e.target.closest('#admin-prod-image-browse')) return;
-      if (e.target.closest('#admin-prod-image-url')) return;
-      productImageFile.click();
-    });
-    adminImageZone.addEventListener('dragover', (e) => { e.preventDefault(); adminImageZone.classList.add('dragover'); });
-    adminImageZone.addEventListener('dragleave', () => { adminImageZone.classList.remove('dragover'); });
-    adminImageZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      adminImageZone.classList.remove('dragover');
-      const files = e.dataTransfer.files;
-      if (files.length) { productImageFile.files = files; productImageFile.dispatchEvent(new Event('change')); }
-    });
-  }
   if (categoryImageFile) categoryImageFile.addEventListener('change', updateCategoryImagePreview);
   if (categoryImageUrl) categoryImageUrl.addEventListener('input', updateCategoryImagePreview);
 
@@ -5107,7 +5275,7 @@ function setupAdminEventHandlers() {
       const status = btn.dataset.status;
       if (status === 'all') {
         currentSection = 'all';
-        renderAdminOrders(adminOrdersCache || []);
+        renderCurrentSection();
       } else {
         currentSection = status;
         renderCurrentSection();
@@ -5116,7 +5284,7 @@ function setupAdminEventHandlers() {
   });
 
   // Status constants (shared)
-  const ACTIVE_STATUSES = ['placed', 'processing', 'shipped', 'in_transit'];
+  const ACTIVE_STATUSES = ['placed', 'processing', 'inoculating', 'shipped', 'in_transit'];
   const REFUND_STATUSES_ALL = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
   const REFUND_STATUSES_AUTO = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED'];
   const REFUND_STATUSES_MANUAL = ['MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];

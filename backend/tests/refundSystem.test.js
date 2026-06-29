@@ -1,3 +1,5 @@
+process.env.JWT_SECRET = 'mushroom-spore-secret-key-123';
+
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const db = require('../src/config/db');
@@ -26,6 +28,11 @@ describe('Refund Management System', () => {
     mockStore.orders.length = 0;
     mockStore.refunds.length = 0;
     mockStore.refund_audits.length = 0;
+    mockStore.users.length = 0;
+
+    // Seed users so auth middleware DB lookup succeeds
+    mockStore.users.push({ id: 'user-buyer', email: 'buyer@sporekart.com', full_name: 'Test Buyer', role: 'buyer' });
+    mockStore.users.push({ id: 'user-admin', email: 'admin@sporekart.com', full_name: 'Test Admin', role: 'admin' });
 
     // Load the app (avoid jest.resetModules to keep the same db singleton)
     app = require('../src/server');
@@ -80,8 +87,8 @@ describe('Refund Management System', () => {
   describe('1. State Machine Transition Rules', () => {
     test('Should allow valid transitions', () => {
       expect(isValidTransition(OrderStates.PAID, OrderStates.CANCEL_REQUESTED)).toBe(true);
-      expect(isValidTransition(OrderStates.CANCEL_REQUESTED, OrderStates.CANCEL_APPROVED)).toBe(true);
-      expect(isValidTransition(OrderStates.CANCEL_APPROVED, OrderStates.REFUND_PENDING)).toBe(true);
+      expect(isValidTransition(OrderStates.CANCEL_REQUESTED, OrderStates.CANCELLED)).toBe(true);
+      expect(isValidTransition(OrderStates.CANCELLED, OrderStates.REFUND_PENDING)).toBe(true);
       expect(isValidTransition(OrderStates.REFUND_PENDING, OrderStates.REFUND_INITIATED)).toBe(true);
       expect(isValidTransition(OrderStates.REFUND_INITIATED, OrderStates.REFUND_PROCESSING)).toBe(true);
       expect(isValidTransition(OrderStates.REFUND_PROCESSING, OrderStates.REFUND_COMPLETED)).toBe(true);
@@ -120,7 +127,7 @@ describe('Refund Management System', () => {
         .send({ adminNote: 'Approved by admin' });
 
       expect(res.status).toBe(200);
-      expect(res.body.data.order.status).toBe(OrderStates.REFUND_INITIATED);
+      expect(res.body.data.order.status).toBe(OrderStates.CANCELLED);
       expect(res.body.data.refund.status).toBe('initiated');
 
       // Check stock was restocked

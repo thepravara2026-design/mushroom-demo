@@ -7,9 +7,24 @@
     "dev": "vite --port 3000 --open",
     "build": "vite build",
     "preview": "vite preview",
-    "screenshots": "node ./tools/screenshot.mjs"
+    "screenshots": "node ./tools/screenshot.mjs",
+    "test": "playwright test",
+    "test:auth": "playwright test tests/01-auth",
+    "test:shop": "playwright test tests/02-shop",
+    "test:cart": "playwright test tests/03-cart",
+    "test:checkout": "playwright test tests/04-checkout",
+    "test:orders": "playwright test tests/05-orders",
+    "test:admin": "playwright test tests/06-admin",
+    "test:security": "playwright test tests/07-security",
+    "test:integration": "playwright test tests/08-integration",
+    "test:all": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "playwright": "^1.60.0",
     "vite": "^5.2.0"
   }

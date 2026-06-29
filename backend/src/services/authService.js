@@ -57,13 +57,15 @@ class AuthService {
     const emailLower = email.toLowerCase();
 
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const resolvedRole = role || "buyer";
     const expiresAt = Date.now() + OTP_TTL_MS;
 
     otpStore.set(emailLower, {
       otp: generatedOtp,
       expiresAt,
-      role: role || "buyer",
+      role: resolvedRole,
       fullName: fullName || "Mushroom Enthusiast",
+      phone: phone || null, // Saved for cross-lookup in verifyOTP
     });
 
     // Send via SMS if phone provided, otherwise email
@@ -73,11 +75,17 @@ class AuthService {
       await sendOtpEmail(emailLower, generatedOtp);
     }
 
+    const includeOtp =
+      process.env.NODE_ENV === 'development' ||
+      process.env.NODE_ENV === 'test' ||
+      process.env.FORCE_MOCK === 'true';
+
     return {
       success: true,
       message: phone
         ? `OTP sent to registered mobile`
         : `OTP sent to ${emailLower}`,
+      ...(includeOtp ? { otp: generatedOtp } : {}),
     };
   }
 
@@ -107,7 +115,9 @@ class AuthService {
     otpStore.delete(emailLower);
 
     const loginMethod = opts.loginMethod || record.loginMethod || null;
-    const whatsappNumber = opts.whatsappNumber || "";
+    // Prefer opts.whatsappNumber (frontend-supplied), fall back to phone saved during OTP request
+    const rawWhatsapp = opts.whatsappNumber || record.phone || "";
+    const whatsappNumber = rawWhatsapp ? rawWhatsapp.replace(/^\+91/, "").trim() : "";
 
     // Try live DB first, fall back to mock store for dev/test compatibility
     let user = null;
@@ -117,25 +127,33 @@ class AuthService {
         if (liveUser) {
           user = liveUser;
         } else {
-          // Phone uniqueness check: ensure no existing user has this phone
+          // Check if user already exists with this phone number (supports phone↔email unified login)
           if (whatsappNumber) {
             const { data: phoneUser } = await userRepo.findByPhone(whatsappNumber);
             if (phoneUser) {
-              const err = new Error("This phone number is already registered to another account.");
-              err.status = 409;
-              throw err;
+              user = phoneUser;
+              // Cross-login: found by phone but email has changed — update if current is synthetic
+              if (phoneUser.email !== emailLower) {
+                const isCurrentSynthetic = /^phone-\d+@/i.test(phoneUser.email);
+                if (!phoneUser.email || isCurrentSynthetic) {
+                  await userRepo.update(phoneUser.id, { email: emailLower });
+                  user.email = emailLower;
+                }
+              }
             }
           }
-          // Try creating in live DB
-          const insertPayload = {
-            email: emailLower,
-            full_name: record.fullName,
-            whatsapp_number: whatsappNumber || "",
-            role: record.role,
-          };
-          if (loginMethod) insertPayload.login_method = loginMethod;
-          const { data: newUser, error } = await userRepo.create(insertPayload);
-          if (!error) user = newUser;
+          if (!user) {
+            // Try creating in live DB
+            const insertPayload = {
+              email: emailLower,
+              full_name: record.fullName,
+              whatsapp_number: whatsappNumber || "",
+              role: record.role,
+            };
+            if (loginMethod) insertPayload.login_method = loginMethod;
+            const { data: newUser, error } = await userRepo.create(insertPayload);
+            if (!error) user = newUser;
+          }
         }
       } catch {
         // Live DB failed — fall through to mock store
@@ -150,29 +168,41 @@ const mockStore = dbConfig._getMockStore ? dbConfig._getMockStore() : { users: [
 const mockUsers = mockStore.users;
       user = mockUsers.find(u => u.email === emailLower);
       if (!user) {
-        // Phone uniqueness check: if whatsappNumber provided, ensure no other user has it
+        // Check if user already exists with this phone number (supports phone↔email unified login)
         if (whatsappNumber) {
           const cleanPhone = whatsappNumber.replace(/^\+91/, "").replace(/\s/g, "").trim();
-          const phoneConflict = mockUsers.find(u =>
+          const existingByPhone = mockUsers.find(u =>
             u.whatsapp_number && u.whatsapp_number.replace(/^\+91/, "").replace(/\s/g, "").trim() === cleanPhone
           );
-          if (phoneConflict) {
-            throw new Error("This phone number is already registered to another account.");
+          if (existingByPhone) {
+            user = existingByPhone;
+            // Cross-login: found by phone but email has changed (e.g. phone user now providing real email)
+            if (existingByPhone.email !== emailLower) {
+              const isCurrentSynthetic = /^phone-\d+@/i.test(existingByPhone.email);
+              if (!existingByPhone.email || isCurrentSynthetic) {
+                existingByPhone.email = emailLower;
+              }
+            }
           }
         }
-        const newUser = {
-          id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          email: emailLower,
-          full_name: record.fullName,
-          whatsapp_number: whatsappNumber || "",
-          role: record.role,
-          created_at: new Date().toISOString(),
-        };
-        if (loginMethod) newUser.login_method = loginMethod;
-        mockUsers.push(newUser);
-        user = newUser;
+        if (!user) {
+          const newUser = {
+            id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            email: emailLower,
+            full_name: record.fullName,
+            whatsapp_number: whatsappNumber || "",
+            role: record.role,
+            created_at: new Date().toISOString(),
+          };
+          if (loginMethod) newUser.login_method = loginMethod;
+          mockUsers.push(newUser);
+          user = newUser;
+        }
       } else if (whatsappNumber) {
-        user.whatsapp_number = whatsappNumber;
+        // Found by email — sync phone if missing or different
+        if (!user.whatsapp_number || user.whatsapp_number !== whatsappNumber) {
+          user.whatsapp_number = whatsappNumber;
+        }
       }
     }
 
@@ -245,9 +275,15 @@ const mockUsers = mockStore.users;
 
     const maskedPhone = `XXXXXX${adminPhone.slice(-4)}`;
 
+    const includeOtp =
+      process.env.NODE_ENV === 'development' ||
+      process.env.NODE_ENV === 'test' ||
+      process.env.FORCE_MOCK === 'true';
+
     return {
       success: true,
       message: `OTP sent to registered mobile ${maskedPhone}`,
+      ...(includeOtp ? { otp: generatedOtp } : {}),
     };
   }
 
@@ -316,6 +352,44 @@ const mockUsers = mockStore.users;
     };
   }
 
+  /**
+   * Looks up a user by email or phone (unauthenticated). Returns only basic profile info.
+   */
+  async lookupUser(emailOrPhone) {
+    const val = String(emailOrPhone).toLowerCase().trim();
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+    let user = null;
+    if (!db.isMock) {
+      try {
+        if (isEmail) {
+          const { data } = await userRepo.findByEmail(val);
+          if (data) user = data;
+        } else {
+          const cleanPhone = val.replace(/^\+91/, "").replace(/\s/g, "").trim();
+          const withPrefix = `+91${cleanPhone}`;
+          const { data } = await userRepo.findByPhone(withPrefix);
+          if (data) user = data;
+        }
+      } catch { /* fall through to mock */ }
+    }
+    if (!user) {
+      const dbConfig = require("../config/db");
+      const mockStore = dbConfig._getMockStore ? dbConfig._getMockStore() : { users: [] };
+      const mockUsers = mockStore.users;
+      user = isEmail
+        ? mockUsers.find(u => u.email === val)
+        : mockUsers.find(u => {
+            const cleanPhone = val.replace(/^\+91/, "").replace(/\s/g, "").trim();
+            return u.whatsapp_number && u.whatsapp_number.replace(/^\+91/, "").replace(/\s/g, "").trim() === cleanPhone;
+          });
+    }
+    if (!user) return { exists: false };
+    return {
+      exists: true,
+      fullName: user.full_name || user.fullName || "",
+    };
+  }
+
   async getUserById(userId) {
     const { data: user, error } = await db
       .from("users")
@@ -345,7 +419,7 @@ const mockUsers = mockStore.users;
     if (typeof updates.email === "string")
       payload.email = updates.email.trim().toLowerCase();
     if (typeof updates.whatsappNumber === "string")
-      payload.whatsapp_number = updates.whatsappNumber.trim();
+      payload.whatsapp_number = updates.whatsappNumber.replace(/^\+91/, "").trim();
     if (typeof updates.defaultAddress === "string")
       payload.default_address = updates.defaultAddress.trim();
     if (typeof updates.defaultPincode === "string")
@@ -361,9 +435,11 @@ const mockUsers = mockStore.users;
     if (typeof updates.city === "string") payload.city = updates.city.trim();
     if (typeof updates.state === "string") payload.state = updates.state.trim();
 
+    // Phone-verified accounts: phone is immutable only if already set
     if (
       current.login_method === "phone" &&
       payload.whatsapp_number &&
+      current.whatsapp_number &&
       payload.whatsapp_number !== current.whatsapp_number
     ) {
       const err = new Error(
@@ -372,12 +448,39 @@ const mockUsers = mockStore.users;
       err.status = 400;
       throw err;
     }
+    // Phone-verified accounts: allow replacing synthetic email with a real one
+    if (
+      current.login_method === "phone" &&
+      payload.email &&
+      payload.email !== current.email
+    ) {
+      const isSynthetic = /^phone-\d+@/i.test(current.email);
+      if (!isSynthetic) {
+        const err = new Error("Email cannot be changed for phone-verified accounts.");
+        err.status = 400;
+        throw err;
+      }
+    }
+    // Email-verified accounts: email is immutable
     if (
       current.login_method === "email" &&
       payload.email &&
       payload.email !== current.email
     ) {
       const err = new Error("Email cannot be changed for email-verified accounts.");
+      err.status = 400;
+      throw err;
+    }
+    // Email-verified accounts: phone is immutable only if already set
+    if (
+      current.login_method === "email" &&
+      payload.whatsapp_number &&
+      current.whatsapp_number &&
+      payload.whatsapp_number !== current.whatsapp_number
+    ) {
+      const err = new Error(
+        "Phone number cannot be changed for email-verified accounts.",
+      );
       err.status = 400;
       throw err;
     }

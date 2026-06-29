@@ -517,6 +517,87 @@ router.post(
   },
 );
 
+// POST /api/orders/confirm-cod-payment
+// Called when user selects Cash on Delivery.
+// Marks order as placed, sets payment_method to COD, status to placed (representing unpaid), and pending admin approval.
+router.post(
+  "/confirm-cod-payment",
+  authMiddleware,
+  validateBody(
+    Joi.object({
+      razorpay_order_id: Joi.string().required(),
+    }),
+  ),
+  async (req, res) => {
+    try {
+      const { razorpay_order_id } = req.body;
+
+      const paymentId = `COD-${Date.now()}`;
+      const transactionId = `TXN-${paymentId}`;
+
+      const { data: existingOrder } = await db
+        .from("orders")
+        .select("invoice_token")
+        .eq("razorpay_order_id", razorpay_order_id)
+        .single();
+
+      const invoiceToken =
+        existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
+
+      const { data: updatedOrder, error } = await db
+        .from("orders")
+        .update({
+          status: "placed", // COD order is placed but unpaid yet
+          delivery_status: "placed",
+          admin_approval_status: "pending",
+          payment_method: "COD",
+          razorpay_payment_id: paymentId,
+          transaction_id: transactionId,
+          invoice_token: invoiceToken,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("razorpay_order_id", razorpay_order_id)
+        .single();
+
+      if (error) {
+        return respondError(res, error.message || "Failed to update order", 500);
+      }
+
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: updatedOrder },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === updatedOrder.user_id),
+        );
+      } catch (e) { /* ignore SSE errors */ }
+
+      // Send WhatsApp invoice on order placement
+      try {
+        const { data: user } = await db
+          .from("users")
+          .select("*")
+          .eq("id", updatedOrder.user_id)
+          .single();
+        if (user) {
+          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
+        }
+      } catch (e) {
+        // ignore WhatsApp errors
+      }
+
+      return success(res, {
+        message: "COD order confirmed successfully.",
+        status: "placed",
+        order: updatedOrder,
+      });
+    } catch (err) {
+      return respondError(res, err.message || "Failed to confirm COD payment", 500);
+    }
+  },
+);
+
 // POST /api/orders/verify-payment
 // Confirm signature & finalize order
 router.post(
@@ -811,17 +892,22 @@ router.get("/all-orders", authMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/orders/:id/status
-// Update delivery status of an order (admin only)
-router.put("/:id/status", authMiddleware, async (req, res) => {
+// PUT /api/orders/:id/fulfillment
+// Update fulfillment status (admin only) — replaces manual delivery_status progression
+router.put("/:id/fulfillment", authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== "admin") {
       return respondError(res, "Access denied. Admins only.", 403);
     }
 
-    const { delivery_status, delivery_days_text } = req.body;
-    if (!delivery_status) {
-      return respondError(res, "Delivery status is required.", 400);
+    const { fulfillment_status } = req.body;
+    if (!fulfillment_status) {
+      return respondError(res, "Fulfillment status is required.", 400);
+    }
+
+    const validStatuses = ['pending_fulfillment', 'packing_required', 'packed', 'awaiting_pickup', 'ready_to_ship', 'with_carrier', 'delivered'];
+    if (!validStatuses.includes(fulfillment_status)) {
+      return respondError(res, `Invalid fulfillment status. Must be one of: ${validStatuses.join(', ')}`, 400);
     }
 
     const { data: order, error: orderErr } = await db
@@ -833,60 +919,26 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       return respondError(res, "Order not found.", 404);
     }
 
-    const previousState = { ...order };
-
-    // Enforce forward-only transitions on delivery_status
-    assertForwardOnly(order.delivery_status || 'placed', delivery_status);
-
-    // Enforce shipping lock (cannot change status of shipped+ orders backward)
-    if (['shipped', 'in_transit', 'delivered'].includes(order.delivery_status)) {
-      assertCancellable(order);
-    }
-
     if (order.status === "cancelled" || order.status === "refunded") {
-      return respondError(
-        res,
-        "Cannot change status of a cancelled or refunded order.",
-        400,
-      );
+      return respondError(res, "Cannot change fulfillment of a cancelled or refunded order.", 400);
     }
 
-    if (
-      order.refund_status === "initiated" ||
-      order.refund_status === "processed"
-    ) {
-      return respondError(
-        res,
-        "Cannot change status of an order with an active refund.",
-        400,
-      );
+    if (order.refund_status === "initiated" || order.refund_status === "processed") {
+      return respondError(res, "Cannot change fulfillment of an order with an active refund.", 400);
     }
+
+    const previousFulfillment = order.fulfillment_status;
 
     const updatePayload = {
-      delivery_status,
+      fulfillment_status,
       updated_at: new Date().toISOString(),
     };
 
-    if (delivery_days_text) {
-      updatePayload.delivery_days_text = delivery_days_text
-        .trim()
-        .slice(0, 100);
-      const daysMatch = delivery_days_text.match(/(\d+)/);
-      if (daysMatch) {
-        const days = parseInt(daysMatch[1], 10);
-        if (!isNaN(days) && days > 0) {
-          const expectedDate = new Date();
-          expectedDate.setDate(expectedDate.getDate() + days);
-          updatePayload.expected_delivery_date = expectedDate.toISOString();
-        }
-      }
-    }
-
-    // Track shipped_at and delivered_at timestamps
-    if (delivery_status === 'shipped' && !order.shipped_at) {
+    // Set shipped_at/delivered_at when transitioning
+    if (fulfillment_status === 'with_carrier' && !order.shipped_at) {
       updatePayload.shipped_at = new Date().toISOString();
     }
-    if (delivery_status === 'delivered' && !order.delivered_at) {
+    if (fulfillment_status === 'delivered' && !order.delivered_at) {
       updatePayload.delivered_at = new Date().toISOString();
     }
 
@@ -901,27 +953,115 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       .single();
 
     if (error) {
-      return respondError(res, error.message || "Failed to update order", 500);
+      return respondError(res, error.message || "Failed to update fulfillment", 500);
     }
 
-    const newState = { ...updatedOrder };
+    // Log to order_status_history
+    await db.from("order_status_history").insert({
+      order_id: order.id,
+      field_name: "fulfillment_status",
+      old_value: previousFulfillment,
+      new_value: fulfillment_status,
+      changed_by: req.user.userId || req.user.id || "admin",
+      changed_at: new Date().toISOString(),
+    });
 
-    // Audit log
-    logAuditAction({
-      orderId: order.id,
-      action: AUDIT_ACTIONS.STATUS_CHANGED,
-      performedBy: req.user,
-      previousState: { delivery_status: previousState.delivery_status },
-      newState: { delivery_status: delivery_status },
-      metadata: { delivery_days_text },
-    }).catch(() => { });
+    let finalOrder = updatedOrder;
 
-    // Notification
-    const eventMap = {
-      'shipped': 'ORDER_SHIPPED',
-      'delivered': 'ORDER_DELIVERED',
-    };
-    if (eventMap[delivery_status]) {
+    // If transitioning to ready_to_ship, auto-create shipment via default provider
+    if (fulfillment_status === 'ready_to_ship') {
+      try {
+        const { getDefaultProvider } = require("../services/shipping/ProviderRegistry");
+        const provider = await getDefaultProvider();
+        if (provider) {
+          const { data: providerRecord } = await db
+            .from("shipping_providers")
+            .select("id")
+            .eq("provider_key", provider.provider.provider_key)
+            .single();
+
+          if (providerRecord) {
+            const shipmentPayload = {
+              order_id: order.id,
+              order_date: order.created_at,
+              pickup_location: "Primary",
+              billing_customer_name: order.customer_name || "Customer",
+              billing_last_name: "",
+              billing_address: order.delivery_address || "",
+              billing_phone: order.delivery_phone || "",
+              billing_email: order.customer_email || "",
+              shipping_is_billing: true,
+              order_items: (order.items || []).map((item) => ({
+                name: item.name || "Item",
+                quantity: item.quantity || 1,
+                price: item.price || 0,
+              })),
+              payment_method: order.payment_method === "COD" ? "COD" : "Prepaid",
+              sub_total: order.subtotal || 0,
+              weight: 0.5,
+            };
+
+            const shipmentResult = await provider.adapter.createShipment(shipmentPayload);
+            let awbResult = null;
+            if (shipmentResult.shipment_id) {
+              awbResult = await provider.adapter.assignCourier(shipmentResult.shipment_id);
+              await provider.adapter.schedulePickup(shipmentResult.shipment_id);
+              await provider.adapter.generateLabel(shipmentResult.shipment_id);
+            }
+
+            const providerShipmentId = shipmentResult.shipment_id ? String(shipmentResult.shipment_id) : null;
+
+            const { data: newShipment } = await db.from("shipments").insert({
+              order_id: order.id,
+              shipping_provider_id: providerRecord.id,
+              awb_code: awbResult?.awb_code || null,
+              status: "pending",
+              weight: 0.5,
+              is_cod: order.payment_method === "COD",
+              courier_name: awbResult?.courier_name || null,
+              provider_shipment_id: providerShipmentId,
+              service_type: awbResult?.courier_name ? 'standard' : null,
+              provider_response: shipmentResult,
+              pickup_requested: true,
+              pickup_requested_at: new Date().toISOString(),
+              label_generated: true,
+              origin_address: process.env.SHOP_ADDRESS || 'Primary Warehouse',
+              recipient_address_snapshot: JSON.parse(JSON.stringify({
+                name: order.customer_name,
+                phone: order.delivery_phone,
+                address: order.delivery_address,
+              })),
+            }).single();
+
+            // Link shipment to order and advance to with_carrier
+            if (newShipment) {
+              const { data: linkedOrder } = await db.from("orders").update({
+                shipment_id: newShipment.id,
+                fulfillment_status: "with_carrier",
+                shipped_at: order.shipped_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }).eq("id", order.id).single();
+
+              await db.from("order_status_history").insert({
+                order_id: order.id,
+                field_name: "shipment_id",
+                old_value: null,
+                new_value: newShipment.id,
+                changed_by: "system",
+                changed_at: new Date().toISOString(),
+              });
+
+              if (linkedOrder) finalOrder = linkedOrder;
+            }
+          }
+        }
+      } catch (shipErr) {
+        logger.error(`[orders] Auto-shipment creation failed for ${order.id}: ${shipErr.message}`);
+      }
+    }
+
+    // Notify on delivered
+    if (fulfillment_status === 'delivered') {
       const { data: user } = await db
         .from("users")
         .select("*")
@@ -929,70 +1069,34 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
         .single()
         .catch(() => ({}));
       if (user) {
-        notify(eventMap[delivery_status], updatedOrder, user, {
-          eta: delivery_days_text,
-        }).catch(() => { });
+        notify('ORDER_DELIVERED', finalOrder, user, {}).catch(() => { });
       }
     }
 
-    // Emit SSE event for updated order (admins + order owner)
+    // SSE broadcast
     try {
-      sendSseEvent(
-        "order:updated",
-        { order: updatedOrder },
-        (sub) =>
-          (sub.user && sub.user.role === "admin") ||
-          (sub.user && sub.user.userId === updatedOrder.user_id),
-      );
-    } catch (e) {
-      // ignore SSE errors
-    }
-
-    // Send invoice via WhatsApp when order is shipped or first confirmed
-    const shouldSendWhatsApp =
-      (delivery_status === "shipped" && !order.whatsapp_sent) ||
-      (["placed", "processing"].includes(delivery_status) &&
-        ["pending", "pending_upi_verification"].includes(order.delivery_status) &&
-        !order.whatsapp_sent);
-
-    if (shouldSendWhatsApp) {
-      try {
-        const { data: user } = await db
-          .from("users")
-          .select("*")
-          .eq("id", order.user_id)
-          .single();
-        if (user) {
-          const result = await sendInvoiceWhatsApp(updatedOrder, user, req);
-          if (result.success) {
-            await db
-              .from("orders")
-              .update({
-                whatsapp_sent: true,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", order.id);
-          }
-        }
-      } catch (waErr) {
-        logger.error(
-          "[orders] Failed to send WhatsApp invoice:",
-          waErr.message,
-        );
-      }
-    }
+      sendSseEvent("order:updated", { order: finalOrder },
+        (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === finalOrder.user_id));
+    } catch (e) { /* ignore */ }
 
     return success(res, {
-      message: "Order status updated successfully.",
-      order: updatedOrder,
+      message: fulfillment_status === 'ready_to_ship'
+        ? "Shipment created. Order moved to With Carrier."
+        : "Fulfillment status updated successfully.",
+      order: finalOrder,
     });
   } catch (error) {
-    return respondError(
-      res,
-      error.message || "Order status update failed",
-      500,
-    );
+    return respondError(res, error.message || "Fulfillment update failed", 500);
   }
+});
+
+// PUT /api/orders/:id/status — DEPRECATED
+// Manual delivery_status updates are replaced by the fulfillment pipeline.
+// Returns guidance on using PUT /orders/:id/fulfillment instead.
+router.put("/:id/status", authMiddleware, async (req, res) => {
+  return respondError(res,
+    "Manual delivery_status updates are deprecated. Use PUT /orders/:id/fulfillment with fulfillment_status " +
+    "(packing_required, packed, ready_to_ship, with_carrier, delivered) instead.", 400);
 });
 const cancelSchema = Joi.object({
   reason: Joi.string().trim().min(1).max(255).required().messages({
@@ -1016,8 +1120,27 @@ router.put("/:id/cancel", authMiddleware, validateBody(cancelSchema), async (req
       );
     }
 
+    const { data: beforeOrder } = await db
+      .from("orders")
+      .select("status, delivery_status, fulfillment_status")
+      .eq("id", req.params.id)
+      .single();
+
     const { reason, adminNote } = req.body;
     const result = await refundService.adminDirectCancellation(req.params.id, reason, adminNote, req.user);
+
+    // Note: adminDirectCancellation handles carrier cancellation, restock, and refund internally.
+    // Log to order_status_history
+    if (beforeOrder) {
+      await db.from("order_status_history").insert({
+        order_id: req.params.id,
+        field_name: "status",
+        old_value: beforeOrder.status,
+        new_value: "cancelled",
+        changed_by: req.user.userId || req.user.id || "admin",
+        changed_at: new Date().toISOString(),
+      }).catch(() => {});
+    }
 
     // SSE broadcast
     try {
@@ -1035,7 +1158,7 @@ router.put("/:id/cancel", authMiddleware, validateBody(cancelSchema), async (req
     return success(res, {
       message: result.refund
         ? "Order cancelled. Refund initiated — expect 5–7 business days."
-        : "Order cancelled successfully.",
+        : "Order cancelled successfully. No auto-refund — admin will process refund manually.",
       order: result.order,
       refund: result.refund,
     });
@@ -1338,7 +1461,7 @@ router.get("/share/:token", async (req, res) => {
 });
 
 // GET /api/orders/:id/track
-// Get tracking status. Simulates shipping status over time!
+// Get tracking status. Uses real shipment data if available, falls back to simulated tracking.
 router.get("/:id/track", authMiddleware, async (req, res) => {
   try {
     const { data: order, error } = await db
@@ -1362,7 +1485,78 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       );
     }
 
-    // Time difference in minutes since order creation
+    // Try to fetch real shipment tracking data
+    const { data: shipment } = await db
+      .from("shipments")
+      .select("*, shipping_provider_id")
+      .eq("order_id", order.id)
+      .single();
+
+    if (shipment) {
+      // Real shipment exists — build tracking from events
+      const { data: events } = await db
+        .from("shipment_tracking_events")
+        .select("*")
+        .eq("shipment_id", shipment.id)
+        .order("occurred_at", { ascending: true });
+
+      const timeline = [
+        {
+          status: "placed",
+          label: "Order Placed",
+          done: true,
+          time: order.created_at,
+        },
+      ];
+
+      if (events && events.length > 0) {
+        for (const ev of events) {
+          timeline.push({
+            status: ev.status,
+            label: ev.description || ev.status,
+            done: true,
+            time: ev.occurred_at,
+            location: ev.location,
+          });
+        }
+      }
+
+      const progressMap = {
+        pending: 10,
+        pickup_scheduled: 25,
+        picked_up: 40,
+        shipped: 60,
+        in_transit: 75,
+        out_for_delivery: 90,
+        delivered: 100,
+        cancelled: 0,
+        returned: 0,
+      };
+
+      return success(res, {
+        orderId: order.id,
+        paymentStatus: order.status,
+        paymentMethod: order.razorpay_order_id ? "Razorpay" : "Pending",
+        refundStatus: order.refund_status || "none",
+        refundAmount: order.total_refunded_amount || 0,
+        paymentId: order.razorpay_payment_id || "",
+        transactionId: order.transaction_id || order.razorpay_payment_id || "",
+        deliveryStatus: shipment.status,
+        fulfillmentStatus: order.fulfillment_status || null,
+        shippedAt: order.shipped_at || null,
+        deliveredAt: order.delivered_at || null,
+        cancelledAt: order.cancelled_at || null,
+        cancelledBy: order.cancelled_by || null,
+        progressPercent: progressMap[shipment.status] || 10,
+        trackingMessage: `Shipment is ${shipment.status}. Courier: ${shipment.courier_name || "N/A"}${shipment.awb_code ? `. AWB: ${shipment.awb_code}` : ""}`,
+        cancelReason: order.cancel_reason || "",
+        timestamp: new Date().toISOString(),
+        timeline,
+        hasRealTracking: true,
+      });
+    }
+
+    // Fallback: simulated tracking (for demo / legacy orders)
     const diffMs = Date.now() - new Date(order.created_at).getTime();
     const diffMin = diffMs / (1000 * 60);
 
@@ -1399,10 +1593,8 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       simulatedIdx > currentIdx
     ) {
       responseStatus = statusResult;
-      await db
-        .from("orders")
-        .update({ delivery_status: statusResult })
-        .eq("id", order.id);
+      // NOTE: Simulated tracking no longer writes to DB.
+      // Real tracking is driven by carrier webhooks.
     }
 
     const getStatusDetails = (statusVal) => {
@@ -1500,11 +1692,17 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       paymentId: order.razorpay_payment_id || "",
       transactionId: order.transaction_id || order.razorpay_payment_id || "",
       deliveryStatus: responseStatus,
+      fulfillmentStatus: order.fulfillment_status || null,
+      shippedAt: order.shipped_at || null,
+      deliveredAt: order.delivered_at || null,
+      cancelledAt: order.cancelled_at || null,
+      cancelledBy: order.cancelled_by || null,
       progressPercent: responseProgress,
       trackingMessage: responseMessage,
       cancelReason: order.cancel_reason || "",
       timestamp: new Date().toISOString(),
       timeline,
+      hasRealTracking: false,
     });
   } catch (error) {
     return respondError(res, error.message || "Order tracking failed", 500);
@@ -1664,7 +1862,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
 });
 
 // POST /api/orders/admin/approve/:id
-// Admin approves a PENDING_APPROVAL order → PLACED
+// Admin approves a PENDING_APPROVAL order → PLACED, triggers shipment creation
 router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== "admin") {
@@ -1672,7 +1870,64 @@ router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
     }
 
     const { adminNote } = req.body;
-    const updatedOrder = await refundService.approveCancellation(req.params.id, adminNote || "", req.user);
+
+    const { data: order } = await db
+      .from("orders")
+      .select("*")
+      .eq("id", req.params.id)
+      .single();
+
+    if (!order) {
+      return respondError(res, "Order not found.", 404);
+    }
+
+    if (order.admin_approval_status !== "pending") {
+      return respondError(res, "Order is not pending approval.", 400);
+    }
+
+    const { data: updatedOrder, error: updateError } = await db
+      .from("orders")
+      .update({
+        admin_approval_status: "approved",
+        fulfillment_status: "pending_fulfillment",
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", req.params.id)
+      .single();
+
+    if (updateError) {
+      return respondError(res, updateError.message || "Failed to approve order", 500);
+    }
+
+    await logAuditAction({
+      orderId: order.id,
+      action: AUDIT_ACTIONS.ORDER_STATUS_CHANGED,
+      performedBy: req.user,
+      previousState: "pending",
+      newState: "approved",
+      metadata: { adminNote }
+    });
+
+    await db.from("order_status_history").insert({
+      order_id: order.id,
+      field_name: "admin_approval_status",
+      old_value: "pending",
+      new_value: "approved",
+      changed_by: req.user.userId || req.user.id || "admin",
+      changed_at: new Date().toISOString(),
+    });
+
+    const { data: user } = await db
+      .from("users")
+      .select("*")
+      .eq("id", order.user_id)
+      .single();
+
+    await notify("ORDER_APPROVED", updatedOrder, user, { adminNote });
+
+    // NOTE: Shipment creation no longer happens at approval.
+    // Admin must move through fulfillment: approve → pack → ready_to_ship
+    // Shipment auto-creates at ready_to_ship transition.
 
     // SSE broadcast
     try {
@@ -1711,7 +1966,80 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
     }
 
     const { reason, adminNote } = req.body;
-    const updatedOrder = await refundService.rejectCancellation(req.params.id, reason, adminNote || "", req.user);
+
+    const { data: order } = await db
+      .from("orders")
+      .select("*")
+      .eq("id", req.params.id)
+      .single();
+
+    if (!order) {
+      return respondError(res, "Order not found.", 404);
+    }
+
+    if (order.admin_approval_status !== "pending") {
+      return respondError(res, "Only orders pending approval can be rejected.", 400);
+    }
+
+    const isPaid = order.status === "paid" && (order.razorpay_payment_id || order.payment_method === "UPI QR");
+
+    const { data: updatedOrder, error: updateError } = await db
+      .from("orders")
+      .update({
+        status: "cancelled",
+        delivery_status: "cancelled",
+        admin_approval_status: "rejected",
+        cancel_reason: reason,
+        cancelled_by: "admin",
+        cancelled_at: new Date().toISOString(),
+        refund_status: isPaid ? "pending" : "none",
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", req.params.id)
+      .single();
+
+    if (updateError) {
+      return respondError(res, updateError.message || "Failed to reject order", 500);
+    }
+
+    await logAuditAction({
+      orderId: order.id,
+      action: AUDIT_ACTIONS.ORDER_STATUS_CHANGED,
+      performedBy: req.user,
+      previousState: "pending",
+      newState: "rejected",
+      metadata: { reason, adminNote }
+    });
+
+    const { restockOrderItems } = require("../modules/orders/OrderStateService");
+    await restockOrderItems(order);
+
+    if (isPaid) {
+      const { createRefund } = require("../modules/refunds/RefundRepository");
+      try {
+        await createRefund({
+          order_id: order.id,
+          user_id: order.user_id,
+          razorpay_payment_id: order.razorpay_payment_id || null,
+          razorpay_refund_id: null,
+          amount: order.total,
+          refund_reason: reason,
+          status: "pending",
+          cancelled_by: "admin",
+          admin_note: adminNote
+        });
+      } catch (refundErr) {
+        logger.error(`[orders] Failed to create refund record for rejected order ${order.id}:`, refundErr.message);
+      }
+    }
+
+    const { data: user } = await db
+      .from("users")
+      .select("*")
+      .eq("id", order.user_id)
+      .single();
+
+    await notify("ORDER_REJECTED", updatedOrder, user, { reason, adminNote });
 
     // SSE broadcast
     try {

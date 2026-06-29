@@ -18,6 +18,7 @@ import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
 import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal } from './utils/notify.js';
 import { isValidIndianPhone } from './utils/validation.js';
 import { createEventSourceWithAuth } from './utils/auth.js';
+import { initDeliveryCheck } from './shipping/deliveryCheck.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
@@ -198,6 +199,15 @@ if (document.readyState === 'loading') {
   initApp();
 }
 
+// Retry product fetch when tab becomes visible (handles backend coming online late)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.products.length === 0) {
+    _productRetryCount = 0;
+    if (_productRetryTimer) { clearTimeout(_productRetryTimer); _productRetryTimer = null; }
+    fetchProducts();
+  }
+});
+
 // Listen for category updates from admin (cross-tab)
 try {
   const bc = new BroadcastChannel('spore-categories');
@@ -209,37 +219,6 @@ try {
   });
 } catch (err) {
   // BroadcastChannel might not be supported; ignore
-}
-
-// Connect to server-sent events to receive order updates cross-browser
-try {
-  if (state && state.token) {
-    const esUrl = `${API_BASE}/orders/events`;
-    const orderEs = createEventSourceWithAuth(esUrl, state.token);
-    orderEs.addEventListener('order:updated', (ev) => {
-      try {
-        const payload = JSON.parse(ev.data || '{}');
-        const updated = payload.order;
-        if (!updated) return;
-        // If this client owns the order, refresh user's orders
-        if (state.user && state.user.userId === updated.user_id) {
-          fetchOrders();
-        }
-        // If admin, fetch admin orders too (admin page may be open)
-        if (state.user && state.user.role === 'admin') {
-          // admin page handles its own SSE, but refresh products/orders if present
-          fetchOrders();
-        }
-      } catch (e) {
-        /* ignore */
-      }
-    });
-    orderEs.addEventListener('error', () => {
-      // noop
-    });
-  }
-} catch (e) {
-  // ignore
 }
 
 let orderEs = null;
@@ -969,71 +948,16 @@ function initEventListeners() {
     mobileAuthBtn.addEventListener('click', (e) => {
       e.preventDefault();
       mobileNav.classList.add('hidden');
-      authModal.open('buyer');
+      authModal.open('admin');
     });
   }
 
-  // Topbar login button (header)
+  // Topbar admin login button (buyer login is at checkout only)
   const topbarAuthBtn = document.getElementById('btn-open-auth-top');
   if (topbarAuthBtn) {
     topbarAuthBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      const existing = document.getElementById('auth-choice-menu');
-      if (existing) {
-        existing.remove();
-        return;
-      }
-
-      const menu = document.createElement('div');
-      menu.id = 'auth-choice-menu';
-      menu.style.position = 'absolute';
-      menu.style.background = '#fff';
-      menu.style.border = '1px solid rgba(0,0,0,0.12)';
-      menu.style.borderRadius = '10px';
-      menu.style.boxShadow = '0 14px 35px rgba(0,0,0,0.12)';
-      menu.style.padding = '10px';
-      menu.style.zIndex = '9999';
-      menu.style.minWidth = '200px';
-      menu.style.display = 'grid';
-      menu.style.gap = '8px';
-      menu.innerHTML = `
-        <button class="btn btn-secondary-glow" id="auth-choice-user" style="width:100%;">User Login</button>
-        <button class="btn btn-secondary" id="auth-choice-trainee" style="width:100%;">Trainee / Grower Login</button>
-        <div style="border-top:1px solid #eee;margin:4px 0"></div>
-        <button class="btn btn-secondary" id="auth-choice-admin" style="width:100%;font-size:0.85rem;">Admin Login</button>
-      `;
-      document.body.appendChild(menu);
-
-      const rect = topbarAuthBtn.getBoundingClientRect();
-      menu.style.top = `${rect.bottom + window.scrollY + 8}px`;
-      menu.style.left = `${Math.max(8, rect.right + window.scrollX - menu.offsetWidth)}px`;
-
-      const closeMenu = () => {
-        if (menu.parentElement) menu.parentElement.removeChild(menu);
-        document.removeEventListener('click', outsideClickListener);
-      };
-
-      const outsideClickListener = (event) => {
-        if (!menu.contains(event.target) && event.target !== topbarAuthBtn) {
-          closeMenu();
-        }
-      };
-
-      document.getElementById('auth-choice-user')?.addEventListener('click', () => {
-        closeMenu();
-        authModal.open('buyer');
-      });
-      document.getElementById('auth-choice-trainee')?.addEventListener('click', () => {
-        closeMenu();
-        traineeAuthModal.open(() => {
-          window.location.hash = '#training-courses';
-        });
-      });
-      document.getElementById('auth-choice-admin')?.addEventListener('click', () => {
-        closeMenu();
-        authModal.open('admin');
-      });
-      setTimeout(() => document.addEventListener('click', outsideClickListener), 0);
+      authModal.open('admin');
     });
   }
 
@@ -1236,6 +1160,10 @@ function updateAuthHeaderUI() {
 // ==========================================================================
 let _shopPagination = null;
 
+let _productRetryTimer = null;
+let _productRetryCount = 0;
+const MAX_PRODUCT_RETRIES = 5;
+
 async function fetchProducts() {
   try {
     const params = new URLSearchParams();
@@ -1263,6 +1191,7 @@ async function fetchProducts() {
       _shopPagination = null;
     }
     renderProducts();
+    _productRetryCount = 0;
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
     document.getElementById('product-grid').innerHTML = `
@@ -1271,6 +1200,12 @@ async function fetchProducts() {
         <p>Failed to retrieve products. Please refresh the page.</p>
       </div>
     `;
+    // Auto-retry on network errors
+    if (_productRetryCount < MAX_PRODUCT_RETRIES) {
+      _productRetryCount += 1;
+      const delay = Math.min(1000 * Math.pow(2, _productRetryCount), 16000);
+      _productRetryTimer = setTimeout(() => fetchProducts(), delay);
+    }
   }
 }
 
@@ -1341,6 +1276,7 @@ function renderProducts() {
                       <span class="carousel-dot ${i === 0 ? 'active' : ''}" data-index="${i}" data-carousel="${carouselId}"></span>
                     `).join('')}
                   </div>
+                  <span class="carousel-counter">1/${imgCount}</span>
                 ` : ''}
               </div>
               <div class="product-badges-overlay">
@@ -1428,7 +1364,23 @@ function renderProducts() {
     });
   });
 
-  // Product carousel interactions
+  // --- Carousel slide helper ---
+  function _goToSlide(carousel, index) {
+    const track = carousel.querySelector('.carousel-track');
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    const dots = carousel.querySelectorAll('.carousel-dot');
+    const counter = carousel.querySelector('.carousel-counter');
+    if (!track || slides.length === 0) return;
+    const count = slides.length;
+    const idx = ((index % count) + count) % count;
+    track.style.transform = `translateX(-${idx * 100}%)`;
+    slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+    dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+    if (counter) counter.textContent = `${idx + 1}/${count}`;
+    carousel.dataset.current = idx;
+  }
+
+  // Prev / Next buttons
   grid.querySelectorAll('.carousel-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1436,35 +1388,22 @@ function renderProducts() {
       const carousel = document.getElementById(carouselId);
       if (!carousel) return;
       const slides = carousel.querySelectorAll('.carousel-slide');
-      const dots = carousel.querySelectorAll('.carousel-dot');
       if (slides.length === 0) return;
-      const currentIndex = carousel.querySelector('.carousel-slide.active') ? Array.from(slides).indexOf(carousel.querySelector('.carousel-slide.active')) : 0;
-      let newIndex = currentIndex;
-      if (btn.classList.contains('carousel-prev')) {
-        newIndex = (currentIndex - 1 + slides.length) % slides.length;
-      } else {
-        newIndex = (currentIndex + 1) % slides.length;
-      }
-      carousel.querySelectorAll('.carousel-slide').forEach(s => s.classList.remove('active'));
-      carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
-      if (slides[newIndex]) slides[newIndex].classList.add('active');
-      if (dots[newIndex]) dots[newIndex].classList.add('active');
+      const currentIdx = parseInt(carousel.dataset.current || '0', 10);
+      const dir = btn.classList.contains('carousel-prev') ? -1 : 1;
+      _goToSlide(carousel, currentIdx + dir);
     });
   });
 
+  // Dot clicks
   grid.querySelectorAll('.carousel-dot').forEach((dot) => {
     dot.addEventListener('click', (e) => {
       e.stopPropagation();
       const carouselId = dot.getAttribute('data-carousel');
-      const index = parseInt(dot.getAttribute('data-index'), 10);
+      const idx = parseInt(dot.getAttribute('data-index'), 10);
       const carousel = document.getElementById(carouselId);
       if (!carousel) return;
-      const slides = carousel.querySelectorAll('.carousel-slide');
-      const dots = carousel.querySelectorAll('.carousel-dot');
-      carousel.querySelectorAll('.carousel-slide').forEach(s => s.classList.remove('active'));
-      carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
-      if (slides[index]) slides[index].classList.add('active');
-      dot.classList.add('active');
+      _goToSlide(carousel, idx);
     });
   });
 
@@ -1495,22 +1434,14 @@ function renderProducts() {
     const card = carousel.closest('.premium-card');
     if (!card) return;
     const slides = carousel.querySelectorAll('.carousel-slide');
-    const dots = carousel.querySelectorAll('.carousel-dot');
     if (slides.length <= 1) return;
     let autoInterval = null;
 
-    function advanceSlide() {
-      const current = carousel.querySelector('.carousel-slide.active');
-      const idx = current ? Array.from(slides).indexOf(current) : 0;
-      const next = (idx + 1) % slides.length;
-      carousel.querySelectorAll('.carousel-slide').forEach(s => s.classList.remove('active'));
-      carousel.querySelectorAll('.carousel-dot').forEach(d => d.classList.remove('active'));
-      if (slides[next]) slides[next].classList.add('active');
-      if (dots[next]) dots[next].classList.add('active');
-    }
-
     card.addEventListener('mouseenter', () => {
-      autoInterval = setInterval(advanceSlide, 2500);
+      autoInterval = setInterval(() => {
+        const currentIdx = parseInt(carousel.dataset.current || '0', 10);
+        _goToSlide(carousel, currentIdx + 1);
+      }, 2500);
     });
 
     card.addEventListener('mouseleave', () => {
@@ -1819,7 +1750,16 @@ function showPremiumProductModal(productId) {
   const curPrice = defVar ? defVar.price : (product.price || 0);
   const curMrp = defVar && defVar.mrp_price ? defVar.mrp_price : (product.mrp_price || 0);
   const discount = curMrp > curPrice ? Math.round((1 - curPrice / curMrp) * 100) : 0;
-  const info = getProductInfo(product.category);
+  const defaultInfo = getProductInfo(product.category);
+  const info = {
+    certificates: (product.certificates && product.certificates.length > 0) ? product.certificates : defaultInfo.certificates,
+    agriInfo: (product.highlights && product.highlights.length > 0) ? product.highlights : defaultInfo.agriInfo,
+    storage: product.storage_handling || defaultInfo.storage,
+    warranty: product.warranty_policy || defaultInfo.warranty,
+    returnPolicy: product.return_policy || defaultInfo.returnPolicy,
+    shipping: product.shipping_info || defaultInfo.shipping,
+    compliance: product.compliance_info || defaultInfo.compliance,
+  };
 
   const varHTML = varOpts ? `
     <div class="ppm-variants">
@@ -1842,25 +1782,25 @@ function showPremiumProductModal(productId) {
         </div>` : ''}
       </div>
       <div class="ppm-info">
-        <div class="ppm-meta-row">
+        <div class="ppm-meta-row scroll-reveal" style="transition-delay: 0ms">
           <span class="ppm-cat"><i class="fa-solid fa-tag"></i> ${catName}</span>
           ${discount > 0 ? `<span class="ppm-badge" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">${discount}% OFF</span>` : ''}
           <span class="ppm-gst">GST ${product.gst_rate || 0}%</span>
         </div>
 
-        <h1 class="ppm-title">${product.name}</h1>
+        <h1 class="ppm-title scroll-reveal" style="transition-delay: 60ms">${product.name}</h1>
 
-        <div class="ppm-price-row">
+        <div class="ppm-price-row scroll-reveal" style="transition-delay: 120ms">
           <span class="ppm-price" id="ppm-price">₹${curPrice}</span>
           ${curMrp > curPrice ? `<span class="ppm-mrp" id="ppm-mrp">₹${curMrp}</span>` : ''}
           ${discount > 0 ? `<span class="ppm-save">Save ₹${curMrp - curPrice}</span>` : ''}
         </div>
 
-        <p class="ppm-desc">${product.description}</p>
+        <p class="ppm-desc scroll-reveal" style="transition-delay: 170ms">${product.description}</p>
 
-        ${varHTML}
+        ${varHTML ? varHTML.replace('class="ppm-variants"', 'class="ppm-variants scroll-reveal" style="transition-delay: 220ms"') : ''}
 
-        <div class="ppm-qty-row">
+        <div class="ppm-qty-row scroll-reveal" style="transition-delay: 270ms">
           <label class="ppm-section-label">Quantity</label>
           <div class="ppm-qty">
             <button class="ppm-qty-btn" id="ppm-qty-m">−</button>
@@ -1869,16 +1809,18 @@ function showPremiumProductModal(productId) {
           </div>
         </div>
 
-        <div class="ppm-actions">
+        <div class="ppm-actions scroll-reveal" style="transition-delay: 320ms">
           <button class="btn btn-primary" id="ppm-add-cart"><i class="fa-solid fa-bag-shopping"></i> Add to Cart</button>
           <button class="btn btn-secondary-glow" id="ppm-buy-now"><i class="fa-solid fa-bolt"></i> Buy Now</button>
         </div>
 
-        <div class="ppm-certs">
+        <div class="ppm-delivery-check scroll-reveal" id="ppm-delivery-check" style="transition-delay: 350ms"></div>
+
+        <div class="ppm-certs scroll-reveal" style="transition-delay: 370ms">
           ${info.certificates.map(c => `<span class="ppm-cert"><i class="${c.icon}"></i> ${c.label}</span>`).join('')}
         </div>
 
-        <div class="ppm-accordion">
+        <div class="ppm-accordion scroll-reveal" style="transition-delay: 420ms">
           <div class="ppm-acc-item open">
             <button class="ppm-acc-hdr"><i class="fa-solid fa-leaf"></i> Product Information <i class="fa-solid fa-chevron-down ppm-acc-arrow"></i></button>
             <div class="ppm-acc-body">
@@ -1895,7 +1837,7 @@ function showPremiumProductModal(productId) {
           </div>
         </div>
 
-        <div class="ppm-policies">
+        <div class="ppm-policies scroll-reveal" style="transition-delay: 470ms">
           <div class="ppm-pol"><i class="fa-solid fa-shield-halved"></i><div><strong>Warranty</strong><span>${info.warranty}</span></div></div>
           <div class="ppm-pol"><i class="fa-solid fa-rotate-left"></i><div><strong>Returns</strong><span>${info.returnPolicy}</span></div></div>
           <div class="ppm-pol"><i class="fa-solid fa-truck"></i><div><strong>Shipping</strong><span>${info.shipping}</span></div></div>
@@ -1906,11 +1848,30 @@ function showPremiumProductModal(productId) {
   modal.classList.add('active');
   document.body.style.overflow = 'hidden';
 
-  // Mark info panel as entered after entrance animation completes
+  // ── Scroll-reveal: observe info children within their scroll container ──
   const ppmInfo = document.querySelector('.ppm-info');
-  if (ppmInfo) {
-    ppmInfo.classList.remove('entered');
-    setTimeout(() => ppmInfo.classList.add('entered'), 600);
+  if (ppmInfo && 'IntersectionObserver' in window) {
+    const srObs = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('revealed');
+          srObs.unobserve(entry.target);
+        }
+      });
+    }, { root: ppmInfo, threshold: 0.12, rootMargin: '0px 0px -20px 0px' });
+    ppmInfo.querySelectorAll('.scroll-reveal').forEach(el => {
+      // Reveal immediately if already above the fold
+      const rect = el.getBoundingClientRect();
+      const infoRect = ppmInfo.getBoundingClientRect();
+      if (rect.top < infoRect.bottom - 40) {
+        el.classList.add('revealed');
+      } else {
+        srObs.observe(el);
+      }
+    });
+  } else {
+    // Fallback: reveal all immediately
+    document.querySelectorAll('.ppm-info .scroll-reveal').forEach(el => el.classList.add('revealed'));
   }
 
   // ── Init zoom ──
@@ -2006,6 +1967,25 @@ function showPremiumProductModal(productId) {
     toggleCartDrawer(false);
     window.location.hash = 'checkout';
   });
+
+  // ── Init delivery check widget ──
+  const dcContainer = document.getElementById('ppm-delivery-check');
+  if (dcContainer) {
+    const defaultWeight = varOpts && varOpts[0] ? varOpts[0].weight : 0.5;
+    const defaultUnit = varOpts && varOpts[0] ? varOpts[0].unit : 'g';
+    const weightKg = defaultUnit === 'kg' ? defaultWeight : defaultWeight / 1000;
+    initDeliveryCheck(dcContainer, { weight: Math.max(weightKg, 0.1), cod: false });
+
+    // Update weight when variant changes
+    document.querySelectorAll('.ppm-chip').forEach(c => {
+      c.addEventListener('click', () => {
+        const w = parseFloat(c.dataset.w);
+        const u = c.dataset.u;
+        const wKg = u === 'kg' ? w : w / 1000;
+        initDeliveryCheck(dcContainer, { weight: Math.max(wKg, 0.1), cod: false });
+      });
+    });
+  }
 }
 
 // Close modal
@@ -2682,12 +2662,22 @@ function initTrainingRegister() {
     try {
       emailOtpBtn.disabled = true;
       emailOtpBtn.textContent = 'Sending…';
-      await authApi.requestOtp(email, 'grower', name);
+      const result = await authApi.requestOtp(email, 'grower', name);
       // persist selected training role locally so courses page can use it even before login
       localStorage.setItem('training_role', trainingRole);
       pendingContact = email;
       pendingMethod = 'email';
       otpArea.style.display = 'block';
+      // Auto-inject OTP in dev/mock mode
+      if (result && result.otp && otpInput) {
+        otpInput.value = result.otp;
+        const hint = document.getElementById('grower-otp-hint');
+        if (hint) { hint.textContent = `🔑 Dev OTP: ${result.otp} (auto-filled)`; hint.style.display = 'block'; }
+        // Auto-submit OTP verification
+        setTimeout(() => {
+          verifyBtn?.click();
+        }, 300);
+      }
     } catch (err) {
       showError(err.message || 'Failed to send OTP');
     } finally {
@@ -2699,20 +2689,21 @@ function initTrainingRegister() {
   phoneOtpBtn?.addEventListener('click', async (e) => {
     e.preventDefault();
     clearError();
-    const phone = (phoneEl?.value || '').trim();
+    const raw = phoneEl?.value;
+    const digits = (raw || '').replace(/\D/g, '').slice(-10);
     const country = phoneCountryEl?.value || '+91';
     const name = (nameEl?.value || '').trim();
     const trainingRole = roleEl?.value || 'trainee';
-    if (!isValidIndianPhone(phone)) return showError('Enter a valid Indian phone number (e.g. +91 9876543210).');
+    if (!digits || !/^[6-9]\d{9}$/.test(digits)) return showError('Enter a valid Indian phone number (e.g. +91 9876543210).');
     try {
       phoneOtpBtn.disabled = true;
       phoneOtpBtn.textContent = 'Sending…';
-      const fullPhone = `${country}${phone}`;
-      const mockEmail = `${phone.replace(/\D/g, '')}@phone.sporekart`;
-      await authApi.requestOtp(
+      const fullPhone = `${country}${digits}`;
+      const mockEmail = `${digits}@phone.sporekart`;
+      const result = await authApi.requestOtp(
         mockEmail,
         'grower',
-        name || `User ${phone.slice(-4)}`,
+        name || `User ${digits.slice(-4)}`,
       );
       localStorage.setItem('training_role', trainingRole);
       pendingContact = mockEmail;
@@ -2720,7 +2711,17 @@ function initTrainingRegister() {
       lastPhone = fullPhone;
       otpArea.style.display = 'block';
       // Autofill local fields with phone value
-      if (phoneEl && !phoneEl.value) phoneEl.value = phone;
+      if (phoneEl && !phoneEl.value) phoneEl.value = digits;
+      // Auto-inject OTP in dev/mock mode
+      if (result && result.otp && otpInput) {
+        otpInput.value = result.otp;
+        const hint = document.getElementById('grower-otp-hint');
+        if (hint) { hint.textContent = `🔑 Dev OTP: ${result.otp} (auto-filled)`; hint.style.display = 'block'; }
+        // Auto-submit OTP verification
+        setTimeout(() => {
+          verifyBtn?.click();
+        }, 300);
+      }
     } catch (err) {
       showError(err.message || 'Failed to send OTP');
     } finally {
@@ -3472,56 +3473,61 @@ function renderCheckoutLoginSection() {
   if (!formPanel) return;
 
   formPanel.innerHTML = `
-    <div class="checkout-auth-section">
-      <div class="checkout-auth-header">
-        <i class="fa-solid fa-user-lock" style="font-size:2rem;color:var(--green-mid);"></i>
-        <h3 style="margin:8px 0 4px;">Login to Checkout</h3>
-        <p style="color:var(--text-muted);font-size:0.9rem;">Verify your identity to proceed with your order</p>
+    <div class="co-auth-wrap">
+      <!-- Step progress -->
+      <div class="co-steps">
+        <div class="co-step active"><span class="co-step-num">1</span><span class="co-step-label">Verify</span></div>
+        <div class="co-step-line"></div>
+        <div class="co-step"><span class="co-step-num">2</span><span class="co-step-label">Details</span></div>
+        <div class="co-step-line"></div>
+        <div class="co-step"><span class="co-step-num">3</span><span class="co-step-label">Payment</span></div>
       </div>
 
-      <div class="checkout-auth-tabs" style="display:flex;gap:8px;margin:16px 0;">
-        <button class="btn checkout-auth-tab active" data-method="phone" style="flex:1;padding:10px;border:2px solid var(--green-mid);background:var(--green-mid);color:#fff;border-radius:8px;cursor:pointer;">
-          <i class="fa-solid fa-mobile-screen"></i> Phone OTP
-        </button>
-        <button class="btn checkout-auth-tab" data-method="email" style="flex:1;padding:10px;border:2px solid var(--border);background:transparent;color:var(--text-dark);border-radius:8px;cursor:pointer;">
-          <i class="fa-solid fa-envelope"></i> Email OTP
-        </button>
-      </div>
+      <div class="co-auth-card">
+        <div class="co-auth-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
+        <h3 class="co-auth-title">Verify your phone</h3>
+        <p class="co-auth-subtitle" id="co-auth-subtitle">Enter your mobile number to receive a secure OTP</p>
 
-      <div id="checkout-auth-step1">
-        <div id="checkout-auth-phone-group">
-          <label style="display:block;margin-bottom:6px;font-weight:600;">Phone Number</label>
-          <div style="display:flex;gap:8px;">
-            <input type="tel" id="checkout-auth-contact" placeholder="Enter phone number" maxlength="10" style="flex:1;padding:12px;border:1.5px solid var(--border);border-radius:8px;outline:none;" />
-            <button class="btn btn-primary" id="checkout-auth-send-otp" style="white-space:nowrap;">Send OTP</button>
+        <!-- Step 1: Phone entry -->
+        <div id="co-step-phone">
+          <div class="co-input-row">
+            <div class="co-country-badge">🇮🇳 +91</div>
+            <input type="tel" id="co-auth-phone" inputmode="numeric" maxlength="16"
+              placeholder="10-digit mobile number"
+              class="co-phone-input" autocomplete="tel-national" />
           </div>
+          <button class="co-btn-primary" id="co-send-otp-btn">
+            <i class="fa-solid fa-paper-plane"></i> Send OTP
+          </button>
         </div>
-        <div id="checkout-auth-email-group" class="hidden" style="margin-top:12px;">
-          <label style="display:block;margin-bottom:6px;font-weight:600;">Email Address</label>
-          <div style="display:flex;gap:8px;">
-            <input type="email" id="checkout-auth-email" placeholder="Enter email address" style="flex:1;padding:12px;border:1.5px solid var(--border);border-radius:8px;outline:none;" />
-            <button class="btn btn-primary" id="checkout-auth-send-email-otp" style="white-space:nowrap;">Send OTP</button>
+
+        <!-- Step 2: OTP entry (hidden initially) -->
+        <div id="co-step-otp" class="hidden">
+          <div class="co-otp-boxes" id="co-otp-boxes">
+            <input type="text" inputmode="numeric" maxlength="1" class="co-otp-box" id="co-otp-box-0" data-otp-idx="0" />
+            <input type="text" inputmode="numeric" maxlength="1" class="co-otp-box" data-otp-idx="1" />
+            <input type="text" inputmode="numeric" maxlength="1" class="co-otp-box" data-otp-idx="2" />
+            <input type="text" inputmode="numeric" maxlength="1" class="co-otp-box" data-otp-idx="3" />
+            <input type="text" inputmode="numeric" maxlength="1" class="co-otp-box" data-otp-idx="4" />
+            <input type="text" inputmode="numeric" maxlength="1" class="co-otp-box" data-otp-idx="5" />
           </div>
+          <!-- Hidden combined field for backward-compat with E2E tests -->
+          <input type="hidden" id="checkout-auth-otp" />
+
+          <div class="co-resend-row">
+            <span id="co-resend-timer" class="co-resend-countdown"></span>
+            <a href="#" id="co-resend-link" class="co-resend-link hidden">Resend OTP</a>
+          </div>
+          <button class="co-btn-primary" id="co-verify-otp-btn">
+            <i class="fa-solid fa-shield-check"></i> Verify &amp; Continue
+          </button>
+          <button class="co-btn-ghost" id="co-change-phone-btn">← Change phone number</button>
         </div>
-        <p style="margin-top:8px;font-size:0.85rem;color:var(--text-muted);">
-          <a href="#" id="checkout-auth-toggle-method" style="color:var(--green-mid);">or use Email OTP instead</a>
-        </p>
+
+        <div class="co-auth-error hidden" id="co-auth-error"></div>
       </div>
 
-      <div id="checkout-auth-step2" class="hidden" style="margin-top:16px;">
-        <p id="checkout-auth-otp-subtitle" style="margin-bottom:8px;font-size:0.9rem;color:var(--text-muted);">Enter the 6-digit code sent</p>
-        <div style="display:flex;gap:8px;">
-          <input type="text" id="checkout-auth-otp" placeholder="Enter OTP" maxlength="6" style="flex:1;padding:12px;border:1.5px solid var(--border);border-radius:8px;outline:none;text-align:center;letter-spacing:0.3rem;font-size:1.1rem;" />
-          <button class="btn btn-primary" id="checkout-auth-verify-btn">Verify</button>
-        </div>
-        <p style="margin-top:8px;font-size:0.85rem;">
-          <a href="#" id="checkout-auth-back-step1" style="color:var(--text-muted);">Change phone/email</a>
-        </p>
-      </div>
-
-      <div class="auth-error-msg hidden" id="checkout-auth-error" style="margin-top:12px;padding:8px 12px;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:0.85rem;"></div>
-
-      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+      <div class="co-back-row">
         <button class="btn btn-secondary btn-block" id="checkout-back-cart-btn">
           <i class="fa-solid fa-arrow-left"></i> Back to cart
         </button>
@@ -3529,287 +3535,373 @@ function renderCheckoutLoginSection() {
     </div>
   `;
 
-  bindCheckoutAuthEvents();
+  _bindCoAuthEvents();
 }
 
-function bindCheckoutAuthEvents() {
-  let activeMethod = 'phone';
-  let pendingContact = null;
-  let mockOtp = null;
+function _bindCoAuthEvents() {
+  let _pendingEmail = '';
+  let _pendingPhone = '';
+  let _resendName = '';
+  let _resendTimerHandle = null;
 
-  const tabPhone = document.querySelector('.checkout-auth-tab[data-method="phone"]');
-  const tabEmail = document.querySelector('.checkout-auth-tab[data-method="email"]');
-  const phoneGroup = document.getElementById('checkout-auth-phone-group');
-  const emailGroup = document.getElementById('checkout-auth-email-group');
-  const step1 = document.getElementById('checkout-auth-step1');
-  const step2 = document.getElementById('checkout-auth-step2');
-  const contactInput = document.getElementById('checkout-auth-contact');
-  const emailInput = document.getElementById('checkout-auth-email');
-  const otpInput = document.getElementById('checkout-auth-otp');
-  const sendBtn = document.getElementById('checkout-auth-send-otp');
-  const sendEmailBtn = document.getElementById('checkout-auth-send-email-otp');
-  const verifyBtn = document.getElementById('checkout-auth-verify-btn');
-  const toggleLink = document.getElementById('checkout-auth-toggle-method');
-  const backLink = document.getElementById('checkout-auth-back-step1');
-  const errorEl = document.getElementById('checkout-auth-error');
-  const otpSubtitle = document.getElementById('checkout-auth-otp-subtitle');
+  const phoneInput  = document.getElementById('co-auth-phone');
+  const sendBtn     = document.getElementById('co-send-otp-btn');
+  const stepPhone   = document.getElementById('co-step-phone');
+  const stepOtp     = document.getElementById('co-step-otp');
+  const verifyBtn   = document.getElementById('co-verify-otp-btn');
+  const changeBtn   = document.getElementById('co-change-phone-btn');
+  const resendLink  = document.getElementById('co-resend-link');
+  const resendTimer = document.getElementById('co-resend-timer');
+  const errorEl     = document.getElementById('co-auth-error');
+  const subtitle    = document.getElementById('co-auth-subtitle');
   const backCartBtn = document.getElementById('checkout-back-cart-btn');
 
-  if (backCartBtn) {
-    backCartBtn.addEventListener('click', () => toggleCartDrawer(true));
-  }
+  if (backCartBtn) backCartBtn.addEventListener('click', () => toggleCartDrawer(true));
 
   function showError(msg) {
-    if (errorEl) {
-      errorEl.textContent = msg;
-      errorEl.classList.remove('hidden');
-    }
+    if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
   }
-
   function hideError() {
     if (errorEl) errorEl.classList.add('hidden');
   }
 
-  function switchMethod(method) {
-    activeMethod = method;
-    if (tabPhone && tabEmail) {
-      tabPhone.className = `btn checkout-auth-tab ${method === 'phone' ? 'active' : ''}`;
-      tabEmail.className = `btn checkout-auth-tab ${method === 'email' ? 'active' : ''}`;
-      tabPhone.style.background = method === 'phone' ? 'var(--green-mid)' : 'transparent';
-      tabPhone.style.color = method === 'phone' ? '#fff' : 'var(--text-dark)';
-      tabPhone.style.borderColor = method === 'phone' ? 'var(--green-mid)' : 'var(--border)';
-      tabEmail.style.background = method === 'email' ? 'var(--green-mid)' : 'transparent';
-      tabEmail.style.color = method === 'email' ? '#fff' : 'var(--text-dark)';
-      tabEmail.style.borderColor = method === 'email' ? 'var(--green-mid)' : 'var(--border)';
-    }
-    if (phoneGroup) phoneGroup.classList.toggle('hidden', method !== 'phone');
-    if (emailGroup) emailGroup.classList.toggle('hidden', method !== 'email');
-    if (toggleLink) {
-      toggleLink.textContent = method === 'phone' ? 'or use Email OTP instead' : 'or use Phone OTP instead';
-    }
-    if (step1) step1.classList.remove('hidden');
-    if (step2) step2.classList.add('hidden');
-    hideError();
+  /* OTP box UX: auto-advance focus, handle backspace, paste */
+  const boxes = document.querySelectorAll('.co-otp-box');
+  const hiddenOtp = document.getElementById('checkout-auth-otp');
+
+  function syncHiddenOtp() {
+    const val = Array.from(boxes).map(b => b.value).join('');
+    if (hiddenOtp) hiddenOtp.value = val;
   }
 
-  if (tabPhone) tabPhone.addEventListener('click', () => switchMethod('phone'));
-  if (tabEmail) tabEmail.addEventListener('click', () => switchMethod('email'));
-
-  if (toggleLink) {
-    toggleLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      switchMethod(activeMethod === 'phone' ? 'email' : 'phone');
+  boxes.forEach((box, i) => {
+    box.addEventListener('input', (e) => {
+      const v = e.target.value.replace(/\D/g, '');
+      box.value = v.slice(-1);
+      syncHiddenOtp();
+      if (v && i < boxes.length - 1) boxes[i + 1].focus();
+      if (Array.from(boxes).every(b => b.value)) handleVerify();
     });
-  }
-
-  if (backLink) {
-    backLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (step1) step1.classList.remove('hidden');
-      if (step2) step2.classList.add('hidden');
-      hideError();
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !box.value && i > 0) boxes[i - 1].focus();
+      if (e.key === 'Enter') handleVerify();
     });
+    box.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+      if (text.length >= 6) {
+        boxes.forEach((b, idx) => { b.value = text[idx] || ''; });
+        syncHiddenOtp();
+        boxes[Math.min(5, text.length - 1)].focus();
+        if (text.length >= 6) handleVerify();
+      }
+    });
+  });
+
+  function _startCountdown() {
+    if (_resendTimerHandle) clearInterval(_resendTimerHandle);
+    let sec = 30;
+    if (resendTimer) { resendTimer.textContent = `Resend in ${sec}s`; resendTimer.style.display = ''; }
+    if (resendLink) resendLink.classList.add('hidden');
+    _resendTimerHandle = setInterval(() => {
+      sec--;
+      if (sec <= 0) {
+        clearInterval(_resendTimerHandle); _resendTimerHandle = null;
+        if (resendTimer) resendTimer.style.display = 'none';
+        if (resendLink) resendLink.classList.remove('hidden');
+      } else {
+        if (resendTimer) resendTimer.textContent = `Resend in ${sec}s`;
+      }
+    }, 1000);
   }
 
   async function handleSendOtp() {
     hideError();
-    const contact = activeMethod === 'phone' ? contactInput?.value.trim() : emailInput?.value.trim();
-    if (!contact) {
-      showError(activeMethod === 'phone' ? 'Please enter a phone number.' : 'Please enter an email address.');
+    const raw = phoneInput?.value.trim();
+    if (!raw || !isValidIndianPhone(raw)) {
+      showError('Enter a valid 10-digit Indian mobile number.');
+      phoneInput?.focus();
       return;
     }
-
-    if (activeMethod === 'phone' && !/^\d{10}$/.test(contact)) {
-      showError('Enter a valid 10-digit Indian phone number.');
-      return;
-    }
-
-    if (activeMethod === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
-      showError('Enter a valid email address.');
-      return;
-    }
-
-    const btn = activeMethod === 'phone' ? sendBtn : sendEmailBtn;
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
-
+    const digits = raw.replace(/\D/g, '').slice(-10);
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending…'; }
     try {
-      const emailForOtp = activeMethod === 'phone'
-        ? `phone-${contact.replace(/\D/g, '')}@sporekart.com`
-        : contact;
+      const mockEmail = `phone-${digits}@sporekart.com`;
+      const fullPhone = `+91${digits}`;
+      _pendingEmail = mockEmail;
+      _pendingPhone = fullPhone;
+      _resendName = `User ${raw.slice(-4)}`;
 
-      pendingContact = emailForOtp;
-      const phoneParam = activeMethod === 'phone' ? `+91${contact}` : '';
-      const result = await authApi.requestOtp(emailForOtp, 'buyer', '', phoneParam);
-      mockOtp = (result && result.otp) ? result.otp : null;
+      const result = await authApi.requestOtp(mockEmail, 'buyer', _resendName, fullPhone);
+      const otp = result && result.otp ? result.otp : null;
 
-      if (step1) step1.classList.add('hidden');
-      if (step2) step2.classList.remove('hidden');
-      if (otpSubtitle) {
-        const displayContact = activeMethod === 'phone' ? `+91 ${contact}` : contact;
-        if (mockOtp) {
-          otpSubtitle.textContent = `Mock OTP: ${mockOtp} - enter it below to continue`;
-        } else {
-          otpSubtitle.textContent = `Enter the 6-digit code sent to ${displayContact}`;
-        }
+      stepPhone.classList.add('hidden');
+      stepOtp.classList.remove('hidden');
+      if (subtitle) subtitle.textContent = `OTP sent to +91 ${digits}`;
+      if (otp) {
+        const digits = String(otp).split('');
+        boxes.forEach((b, i) => { b.value = digits[i] || ''; });
+        syncHiddenOtp();
+        if (subtitle) subtitle.textContent = `Dev mode OTP: ${otp} (auto-filled)`;
+        // Auto-submit OTP verification
+        setTimeout(() => {
+          handleVerify();
+        }, 300);
       }
-      if (otpInput && mockOtp) otpInput.value = mockOtp;
-      hideError();
+      boxes[0].focus();
+      _startCountdown();
     } catch (err) {
-      showError(err.message || 'Failed to send OTP.');
+      showError(err.message || 'Failed to send OTP. Please try again.');
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = activeMethod === 'phone' ? 'Send OTP' : 'Send OTP'; }
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send OTP'; }
+    }
+  }
+
+  async function handleVerify() {
+    hideError();
+    const otpCode = Array.from(boxes).map(b => b.value).join('');
+    if (otpCode.length !== 6 || !/^\d{6}$/.test(otpCode)) {
+      showError('Enter the complete 6-digit OTP.');
+      return;
+    }
+    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Verifying…'; }
+    try {
+      const data = await authApi.verifyOtp(_pendingEmail, otpCode, {
+        loginMethod: 'phone',
+        whatsappNumber: _pendingPhone,
+      });
+      data.user = data.user || {};
+      data.user.loginMethod = 'phone';
+      data.user.whatsappNumber = _pendingPhone;
+      saveAuth(data.token, data.user);
+      hideError();
+      if (_resendTimerHandle) clearInterval(_resendTimerHandle);
+      // Move to delivery form
+      renderCheckoutDeliveryForm();
+    } catch (err) {
+      showError(err.message || 'OTP verification failed. Please try again.');
+      boxes.forEach(b => { b.value = ''; });
+      boxes[0].focus();
+    } finally {
+      if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.innerHTML = '<i class="fa-solid fa-shield-check"></i> Verify &amp; Continue'; }
     }
   }
 
   if (sendBtn) sendBtn.addEventListener('click', handleSendOtp);
-  if (sendEmailBtn) sendEmailBtn.addEventListener('click', handleSendOtp);
+  if (phoneInput) phoneInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleSendOtp(); });
+  if (verifyBtn) verifyBtn.addEventListener('click', handleVerify);
 
-  if (contactInput) {
-    contactInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleSendOtp();
-    });
-  }
-  if (emailInput) {
-    emailInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleSendOtp();
-    });
-  }
+  if (changeBtn) changeBtn.addEventListener('click', () => {
+    stepOtp.classList.add('hidden');
+    stepPhone.classList.remove('hidden');
+    boxes.forEach(b => { b.value = ''; });
+    if (hiddenOtp) hiddenOtp.value = '';
+    if (subtitle) subtitle.textContent = 'Enter your mobile number to receive a secure OTP';
+    hideError();
+    if (_resendTimerHandle) clearInterval(_resendTimerHandle);
+  });
 
-  async function handleVerifyOtp() {
-    const otpCode = otpInput?.value.trim();
-    if (!otpCode || !/^\d{6}$/.test(otpCode)) {
-      showError('Enter a valid 6-digit OTP.');
-      return;
-    }
-
-    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying...'; }
-
+  if (resendLink) resendLink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    resendLink.textContent = 'Sending…';
+    resendLink.style.pointerEvents = 'none';
     try {
-      const data = await authApi.verifyOtp(pendingContact, otpCode, {
-        loginMethod: activeMethod,
-        whatsappNumber: activeMethod === 'phone' ? `+91${contactInput?.value.trim()}` : '',
-      });
-      data.user = data.user || {};
-      data.user.loginMethod = activeMethod;
-      if (activeMethod === 'phone') {
-        data.user.whatsappNumber = `+91${contactInput?.value.trim()}`;
+      const result = await authApi.requestOtp(_pendingEmail, 'buyer', _resendName, _pendingPhone);
+      if (result && result.otp) {
+        const digits = String(result.otp).split('');
+        boxes.forEach((b, i) => { b.value = digits[i] || ''; });
+        syncHiddenOtp();
+        if (subtitle) subtitle.textContent = `Dev mode OTP: ${result.otp} (auto-filled)`;
+        // Auto-submit OTP verification
+        setTimeout(() => {
+          handleVerify();
+        }, 300);
       }
-      saveAuth(data.token, data.user);
-      hideError();
+      _startCountdown();
     } catch (err) {
-      showError(err.message || 'OTP verification failed.');
-      if (verifyBtn) { verifyBtn.disabled = false; verifyBtn.textContent = 'Verify'; }
+      showError(err.message || 'Failed to resend OTP.');
+    } finally {
+      resendLink.textContent = 'Resend OTP';
+      resendLink.style.pointerEvents = '';
     }
-  }
-
-  if (verifyBtn) verifyBtn.addEventListener('click', handleVerifyOtp);
-  if (otpInput) {
-    otpInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleVerifyOtp();
-    });
-  }
+  });
 }
+
+
 
 function renderCheckoutDeliveryForm() {
   const formPanel = document.querySelector('.checkout-form-panel');
   if (!formPanel) return;
 
-  if (_checkoutFormOriginalHTML) {
-    formPanel.innerHTML = _checkoutFormOriginalHTML;
-  }
-
-  // Re-populate state dropdown (lost when HTML was replaced by login section)
-  const stateSelectEl = document.getElementById('checkout-state');
-  if (stateSelectEl) {
-    if (_statesCache.length > 0 && stateSelectEl.options.length <= 1) {
-      stateSelectEl.innerHTML = '<option value="">Select State</option>' +
-        _statesCache.map(s => `<option value="${s}">${s}</option>`).join('');
-    } else if (_statesCache.length === 0) {
-      _loadStates();
-    }
-  }
-
-  const isReturningUser = state.user && (
-    state.user.addressLine1 || state.user.address_line1 ||
-    state.user.addressLine2 || state.user.address_line2
+  const user = state.user || {};
+  const isReturningUser = !!(
+    user.addressLine1 || user.address_line1 ||
+    user.addressLine2 || user.address_line2
   );
 
-  const user = state.user || {};
-
-  const phoneInput = document.getElementById('checkout-delivery-phone');
-  const nameInput = document.getElementById('checkout-delivery-name');
-  const emailInput = document.getElementById('checkout-delivery-email');
-  const pincodeInput = document.getElementById('checkout-delivery-pincode');
-  const line1Input = document.getElementById('checkout-address-line1');
-  const line2Input = document.getElementById('checkout-address-line2');
-  const landmarkInput = document.getElementById('checkout-landmark');
-  const stateSelect = document.getElementById('checkout-state');
-  const citySelect = document.getElementById('checkout-city');
-
-  if (nameInput) {
-    nameInput.value = user.fullName || user.full_name || '';
-  }
-
-  const uPhone = user.whatsappNumber || user.whatsapp_number || '';
-  if (phoneInput) {
-    if (uPhone) phoneInput.value = uPhone;
-    if (isReturningUser) {
-      phoneInput.readOnly = true;
-      phoneInput.style.background = '#f3f4f6';
-      phoneInput.style.cursor = 'not-allowed';
-    }
-  }
-
-  const uEmail = user.email || '';
-  // Do NOT pre-fill synthetic phone-login emails (phone-XXXXXX@sporekart.com)
-  const isSyntheticPhoneEmail = /^phone-\d+@sporekart\.com$/.test(uEmail);
-  if (emailInput && !emailInput.value && uEmail && !isSyntheticPhoneEmail) emailInput.value = uEmail;
-
+  const uName    = user.fullName || user.full_name || '';
+  const uPhone   = user.whatsappNumber || user.whatsapp_number || '';
+  const uEmail   = (() => {
+    const e = user.email || '';
+    return /^phone-\d+@sporekart\.com$/.test(e) ? '' : e;
+  })();
   const uPincode = user.defaultPincode || user.default_pincode || '';
-  if (pincodeInput && !pincodeInput.value && uPincode) pincodeInput.value = uPincode;
-
-  const uLine1 = user.addressLine1 || user.address_line1 || '';
-  if (line1Input && !line1Input.value && uLine1) line1Input.value = uLine1;
-
-  const uLine2 = user.addressLine2 || user.address_line2 || '';
-  if (line2Input && !line2Input.value && uLine2) line2Input.value = uLine2;
-
+  const uLine1   = user.addressLine1 || user.address_line1 || '';
+  const uLine2   = user.addressLine2 || user.address_line2 || '';
   const uLandmark = user.landmark || '';
-  if (landmarkInput && !landmarkInput.value && uLandmark) landmarkInput.value = uLandmark;
 
-  const uState = user.state || '';
-  const uCity = user.city || '';
+  const uState   = user.state || '';
+  const uCity    = user.city || '';
 
-  if (stateSelect && !stateSelect.value && uState) {
-    if (!_statesCache.includes(uState)) {
-      const opt = document.createElement('option');
-      opt.value = uState;
-      opt.textContent = uState;
-      stateSelect.appendChild(opt);
-    }
-    stateSelect.value = uState;
-    if (citySelect && uState) {
-      _loadCities(uState).then(cities => {
-        citySelect.innerHTML = '<option value="">Select City</option>' +
-          cities.map(c => `<option value="${c}">${c}</option>`).join('');
-        if (uCity) {
-          if (!cities.includes(uCity)) {
-            const opt = document.createElement('option');
-            opt.value = uCity;
-            opt.textContent = uCity;
-            citySelect.appendChild(opt);
-          }
-          citySelect.value = uCity;
-        }
-      });
-    }
+  /* For returning users, lock identity fields */
+  const lockAttr = isReturningUser ? 'readonly style="background:#f3f4f6;cursor:not-allowed;"' : '';
+  const lockNameAttr  = uName  && isReturningUser ? lockAttr : '';
+  const lockPhoneAttr = uPhone ? 'readonly style="background:#f3f4f6;cursor:not-allowed;"' : '';
+  const lockEmailAttr = uEmail && isReturningUser ? lockAttr : '';
+
+  const stateOptions = _statesCache.length
+    ? `<option value="">Select State</option>` + _statesCache.map(s => `<option value="${s}"${s === uState ? ' selected' : ''}>${s}</option>`).join('')
+    : `<option value="">Loading states…</option>`;
+
+  formPanel.innerHTML = `
+    <div class="co-auth-wrap">
+      <!-- Step progress -->
+      <div class="co-steps">
+        <div class="co-step done"><span class="co-step-num">✓</span><span class="co-step-label">Verified</span></div>
+        <div class="co-step-line done"></div>
+        <div class="co-step active"><span class="co-step-num">2</span><span class="co-step-label">Details</span></div>
+        <div class="co-step-line"></div>
+        <div class="co-step"><span class="co-step-num">3</span><span class="co-step-label">Payment</span></div>
+      </div>
+    </div>
+
+    <div class="panel-head">
+      <div>
+        <div class="panel-subtitle">STEP 2</div>
+        <h3>Delivery Information</h3>
+      </div>
+      <div class="panel-pill">${isReturningUser ? 'Pre-filled' : 'Required'}</div>
+    </div>
+
+    ${isReturningUser ? `
+    <div class="co-returning-banner">
+      <i class="fa-solid fa-circle-check"></i>
+      Welcome back! Your details are pre-filled. Only your address can be updated.
+    </div>` : ''}
+
+    <div class="input-group">
+      <label for="checkout-delivery-name">Full Name</label>
+      <input type="text" id="checkout-delivery-name" placeholder="Enter your full name"
+        value="${uName}" ${lockNameAttr} />
+      <span class="input-error-msg" id="error-checkout-delivery-name"></span>
+    </div>
+
+    <div class="input-group">
+      <label for="checkout-delivery-phone">Mobile Number</label>
+      <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="16"
+        value="${uPhone}" ${lockPhoneAttr} />
+      <span class="input-error-msg" id="error-checkout-delivery-phone"></span>
+    </div>
+
+    <div class="input-group">
+      <label for="checkout-delivery-email">Email Address <span class="co-optional">(optional)</span></label>
+      <input type="email" id="checkout-delivery-email" placeholder="For order updates"
+        value="${uEmail}" ${lockEmailAttr} />
+      <span class="input-error-msg" id="error-checkout-delivery-email"></span>
+    </div>
+
+    <div class="co-section-divider">Delivery Address</div>
+
+    <div class="input-group">
+      <label for="checkout-delivery-pincode">Pincode <span style="color:var(--color-danger)">*</span></label>
+      <input type="text" id="checkout-delivery-pincode" placeholder="6-digit pincode" maxlength="6"
+        value="${uPincode}" inputmode="numeric" />
+      <span class="input-error-msg" id="error-checkout-delivery-pincode"></span>
+    </div>
+
+    <div class="input-group">
+      <label for="checkout-address-line1">Flat / House No., Building <span style="color:var(--color-danger)">*</span></label>
+      <input type="text" id="checkout-address-line1" placeholder="e.g. Flat 4B, Green Tower"
+        value="${uLine1}" />
+      <span class="input-error-msg" id="error-checkout-address-line1"></span>
+    </div>
+
+    <div class="input-group">
+      <label for="checkout-address-line2">Area / Locality / District <span style="color:var(--color-danger)">*</span></label>
+      <input type="text" id="checkout-address-line2" placeholder="e.g. MG Road, Sector 5"
+        value="${uLine2}" />
+      <span class="input-error-msg" id="error-checkout-address-line2"></span>
+    </div>
+
+    <div class="input-group">
+      <label for="checkout-landmark">Nearby Landmark <span style="color:var(--color-danger)">*</span></label>
+      <input type="text" id="checkout-landmark" placeholder="e.g. Near City Mall"
+        value="${uLandmark}" />
+      <span class="input-error-msg" id="error-checkout-landmark"></span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+      <div class="input-group">
+        <label for="checkout-state">State <span style="color:var(--color-danger)">*</span></label>
+        <select id="checkout-state" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;background:#fff;color:var(--color-text-dark);">
+          ${stateOptions}
+        </select>
+        <span class="input-error-msg" id="error-checkout-state"></span>
+      </div>
+      <div class="input-group">
+        <label for="checkout-city">City <span style="color:var(--color-danger)">*</span></label>
+        <select id="checkout-city" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;background:#fff;color:var(--color-text-dark);">
+          <option value="">Select State first</option>
+        </select>
+        <span class="input-error-msg" id="error-checkout-city"></span>
+      </div>
+    </div>
+
+    <div class="co-save-address-row">
+      <label class="co-save-label" for="co-save-home-address">
+        <input type="checkbox" id="co-save-home-address" ${isReturningUser ? '' : 'checked'} />
+        <span>
+          <strong>Save as my default home address</strong><br>
+          <small>Update your profile with this address for future orders</small>
+        </span>
+      </label>
+    </div>
+
+    <div id="checkout-page-feedback" class="auth-error-msg hidden"></div>
+
+    <button class="btn btn-primary btn-block" id="btn-payment-continue">
+      <i class="fa-solid fa-credit-card"></i> Continue to Payment
+    </button>
+    <button class="btn btn-secondary btn-block" id="btn-change-cart">
+      <i class="fa-solid fa-arrow-left"></i> Back to cart
+    </button>
+  `;
+
+  // Trigger states load if not cached yet
+  if (_statesCache.length === 0) {
+    _loadStates().then(() => {
+      const sel = document.getElementById('checkout-state');
+      if (sel && _statesCache.length) {
+        sel.innerHTML = `<option value="">Select State</option>` +
+          _statesCache.map(s => `<option value="${s}"${s === uState ? ' selected' : ''}>${s}</option>`).join('');
+        if (uState) sel.dispatchEvent(new Event('change'));
+      }
+    });
+  } else if (uState) {
+    // State already set in the select; load cities
+    _loadCities(uState).then(cities => {
+      const citySelect = document.getElementById('checkout-city');
+      if (!citySelect) return;
+      citySelect.innerHTML = `<option value="">Select City</option>` +
+        cities.map(c => `<option value="${c}"${c === uCity ? ' selected' : ''}>${c}</option>`).join('');
+    });
   }
 
   _attachCheckoutValidation();
 
-  // Re-bind state→city dropdown and pincode auto-fill (lost when HTML was replaced)
+  // State → City dropdown
   const _stateSelect = document.getElementById('checkout-state');
-  const _citySelect = document.getElementById('checkout-city');
+  const _citySelect  = document.getElementById('checkout-city');
   if (_stateSelect) {
     _stateSelect.addEventListener('change', async (e) => {
       const selState = e.target.value;
@@ -3819,14 +3911,12 @@ function renderCheckoutDeliveryForm() {
         return;
       }
       const cities = await _loadCities(selState);
-      if (!cities.length && !_citiesCache[selState]) {
-        _citySelect.innerHTML = '<option value="">Select State first</option>';
-        return;
-      }
       _citySelect.innerHTML = '<option value="">Select City</option>' +
         cities.map(c => `<option value="${c}">${c}</option>`).join('');
     });
   }
+
+  // Pincode auto-fill state
   const _pincodeInput = document.getElementById('checkout-delivery-pincode');
   if (_pincodeInput) {
     _pincodeInput.addEventListener('input', async (e) => {
@@ -3838,11 +3928,21 @@ function renderCheckoutDeliveryForm() {
           const data = await resp.json();
           if (data[0]?.Status === 'Success') {
             const d = data[0].PostOffice[0];
-            const foundState = d.State;
             if (_stateSelect && !_stateSelect.value) {
-              _stateSelect.value = foundState;
+              _stateSelect.value = d.State;
               _stateSelect.dispatchEvent(new Event('change'));
             }
+            const districtInput = document.getElementById('checkout-district');
+            if (districtInput && !districtInput.value) districtInput.value = d.District || '';
+            setTimeout(() => {
+              const _city = document.getElementById('checkout-city');
+              if (_city && d.Division) {
+                // try to match city
+                const opts = Array.from(_city.options).map(o => o.value);
+                const match = opts.find(o => o.toLowerCase().includes(d.Division.toLowerCase()));
+                if (match) _city.value = match;
+              }
+            }, 600);
           }
         } catch { /* ignore */ }
       }
@@ -3851,10 +3951,10 @@ function renderCheckoutDeliveryForm() {
 
   document.getElementById('btn-payment-continue')?.addEventListener('click', handlePaymentContinue);
   const backCartBtn = document.getElementById('btn-change-cart');
-  if (backCartBtn) {
-    backCartBtn.addEventListener('click', () => toggleCartDrawer(true));
-  }
+  if (backCartBtn) backCartBtn.addEventListener('click', () => toggleCartDrawer(true));
 }
+
+
 
 function _attachCheckoutValidation() {
   const checkoutFields = [
@@ -3863,7 +3963,7 @@ function _attachCheckoutValidation() {
     { id: 'checkout-delivery-email', validator: (v) => !v.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? '' : 'Enter a valid email address.' },
     { id: 'checkout-delivery-pincode', validator: (v) => !v.trim() || /^\d{6}$/.test(v.trim()) ? '' : 'Enter a valid 6-digit pincode.' },
     { id: 'checkout-address-line1', validator: (v) => v.trim() ? '' : 'Address Line 1 is required.' },
-    { id: 'checkout-address-line2', validator: (v) => v.trim() ? '' : 'Address Line 2 is required.' },
+    { id: 'checkout-address-line2', validator: (v) => v.trim() ? '' : 'Area / Locality / District is required.' },
     { id: 'checkout-landmark', validator: (v) => v.trim() ? '' : 'Landmark is required.' },
     { id: 'checkout-state', validator: (v) => v.trim() ? '' : 'Please select a state.' },
     { id: 'checkout-city', validator: (v) => v.trim() ? '' : 'Please select a city.' },
@@ -3894,15 +3994,18 @@ function _attachCheckoutValidation() {
 }
 
 async function handlePaymentContinue() {
-  const deliveryName = document.getElementById('checkout-delivery-name')?.value.trim() || state.user?.fullName || '';
+  const deliveryName  = document.getElementById('checkout-delivery-name')?.value.trim() || state.user?.fullName || '';
   const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
   const deliveryEmail = document.getElementById('checkout-delivery-email')?.value.trim() || state.user?.email || '';
-  const addressLine1 = document.getElementById('checkout-address-line1')?.value.trim() || '';
-  const addressLine2 = document.getElementById('checkout-address-line2')?.value.trim() || '';
-  const landmark = document.getElementById('checkout-landmark')?.value.trim() || '';
-  const city = document.getElementById('checkout-city')?.value.trim() || '';
-  const stateVal = document.getElementById('checkout-state')?.value.trim() || '';
+  const addressLine1  = document.getElementById('checkout-address-line1')?.value.trim() || '';
+  const rawLine2      = document.getElementById('checkout-address-line2')?.value.trim() || '';
+  const landmark      = document.getElementById('checkout-landmark')?.value.trim() || '';
+  const city          = document.getElementById('checkout-city')?.value.trim() || '';
+  const stateVal      = document.getElementById('checkout-state')?.value.trim() || '';
   const deliveryPincode = document.getElementById('checkout-delivery-pincode')?.value.trim() || '';
+  const saveHomeAddress = document.getElementById('co-save-home-address')?.checked ?? false;
+
+  const addressLine2 = rawLine2;
 
   const feedback = document.getElementById('checkout-page-feedback');
 
@@ -3919,7 +4022,6 @@ async function handlePaymentContinue() {
   }
 
   clearFieldErrors();
-
   let hasError = false;
 
   if (!deliveryName || deliveryName.length < 2) {
@@ -3929,6 +4031,11 @@ async function handlePaymentContinue() {
 
   if (!isValidIndianPhone(deliveryPhone)) {
     markFieldError('checkout-delivery-phone', 'Enter a valid Indian phone number (e.g. +91 9876543210).');
+    hasError = true;
+  }
+
+  if (deliveryEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(deliveryEmail)) {
+    markFieldError('checkout-delivery-email', 'Enter a valid email address.');
     hasError = true;
   }
 
@@ -3942,8 +4049,8 @@ async function handlePaymentContinue() {
     hasError = true;
   }
 
-  if (!addressLine2) {
-    markFieldError('checkout-address-line2', 'Address Line 2 is required.');
+  if (!rawLine2) {
+    markFieldError('checkout-address-line2', 'Area / Locality / District is required.');
     hasError = true;
   }
 
@@ -3972,13 +4079,54 @@ async function handlePaymentContinue() {
     return;
   }
 
+  // Always persist the customer name to the user profile for future orders/sessions
+  const profileUpdates = {};
+  const existingName = state.user?.fullName || state.user?.full_name || '';
+  if (deliveryName && deliveryName !== existingName) {
+    profileUpdates.fullName = deliveryName;
+  }
+
+  // Save home address to profile if user opted in, otherwise just sync identity fields
+  if (state.token && state.user) {
+    if (saveHomeAddress) {
+      Object.assign(profileUpdates, {
+        fullName: deliveryName,
+        addressLine1: addressLine1,
+        addressLine2: addressLine2,
+        landmark,
+        city,
+        state: stateVal,
+        defaultPincode: deliveryPincode,
+      });
+    }
+    const uEmail = state.user.email || '';
+    const isSynthetic = /^phone-\d+@sporekart\.com$/.test(uEmail);
+    if (isSynthetic && deliveryEmail) profileUpdates.email = deliveryEmail;
+    const uPhone = state.user.whatsappNumber || state.user.whatsapp_number || '';
+    if (!uPhone && deliveryPhone) profileUpdates.whatsappNumber = deliveryPhone;
+    if (Object.keys(profileUpdates).length) {
+      try {
+        const updated = await fetchWithAuth('/auth/me', {
+          method: 'PUT',
+          body: JSON.stringify(profileUpdates),
+        });
+        if (updated) {
+          Object.assign(state.user, updated);
+          saveUserProfile(state.user);
+        }
+      } catch (err) {
+        console.warn('[Profile Save] Failed to save profile:', err?.message || err);
+      }
+    }
+  }
+
   const btnContinue = document.getElementById('btn-payment-continue');
   const originalBtnText = btnContinue ? btnContinue.innerHTML : '';
 
   try {
     if (btnContinue) {
       btnContinue.disabled = true;
-      btnContinue.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing Payment...';
+      btnContinue.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating order…';
     }
 
     const data = await fetchWithAuth('/orders/checkout', {
@@ -3989,14 +4137,14 @@ async function handlePaymentContinue() {
           quantity: item.quantity,
           ...(item.weightInfo ? { weight: item.weightInfo.weight, unit: item.weightInfo.unit } : {}),
         })),
-        promoCode: state.activePromo || "",
+        promoCode: state.activePromo || '',
         customer_name: deliveryName,
         customer_email: deliveryEmail,
         delivery_phone: deliveryPhone,
         address_line1: addressLine1,
         address_line2: addressLine2,
-        landmark: landmark,
-        city: city,
+        landmark,
+        city,
         state: stateVal,
         pincode: deliveryPincode,
       }),
@@ -4004,18 +4152,12 @@ async function handlePaymentContinue() {
 
     toggleCartDrawer(false);
 
-    const rzpDetails = data.razorpay;
+    const rzpDetails  = data.razorpay;
     const orderRecord = data.order;
 
-    if (
-      !rzpDetails.keyId
-      || rzpDetails.keyId.includes('mockKey')
-      || rzpDetails.keyId.includes('rzp_test_mock')
-    ) {
-      showMockPaymentModal(rzpDetails, orderRecord);
-    } else {
-      showPaymentChoiceModal(rzpDetails, orderRecord);
-    }
+    // Always show inline payment screen (step 3) — both mock and real Razorpay
+    renderInlinePaymentScreen(rzpDetails, orderRecord);
+
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
     if (feedback) {
@@ -4030,8 +4172,255 @@ async function handlePaymentContinue() {
   }
 }
 
+/**
+ * Render unified inline payment screen (Step 3) inside the checkout form panel.
+ * Supports: UPI Apps (Razorpay), UPI ID, UPI QR, Card, Net Banking, Wallets, EMI, COD.
+ */
+function renderInlinePaymentScreen(rzpDetails, orderRecord) {
+  const formPanel = document.querySelector('.checkout-form-panel');
+  if (!formPanel) return;
+
+  const amount    = (rzpDetails.amount / 100).toFixed(2);
+  const isMock    = !rzpDetails.keyId || rzpDetails.keyId.includes('mockKey') || rzpDetails.keyId.includes('rzp_test_mock');
+  const orderId   = rzpDetails.orderId || orderRecord?.id || 'ORDER';
+
+  formPanel.innerHTML = `
+    <div class="co-auth-wrap">
+      <div class="co-steps">
+        <div class="co-step done"><span class="co-step-num">✓</span><span class="co-step-label">Verified</span></div>
+        <div class="co-step-line done"></div>
+        <div class="co-step done"><span class="co-step-num">✓</span><span class="co-step-label">Details</span></div>
+        <div class="co-step-line done"></div>
+        <div class="co-step active"><span class="co-step-num">3</span><span class="co-step-label">Payment</span></div>
+      </div>
+    </div>
+
+    <div class="panel-head">
+      <div>
+        <div class="panel-subtitle">STEP 3</div>
+        <h3>Choose Payment Method</h3>
+      </div>
+      <div class="co-amount-badge">₹${amount}</div>
+    </div>
+
+    <div class="co-payment-grid" id="co-payment-grid">
+
+      <!-- UPI Apps (Razorpay) -->
+      <button class="co-pay-card" id="co-pay-razorpay" ${isMock ? 'data-mock="1"' : ''}>
+        <div class="co-pay-icon co-pay-icon--green">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">UPI Apps</div>
+          <div class="co-pay-sub">GPay · PhonePe · BHIM · Paytm</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- UPI ID -->
+      <button class="co-pay-card" id="co-pay-upi-id">
+        <div class="co-pay-icon co-pay-icon--amber">
+          <i class="fa-solid fa-indian-rupee-sign"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">UPI ID</div>
+          <div class="co-pay-sub">Enter VPA (e.g. name@ybl)</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- UPI QR -->
+      <button class="co-pay-card" id="co-pay-upi-qr">
+        <div class="co-pay-icon co-pay-icon--indigo">
+          <i class="fa-solid fa-qrcode"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">UPI QR Code</div>
+          <div class="co-pay-sub">Scan with any UPI app</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- Card -->
+      <button class="co-pay-card" id="co-pay-card" ${isMock ? '' : ''}>
+        <div class="co-pay-icon co-pay-icon--blue">
+          <i class="fa-solid fa-credit-card"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">Credit / Debit Card</div>
+          <div class="co-pay-sub">Visa · Mastercard · RuPay</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- Net Banking -->
+      <button class="co-pay-card" id="co-pay-netbanking">
+        <div class="co-pay-icon co-pay-icon--teal">
+          <i class="fa-solid fa-building-columns"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">Net Banking</div>
+          <div class="co-pay-sub">SBI · HDFC · ICICI · Axis + more</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- Wallets -->
+      <button class="co-pay-card" id="co-pay-wallet">
+        <div class="co-pay-icon co-pay-icon--purple">
+          <i class="fa-solid fa-wallet"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">Wallets</div>
+          <div class="co-pay-sub">Paytm · Mobikwik · Freecharge</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- EMI -->
+      <button class="co-pay-card" id="co-pay-emi">
+        <div class="co-pay-icon co-pay-icon--pink">
+          <i class="fa-solid fa-calendar-days"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">EMI</div>
+          <div class="co-pay-sub">3 · 6 · 12 · 24 months</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+      <!-- Cash on Delivery -->
+      <button class="co-pay-card co-pay-card--cod" id="co-pay-cod">
+        <div class="co-pay-icon co-pay-icon--cod">
+          <i class="fa-solid fa-money-bill-wave"></i>
+        </div>
+        <div class="co-pay-text">
+          <div class="co-pay-title">Cash on Delivery</div>
+          <div class="co-pay-sub">Pay when your order arrives</div>
+        </div>
+        <i class="fa-solid fa-chevron-right co-pay-arrow"></i>
+      </button>
+
+    </div>
+
+    <div class="co-pay-security">
+      <i class="fa-solid fa-shield-halved"></i> 256-bit SSL encrypted secure payment
+    </div>
+    <div class="co-auth-error hidden" id="co-pay-error"></div>
+  `;
+
+  function showPayError(msg) {
+    const el = document.getElementById('co-pay-error');
+    if (el) { el.textContent = msg; el.classList.remove('hidden'); }
+  }
+
+  function buildRzpOptions(method) {
+    return {
+      key: rzpDetails.keyId,
+      amount: rzpDetails.amount,
+      currency: rzpDetails.currency,
+      name: 'Sporekart',
+      description: 'Sporekart Order',
+      order_id: rzpDetails.orderId,
+      method: method || undefined,
+      async handler(response) {
+        await completeOrderPayment(
+          response.razorpay_order_id,
+          response.razorpay_payment_id,
+          response.razorpay_signature,
+        );
+      },
+      prefill: {
+        name: state.user?.fullName || '',
+        email: state.user?.email || '',
+        contact: state.user?.whatsappNumber || '',
+      },
+      theme: { color: '#38b17b' },
+    };
+  }
+
+  function openRazorpay(method) {
+    if (isMock) {
+      showMockPaymentModal(rzpDetails, orderRecord);
+    } else {
+      const rzp = new Razorpay(buildRzpOptions(method));
+      rzp.open();
+    }
+  }
+
+  document.getElementById('co-pay-razorpay')?.addEventListener('click', () => openRazorpay('upi'));
+  document.getElementById('co-pay-upi-id')?.addEventListener('click', () => {
+    if (isMock) {
+      showMockPaymentModal(rzpDetails, orderRecord);
+    } else {
+      showUpiIdModal(rzpDetails, orderRecord);
+    }
+  });
+  document.getElementById('co-pay-upi-qr')?.addEventListener('click', () => {
+    if (isMock) {
+      showMockPaymentModal(rzpDetails, orderRecord);
+    } else {
+      showUpiQrModal(rzpDetails, orderRecord);
+    }
+  });
+  document.getElementById('co-pay-card')?.addEventListener('click', () => openRazorpay('card'));
+  document.getElementById('co-pay-netbanking')?.addEventListener('click', () => openRazorpay('netbanking'));
+  document.getElementById('co-pay-wallet')?.addEventListener('click', () => openRazorpay('wallet'));
+  document.getElementById('co-pay-emi')?.addEventListener('click', () => openRazorpay('emi'));
+
+  document.getElementById('co-pay-cod')?.addEventListener('click', async () => {
+    const btn = document.getElementById('co-pay-cod');
+    if (btn) { btn.disabled = true; btn.querySelector('.co-pay-title').textContent = 'Placing order…'; }
+    try {
+      const res = await fetch(`${API_BASE}/orders/confirm-cod-payment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+        },
+        body: JSON.stringify({ razorpay_order_id: rzpDetails.orderId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        clearCart();
+        updateCartUI();
+        state.activePromo = null;
+        state.promoDiscountPct = 0;
+        const promoInput = document.getElementById('promo-input');
+        if (promoInput) promoInput.value = '';
+        const promoMsg = document.getElementById('promo-message');
+        if (promoMsg) promoMsg.classList.add('hidden');
+        state.activeCategory = 'all';
+        document.querySelectorAll('#product-filters-row .cat-btn').forEach((b) => {
+          b.classList.toggle('active', b.getAttribute('data-category') === 'all');
+        });
+        await fetchProducts();
+        await loadUser();
+        const userName = state.user?.fullName || state.user?.full_name || 'Valued Cultivator';
+        try {
+          const bcOrders = new BroadcastChannel('spore-orders');
+          bcOrders.postMessage({ type: 'orders:updated', orderId: orderRecord?.id || null });
+        } catch (e) { /* ignore */ }
+        showPopupModal({
+          title: '🛵 Order Placed!',
+          message: `${userName}, your Cash on Delivery order has been placed. Our team will confirm it shortly.`,
+          duration: 2000,
+          redirectHash: '#shop',
+        });
+      } else {
+        showPayError(data.error || 'Could not place COD order. Please try again.');
+        if (btn) { btn.disabled = false; btn.querySelector('.co-pay-title').textContent = 'Cash on Delivery'; }
+      }
+    } catch (err) {
+      showPayError('Network error. Please try again.');
+      if (btn) { btn.disabled = false; btn.querySelector('.co-pay-title').textContent = 'Cash on Delivery'; }
+    }
+  });
+}
+
 // ── Payment Method Choice Modal (for real Razorpay) ────────────────────────
 function showPaymentChoiceModal(rzpDetails, orderRecord) {
+
   document.getElementById('payment-choice-modal')?.remove();
   const amount = (rzpDetails.amount / 100).toFixed(2);
 
@@ -5058,7 +5447,11 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       const promoMsg = document.getElementById('promo-message');
       if (promoMsg) promoMsg.classList.add('hidden');
 
-      // Refresh shop inventory quantities immediately after payment
+      // Refresh shop inventory — reset to show all products
+      state.activeCategory = 'all';
+      document.querySelectorAll('#product-filters-row .cat-btn').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-category') === 'all');
+      });
       await fetchProducts();
       await loadUser();
 
@@ -5066,7 +5459,9 @@ async function completeOrderPayment(orderId, paymentId, signature) {
       if (state.token && state.user) {
         try {
           const deliveryPhone = document.getElementById('checkout-delivery-phone')?.value.trim() || '';
-          const deliveryEmail = document.getElementById('checkout-delivery-email')?.value.trim() || state.user?.email || '';
+          const rawEmailEl = document.getElementById('checkout-delivery-email');
+          const typedEmail = rawEmailEl ? rawEmailEl.value.trim() : '';
+          const deliveryEmail = typedEmail || state.user?.email || '';
           const addressLine1 = document.getElementById('checkout-address-line1')?.value.trim() || '';
           const addressLine2 = document.getElementById('checkout-address-line2')?.value.trim() || '';
           const landmark = document.getElementById('checkout-landmark')?.value.trim() || '';
@@ -5077,7 +5472,8 @@ async function completeOrderPayment(orderId, paymentId, signature) {
           const fullName = document.getElementById('checkout-delivery-name')?.value.trim() || '';
           const profilePayload = {};
           if (fullName) profilePayload.fullName = fullName;
-          if (deliveryEmail) profilePayload.email = deliveryEmail;
+          // Only save email if user actually typed it (avoids storing synthetic phone-* email)
+          if (typedEmail) profilePayload.email = typedEmail;
           if (deliveryPhone) profilePayload.whatsappNumber = deliveryPhone;
           if (addressLine1) profilePayload.address_line1 = addressLine1;
           if (addressLine2) profilePayload.address_line2 = addressLine2;
@@ -5164,6 +5560,11 @@ function getStatusBadgeHTML(status) {
       color = "#3b82f6";
       label = "Processing";
       break;
+    case "inoculating":
+      bg = "rgba(139,92,246,0.12)";
+      color = "#7c3aed";
+      label = "Inoculating";
+      break;
     case "shipped":
       bg = "rgba(139,92,246,0.12)";
       color = "#8b5cf6";
@@ -5183,6 +5584,12 @@ function getStatusBadgeHTML(status) {
       bg = "rgba(239,68,68,0.12)";
       color = "#ef4444";
       label = "Cancelled";
+      break;
+    case "returned":
+    case "RTO":
+      bg = "rgba(239,68,68,0.15)";
+      color = "#dc2626";
+      label = "Returned to Sender";
       break;
     case "CANCEL_REQUESTED":
       bg = "rgba(245,158,11,0.15)";
@@ -5275,11 +5682,13 @@ function renderOrdersSidebar() {
         year: 'numeric',
       });
       const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
-      const displayStatus = refundStates.includes(order.status) ? order.status : order.delivery_status;
+      // Handle new manual refund flow (status=cancelled, tracked via refund_status)
+      const hasRefundStatus = order.status === 'cancelled' && order.refund_status && order.refund_status !== 'none';
+      const displayStatus = hasRefundStatus ? `REFUND_${order.refund_status.toUpperCase()}` : (refundStates.includes(order.status) ? order.status : order.delivery_status);
       const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-      const cancelOrRefundReason = refundStates.includes(order.status) && order.cancel_reason ? order.cancel_reason : "";
-      const refundAmountStr = order.total_refunded_amount && Number(order.total_refunded_amount) > 0 ? `Refunded: ₹${Number(order.total_refunded_amount).toFixed(2)}` : "";
+      const cancelOrRefundReason = (refundStates.includes(order.status) || hasRefundStatus) && order.cancel_reason ? order.cancel_reason : "";
+      const refundAmountStr = order.total_refunded_amount && Number(order.total_refunded_amount) > 0 ? `Refunded: ₹${Number(order.total_refunded_amount).toFixed(2)}` : (order.refund_status && order.refund_status !== 'none' && order.refund_status !== 'completed' ? `Refund: ${order.refund_status}` : "");
 
       return `
         <div class="order-sidebar-card ${activeClass}" data-id="${order.id}">
@@ -5293,6 +5702,7 @@ function renderOrdersSidebar() {
           ${(order.delivery_status === "cancelled" || order.status === "cancelled") && order.cancel_reason ? `<div class="order-card-reason">Reason: ${order.cancel_reason}</div>` : ""}
           ${cancelOrRefundReason ? `<div class="order-card-reason">Reason: ${cancelOrRefundReason}</div>` : ""}
           ${refundAmountStr ? `<div class="order-card-reason" style="color:#8b5cf6;">${refundAmountStr}</div>` : ""}
+          ${(order.status === 'cancelled' && order.refund_status && order.refund_status !== 'none' && order.refund_status !== 'completed') ? `<div class="order-card-reason" style="color:#f59e0b;font-size:0.7rem;margin-top:4px;">📞 Refund queries: <a href="mailto:support@sporekart.com" style="color:#f59e0b;">support@sporekart.com</a></div>` : ""}
         </div>
       `;
     })
@@ -5365,17 +5775,19 @@ function renderTrackingDetails(track) {
     .join('');
 
   const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
-  const displayStatus = refundStates.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus;
+  // Handle new manual refund flow via refundStatus field
+  const hasRefundStatus = track.paymentStatus === 'cancelled' && track.refundStatus && track.refundStatus !== 'none';
+  const displayStatus = hasRefundStatus ? `REFUND_${track.refundStatus.toUpperCase()}` : (refundStates.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus);
   const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus);
+  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus) && !["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED"].includes(track.paymentStatus);
   const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `
     <div class="tracker-details-header">
       <div>
         <h3>Mycelium Incubator Log</h3>
-        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0, 8).toUpperCase()} | Stage: ${badgeHTML}</p>
+        <p class="subtitle">Run ID: RUN-${track.orderId.substring(0, 8).toUpperCase()} | Stage: ${badgeHTML} ${track.hasRealTracking ? '<span class="tracker-real-badge"><i class="fa-solid fa-satellite-dish"></i> Live Tracking</span>' : ''}</p>
       </div>
       <span style="font-size:0.75rem; color:var(--color-text-muted);">Sync time: ${dateStr}</span>
     </div>
@@ -5388,11 +5800,15 @@ function renderTrackingDetails(track) {
         <div class="tracker-payment-line"><strong>Status:</strong> ${track.paymentStatus || 'pending'}</div>
         ${(track.refundStatus && track.refundStatus !== 'none') ? `<div class="tracker-payment-line"><strong>Refund Status:</strong> ${track.refundStatus}</div>` : ''}
         ${(track.refundAmount && track.refundAmount > 0) ? `<div class="tracker-payment-line"><strong>Refunded Amount:</strong> ₹${Number(track.refundAmount).toFixed(2)}</div>` : ''}
+        ${(track.refundStatus && track.refundStatus !== 'none' && track.refundStatus !== 'completed') ? `<div class="tracker-payment-line" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(56,177,123,0.1);"><strong style="color:#f59e0b;">Refund Queries:</strong> <a href="mailto:support@sporekart.com" style="color:#f59e0b;">support@sporekart.com</a> / +91 80 4991 3800</div>` : ''}
       </div>
       <div class="tracker-payment-card">
         <div class="tracker-payment-header">Delivery Summary</div>
         <div class="tracker-payment-line"><strong>Stage:</strong> ${track.deliveryStatus}</div>
+        ${track.fulfillmentStatus ? `<div class="tracker-payment-line"><strong>Fulfillment:</strong> ${track.fulfillmentStatus}</div>` : ''}
         <div class="tracker-payment-line"><strong>Progress:</strong> ${track.progressPercent}%</div>
+        ${track.shippedAt ? `<div class="tracker-payment-line"><strong>Shipped:</strong> ${new Date(track.shippedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</div>` : ''}
+        ${track.deliveredAt ? `<div class="tracker-payment-line"><strong>Delivered:</strong> ${new Date(track.deliveredAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</div>` : ''}
         <div class="tracker-payment-line"><strong>Updated:</strong> ${dateStr}</div>
       </div>
     </div>
@@ -5403,6 +5819,23 @@ function renderTrackingDetails(track) {
         <div class="progress-bar-fill" style="width: ${track.progressPercent}%"></div>
       </div>
     </div>
+
+    ${track.fulfillmentStatus ? `
+    <div class="fulfillment-strip">
+      <div class="fulfillment-strip-header"><i class="fa-solid fa-boxes-stacked"></i> Fulfillment Pipeline</div>
+      <div class="fulfillment-strip-steps">
+        ${['pending_fulfillment','packing_required','packed','ready_to_ship','with_carrier','delivered'].map((step, i) => {
+          const stepLabels = {'pending_fulfillment':'Pending','packing_required':'Packing','packed':'Packed','ready_to_ship':'Ready','with_carrier':'Shipped','delivered':'Delivered'};
+          const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,ready_to_ship:3,with_carrier:4,delivered:5};
+          const current = fulfillmentOrder[track.fulfillmentStatus] ?? -1;
+          const idx = fulfillmentOrder[step] ?? -1;
+          const done = idx < current;
+          const active = idx === current;
+          return `<div class="fulfillment-step ${done?'fstep-done':''} ${active?'fstep-active':''}"><div class="fstep-dot"></div><span class="fstep-label">${stepLabels[step]||step}</span></div>`;
+        }).join('<div class="fstep-connector"></div>')}
+      </div>
+    </div>
+    ` : ''}
 
     <div class="tracker-status-box">
       <h4>Inoculation Stage Notes</h4>
@@ -5425,7 +5858,7 @@ function renderTrackingDetails(track) {
       ${track.paymentStatus === "CANCEL_APPROVED"
       ? `
         <div class="tracker-status-box" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; border-radius:10px; padding:12px; margin-bottom:15px;">
-          <i class="fa-solid fa-check-circle"></i> <strong>Cancellation Approved</strong>: Your cancellation has been approved. Refund is being initiated and will reflect within 5-7 business days.
+          <i class="fa-solid fa-check-circle"></i> <strong>Cancellation Approved</strong>: Your order has been cancelled. The refund will be processed manually by our team. For refund queries, contact <a href="mailto:support@sporekart.com" style="color:#10b981;font-weight:600;">support@sporekart.com</a> or call +91 80 4991 3800.
         </div>
       `
       : ""
@@ -5478,11 +5911,21 @@ function renderTrackingDetails(track) {
       `
       : ""
     }
-      ${track.deliveryStatus === "cancelled" || track.paymentStatus === "cancelled"
+      ${track.deliveryStatus === "cancelled" || track.paymentStatus === "cancelled" || track.deliveryStatus === "returned" || track.deliveryStatus === "RTO"
       ? `
         <div class="tracker-cancelled-note">
           <strong>Cancellation reason:</strong> ${cancelReason || "Not provided"}
         </div>
+        ${track.cancelledBy ? `<div class="tracker-payment-line" style="margin-top:4px; font-size:0.85rem; color:var(--color-text-muted);"><strong>Cancelled by:</strong> ${track.cancelledBy}</div>` : ''}
+        ${track.cancelledAt ? `<div class="tracker-payment-line" style="font-size:0.85rem; color:var(--color-text-muted);"><strong>Cancelled at:</strong> ${new Date(track.cancelledAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+        ${track.deliveryStatus === "returned" || track.deliveryStatus === "RTO"
+          ? `<div class="tracker-status-box" style="background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2); color:#dc2626; border-radius:10px; padding:12px; margin-bottom:15px; margin-top:8px;">
+            <i class="fa-solid fa-truck-ramp-box"></i> <strong>Returned to Sender (RTO)</strong>: This shipment was returned to us. A refund will be processed automatically. For queries, contact <a href="mailto:support@sporekart.com" style="color:#dc2626;font-weight:600;">support@sporekart.com</a>.
+          </div>`
+          : `<div class="tracker-status-box" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); color:#f59e0b; border-radius:10px; padding:12px; margin-bottom:15px; margin-top:8px;">
+            <i class="fa-solid fa-life-ring"></i> <strong>Refund Support</strong>: For any refund-related queries, please contact us at <a href="mailto:support@sporekart.com" style="color:#f59e0b;font-weight:600;">support@sporekart.com</a> or call <strong>+91 80 4991 3800</strong>.
+          </div>`
+        }
       `
       : ""
     }

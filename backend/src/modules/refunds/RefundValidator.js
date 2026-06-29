@@ -93,10 +93,26 @@ const manualRefundSchema = Joi.object({
     .allow("")
 });
 
+const refundProgressSchema = Joi.object({
+  step: Joi.string()
+    .valid("initiated", "processing", "completed")
+    .required()
+    .messages({
+      "any.only": "Step must be one of: initiated, processing, completed",
+      "any.required": "Refund step is required"
+    }),
+  adminNote: Joi.string()
+    .trim()
+    .max(500)
+    .optional()
+    .allow("")
+});
+
 module.exports = {
   cancelRequestSchema,
   adminApproveRejectSchema,
   adminCancelSchema,
   partialRefundSchema,
-  manualRefundSchema
+  manualRefundSchema,
+  refundProgressSchema
 };

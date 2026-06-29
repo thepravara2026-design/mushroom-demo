@@ -201,6 +201,21 @@ router.post(
   },
 );
 
+/**
+ * GET /api/auth/lookup
+ * Look up a registered user by email or phone (unauthenticated). Returns fullName if found.
+ */
+router.get("/lookup", async (req, res) => {
+  try {
+    const query = (req.query.q || "").trim();
+    if (!query) return respondError(res, "Query parameter 'q' is required.", 400);
+    const result = await authService.lookupUser(query);
+    return success(res, result);
+  } catch (err) {
+    return respondError(res, err.message || "Lookup failed", err.status || 500);
+  }
+});
+
 const verifyOtpSchema = Joi.object({
   email: Joi.string().email().required().messages({
     "string.email": "Enter a valid email address.",
@@ -276,7 +291,7 @@ router.put(
     try {
       const { userId } = req.user;
       const updates = {
-        fullName: req.body.fullName,
+        fullName: req.body.fullName || req.body.full_name,
         email: req.body.email,
         whatsappNumber: req.body.whatsappNumber,
         defaultAddress: req.body.defaultAddress || req.body.default_address,

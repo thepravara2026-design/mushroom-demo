@@ -113,6 +113,14 @@ export class AuthModal {
         else this.showEmailView();
       });
 
+    // Resend OTP
+    document
+      .getElementById('link-resend-otp')
+      ?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.handleResendOtp();
+      });
+
     // Email OTP form
     this.formRequest?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -169,12 +177,19 @@ export class AuthModal {
           this.requestError.textContent = err;
           this.requestError.classList.toggle('hidden', !err);
         }
+        this._lookupAndPrefillName(this.emailInput.value.trim(), 'email');
       });
       this.emailInput.addEventListener('input', () => {
         if (this.requestError && !this.requestError.classList.contains('hidden')) {
           const err = getFieldError('email', this.emailInput.value);
           if (!err) this.requestError.classList.add('hidden');
         }
+      });
+    }
+
+    if (this.phoneInput) {
+      this.phoneInput.addEventListener('blur', () => {
+        this._lookupAndPrefillName(this.phoneInput.value.trim(), 'phone');
       });
     }
 
@@ -239,14 +254,28 @@ export class AuthModal {
       else titleEl.textContent = 'Welcome to Sporekart';
     }
 
-    // Name fields only for grower registration
-    if (this.nameField) this.nameField.style.display = role === 'grower' ? 'block' : 'none';
-    if (this.phoneNameField) this.phoneNameField.style.display = role === 'grower' ? 'block' : 'none';
+    // Always show name field so first-time users can set their profile name
+    if (this.nameField) this.nameField.style.display = 'block';
+    if (this.phoneNameField) this.phoneNameField.style.display = 'block';
 
     const backBtn = document.getElementById('link-back-method-email');
     if (backBtn) {
       if (role === 'grower') backBtn.classList.add('hidden');
       else backBtn.classList.remove('hidden');
+    }
+
+    const backBtnPhone = document.getElementById('link-back-method-phone');
+    if (backBtnPhone) {
+      // BUG-13: buyers should also be able to go back and switch to email
+      backBtnPhone.classList.remove('hidden');
+    }
+
+    const backRequestBtn = document.getElementById('link-back-request');
+    if (backRequestBtn) {
+      if (role === 'admin') {
+        backRequestBtn.textContent = '← Use a different method';
+      }
+      // BUG-12: label is set contextually in showVerifyView based on activeMethod
     }
 
     if (role === 'admin') {
@@ -265,17 +294,19 @@ export class AuthModal {
       adminCaution.style.display = role === 'buyer' ? 'none' : '';
     }
 
-    if (role === 'grower') {
-      this.showEmailView();
-    } else if (role === 'admin') {
+    if (role === 'admin') {
       this.showAdminPasswordView();
     } else {
-      this.showMethodView();
+      this.showPhoneView();
     }
     this.modal.classList.add('open');
   }
 
   close() {
+    this._lastPhone = undefined;
+    this._mockPhoneEmail = undefined;
+    this._pendingContact = null;
+    this._lastResendParams = null; // BUG-10: clear stale resend params on close
     this.modal.classList.remove('open');
     this.formRequest?.reset();
     this.formVerify?.reset();
@@ -319,6 +350,8 @@ export class AuthModal {
 
   showPhoneView() {
     this.activeMethod = 'phone';
+    this._mockPhoneEmail = undefined;
+    this._lastPhone = undefined;
     this._hide(this.methodView);
     this._hide(this.requestView);
     this._hide(this.verifyView);
@@ -327,6 +360,8 @@ export class AuthModal {
 
   showEmailView() {
     this.activeMethod = 'email';
+    this._mockPhoneEmail = undefined;
+    this._lastPhone = undefined;
     this._hide(this.methodView);
     this._hide(this.phoneView);
     this._hide(this.verifyView);
@@ -348,10 +383,12 @@ export class AuthModal {
         // In mock/dev mode, show the OTP directly in the UI
         subtitle.textContent = `Mock OTP: ${mockOtp} — enter it below to log in`;
       } else {
+        // BUG-9: For phone login, clarify OTP is sent via SMS (not the synthetic email)
         const displayContact = this.activeMethod === 'phone'
-          ? contact : contact;
+          ? contact.replace(/^(\+91)?/, '+91 ').trim()
+          : contact;
         subtitle.textContent = this.activeMethod === 'phone'
-          ? `Enter the 6-digit OTP sent to ${displayContact}`
+          ? `Enter the 6-digit OTP sent via SMS to ${displayContact}`
           : `Enter the 6-digit code sent to ${displayContact}`;
       }
     }
@@ -360,9 +397,66 @@ export class AuthModal {
     const otpInput = this.otpInput;
     if (otpInput && mockOtp) {
       otpInput.value = mockOtp;
+      // Auto-submit OTP verification
+      setTimeout(() => {
+        this.handleVerifyOtp();
+      }, 300);
+    }
+
+    // BUG-12: set back button label contextually based on active method
+    const backRequestBtn = document.getElementById('link-back-request');
+    if (backRequestBtn) {
+      if (this.activeMethod === 'phone') {
+        backRequestBtn.textContent = '← Change phone number';
+      } else if (this.activeMethod === 'email') {
+        backRequestBtn.textContent = '← Change email';
+      }
     }
 
     this.otpInput?.focus();
+
+    // Start resend countdown
+    this._startResendCountdown();
+  }
+
+  _startResendCountdown() {
+    if (this._resendTimer) clearInterval(this._resendTimer);
+    const link = document.getElementById('link-resend-otp');
+    const timer = document.getElementById('resend-timer');
+    if (!link || !timer) return;
+    let sec = 30;
+    timer.textContent = `Resend OTP in ${sec}s`;
+    timer.style.display = '';
+    link.style.display = 'none';
+    this._resendTimer = setInterval(() => {
+      sec--;
+      if (sec <= 0) {
+        clearInterval(this._resendTimer);
+        this._resendTimer = null;
+        timer.style.display = 'none';
+        link.style.display = '';
+      } else {
+        timer.textContent = `Resend OTP in ${sec}s`;
+      }
+    }, 1000);
+  }
+
+  async handleResendOtp() {
+    if (!this._lastResendParams) return;
+    const { email, role, fullName, phone } = this._lastResendParams;
+    const link = document.getElementById('link-resend-otp');
+    if (link) { link.textContent = 'Sending...'; link.style.pointerEvents = 'none'; }
+    try {
+      const result = await authApi.requestOtp(email, role, fullName || '', phone || '');
+      this.showVerifyView(this._pendingContact, result && result.otp ? result.otp : null);
+    } catch (err) {
+      if (this.verifyError) {
+        this.verifyError.textContent = err.message || 'Failed to resend OTP.';
+        this.verifyError.classList.remove('hidden');
+      }
+    } finally {
+      if (link) { link.textContent = 'Resend OTP'; link.style.pointerEvents = ''; }
+    }
   }
 
   showAdminPasswordView() {
@@ -387,16 +481,17 @@ export class AuthModal {
   }
 
   async handleRequestPhoneOtp() {
-    const phone = this.phoneInput?.value.trim();
+    const raw = this.phoneInput?.value;
+    const digits = (raw || '').replace(/\D/g, '').slice(-10);
     const country = this.phoneCountry?.value || '+91';
-    const fullPhone = `${country}${phone}`;
+    const fullPhone = `${country}${digits}`;
     const fullName = document
       .getElementById('auth-phone-fullname')
       ?.value.trim();
 
-    if (!isValidIndianPhone(phone)) {
+    if (!digits || !/^[6-9]\d{9}$/.test(digits)) {
       if (this.phoneError) {
-        this.phoneError.textContent = 'Enter a valid Indian phone number (e.g. +91 9876543210).';
+        this.phoneError.textContent = 'Enter a valid Indian phone number (digits 6–9, e.g. +91 6123456789).';
         this.phoneError.classList.remove('hidden');
       }
       return;
@@ -410,17 +505,19 @@ export class AuthModal {
 
     try {
       // Use phone as email for backend (Joi email() requires a valid TLD)
-      const mockEmail = `phone-${phone.replace(/\D/g, '')}@sporekart.com`;
+      const mockEmail = `phone-${digits}@sporekart.com`;
       // Set before the API call so it's available even if request fails
       this._mockPhoneEmail = mockEmail;
       this._lastPhone = fullPhone;
 
+      const resolvedName = fullName || `User ${digits.slice(-4)}`;
       const result = await authApi.requestOtp(
         mockEmail,
         this.currentRole,
-        fullName || `User ${phone.slice(-4)}`,
+        resolvedName,
         fullPhone,
       );
+      this._lastResendParams = { email: mockEmail, role: this.currentRole, fullName: resolvedName, phone: fullPhone };
       this.phoneError?.classList.add('hidden');
 
       this.showVerifyView(fullPhone, result && result.otp ? result.otp : null);
@@ -470,7 +567,9 @@ export class AuthModal {
 
     try {
       const result = await authApi.requestOtp(email, this.currentRole, fullName);
+      this._lastResendParams = { email, role: this.currentRole, fullName };
       this.requestError?.classList.add('hidden');
+
       this.showVerifyView(email, result && result.otp ? result.otp : null);
     } catch (err) {
       if (this.requestError) {
@@ -561,6 +660,10 @@ export class AuthModal {
       if (result && result.otp) {
         if (sentToEl) sentToEl.textContent = `Demo OTP: ${result.otp}`;
         if (this.adminOtpInput) this.adminOtpInput.value = result.otp;
+        // Auto-submit OTP verification
+        setTimeout(() => {
+          this.handleAdminPasswordLogin();
+        }, 300);
       } else if (sentToEl) {
         sentToEl.textContent = 'OTP sent to registered mobile';
       }
@@ -606,7 +709,7 @@ export class AuthModal {
       clearAuth();
       const data = await authApi.verifyOtp(contact, otpCode, {
         loginMethod: this.activeMethod,
-        whatsappNumber: this._lastPhone,
+        ...(this.activeMethod === 'phone' ? { whatsappNumber: this._lastPhone } : {}),
       });
       // Mark login method so profile UI can honor immutability rules
       data.user = data.user || {};
@@ -645,6 +748,26 @@ export class AuthModal {
 
   _hide(el) {
     if (el) el.classList.add('hidden');
+  }
+
+  async _lookupAndPrefillName(value, method) {
+    if (!value) return;
+    // BUG-4: slice last 10 digits to handle both "6123456789" and "+916123456789" formats
+    if (method === 'phone' && !/^[6-9]\d{9}$/.test(value.replace(/\D/g, '').slice(-10))) return;
+    if (method === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return;
+    const nameField = method === 'phone'
+      ? document.getElementById('auth-phone-fullname')
+      : this.nameInput;
+    if (!nameField || nameField.value.trim().length >= 2) return;
+    try {
+      const res = await fetch(`/api/auth/lookup?q=${encodeURIComponent(value)}`);
+      if (!res.ok) return;
+      const body = await res.json();
+      const data = body && body.data ? body.data : body;
+      if (data && data.exists && data.fullName) {
+        nameField.value = data.fullName;
+      }
+    } catch { /* silently ignore */ }
   }
 }
 

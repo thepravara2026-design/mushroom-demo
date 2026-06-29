@@ -1,14 +1,10 @@
 export function isValidIndianPhone(value) {
   if (!value) return false;
   const digits = value.replace(/\D/g, '');
-  if (digits.length === 12 && digits.startsWith('91')) {
-    return /^[6-9]\d{9}$/.test(digits.slice(2));
-  }
-  if (digits.length === 11 && digits.startsWith('0')) {
-    return /^[6-9]\d{9}$/.test(digits.slice(1));
-  }
-  if (digits.length === 10) {
-    return /^[6-9]\d{9}$/.test(digits);
+  // If more than 10 digits, take the last 10 (handles country code prefix and maxlength truncation)
+  const normalized = digits.length > 10 ? digits.slice(-10) : digits;
+  if (normalized.length === 10) {
+    return /^[6-9]\d{9}$/.test(normalized);
   }
   return false;
 }
@@ -56,7 +52,7 @@ export function getFieldError(fieldName, value, extra) {
       return '';
     case 'phone':
       if (!v) return 'Phone number is required.';
-      if (!isValidIndianPhone(v)) return 'Enter a valid Indian phone number (e.g. +91 9876543210).';
+      if (!isValidIndianPhone(v)) return 'Enter a valid Indian phone number (digits 6–9, e.g. +91 6123456789).';
       return '';
     case 'otp':
       if (!v) return 'OTP is required.';

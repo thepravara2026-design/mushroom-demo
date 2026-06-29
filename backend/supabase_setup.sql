@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS products (
   gst_rate INTEGER DEFAULT 5 NOT NULL,
   stock INTEGER DEFAULT 100 NOT NULL,
   weight_pricing JSONB,
+  storage_handling TEXT,
+  warranty_policy TEXT,
+  return_policy TEXT,
+  shipping_info TEXT,
+  compliance_info TEXT,
+  highlights JSONB DEFAULT '[]'::JSONB,
+  certificates JSONB DEFAULT '[]'::JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
@@ -528,7 +535,184 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
--- 6. SET ADMIN ROLE IN SUPABASE AUTH (run once per admin user)
+-- 6. SHIPPING TABLES
+-- ============================================================
+
+-- Shipping Provider Registry
+CREATE TABLE IF NOT EXISTS shipping_providers (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  provider_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT false NOT NULL,
+  is_default BOOLEAN DEFAULT false NOT NULL,
+  config JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+-- Core Shipments Table (order_id is TEXT to match orders.id)
+CREATE TABLE IF NOT EXISTS shipments (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  shipping_provider_id TEXT NOT NULL REFERENCES shipping_providers(id) ON DELETE RESTRICT,
+  awb_code TEXT,
+  status TEXT DEFAULT 'pending' NOT NULL,
+  tracking_url TEXT,
+  pickup_scheduled_at TIMESTAMP WITH TIME ZONE,
+  shipped_at TIMESTAMP WITH TIME ZONE,
+  delivered_at TIMESTAMP WITH TIME ZONE,
+  weight NUMERIC(10,3),
+  is_cod BOOLEAN DEFAULT false NOT NULL,
+  courier_name TEXT,
+  courier_id TEXT,
+  label_url TEXT,
+  manifest_url TEXT,
+  provider_response JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_shipments_order ON shipments(order_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_awb ON shipments(awb_code);
+CREATE INDEX IF NOT EXISTS idx_shipments_provider ON shipments(shipping_provider_id);
+
+-- Tracking Events Timeline
+CREATE TABLE IF NOT EXISTS shipment_tracking_events (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  shipment_id TEXT NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  location TEXT,
+  description TEXT,
+  occurred_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tracking_events_shipment ON shipment_tracking_events(shipment_id, occurred_at DESC);
+
+ALTER TABLE shipping_providers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shipments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shipment_tracking_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins manage shipping providers" ON shipping_providers;
+CREATE POLICY "Admins manage shipping providers"
+  ON shipping_providers FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Users view own shipments" ON shipments;
+CREATE POLICY "Users view own shipments"
+  ON shipments FOR SELECT
+  USING (auth.uid()::text IN (SELECT user_id FROM orders WHERE id = order_id));
+
+DROP POLICY IF EXISTS "Admins manage shipments" ON shipments;
+CREATE POLICY "Admins manage shipments"
+  ON shipments FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Users view own tracking events" ON shipment_tracking_events;
+CREATE POLICY "Users view own tracking events"
+  ON shipment_tracking_events FOR SELECT
+  USING (auth.uid()::text IN (SELECT o.user_id FROM shipments s JOIN orders o ON o.id = s.order_id WHERE s.id = shipment_id));
+
+DROP POLICY IF EXISTS "Admins manage tracking events" ON shipment_tracking_events;
+CREATE POLICY "Admins manage tracking events"
+  ON shipment_tracking_events FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- Seed providers
+INSERT INTO shipping_providers (provider_key, name, is_active, is_default, config) VALUES
+('shiprocket', 'Shiprocket', true, true, '{"base_url": "https://apiv2.shiprocket.in/v1/external"}'::jsonb),
+('manual_legacy', 'Manual / Legacy', false, false, '{}'::jsonb)
+ON CONFLICT (provider_key) DO NOTHING;
+
+-- ============================================================
+-- 6A. Fulfillment Pipeline (replaces manual delivery_status progression)
+-- ============================================================
+
+-- New columns on orders
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_status TEXT DEFAULT 'pending_fulfillment' NOT NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipment_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS restocked BOOLEAN DEFAULT false NOT NULL;
+
+-- New columns on shipments
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS provider_shipment_id TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS service_type TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS rate NUMERIC(10,2);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS estimated_delivery_date DATE;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS origin_address TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS recipient_address_snapshot JSONB;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pickup_requested BOOLEAN DEFAULT false NOT NULL;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pickup_requested_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS label_generated BOOLEAN DEFAULT false NOT NULL;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS manifest_generated BOOLEAN DEFAULT false NOT NULL;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+
+-- Immutable audit trail for ALL order status changes
+CREATE TABLE IF NOT EXISTS order_status_history (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  field_name TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT NOT NULL,
+  changed_by TEXT NOT NULL,
+  changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_id, changed_at DESC);
+
+-- Fulfillment tasks (replaces manual status steps)
+CREATE TABLE IF NOT EXISTS fulfillment_tasks (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  task_type TEXT NOT NULL CHECK (task_type IN ('packing', 'labeling', 'pickup', 'handover')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'skipped')),
+  assigned_to TEXT,
+  completed_at TIMESTAMP WITH TIME ZONE,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fulfillment_tasks_order ON fulfillment_tasks(order_id);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_delivery_status ON orders(delivery_status);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_fulfillment_status ON orders(fulfillment_status);
+CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shipments_awb_unique ON shipments(awb_code) WHERE awb_code IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shipping_providers_default ON shipping_providers(is_default) WHERE is_default = true;
+
+-- RLS for new tables
+ALTER TABLE order_status_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fulfillment_tasks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users view own order status history" ON order_status_history;
+CREATE POLICY "Users view own order status history"
+  ON order_status_history FOR SELECT
+  USING (auth.uid()::text IN (SELECT user_id FROM orders WHERE id = order_id));
+
+DROP POLICY IF EXISTS "Admins manage order status history" ON order_status_history;
+CREATE POLICY "Admins manage order status history"
+  ON order_status_history FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Admins manage fulfillment tasks" ON fulfillment_tasks;
+CREATE POLICY "Admins manage fulfillment tasks"
+  ON fulfillment_tasks FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- Allow anyone to see active providers (needed for checkout serviceability)
+DROP POLICY IF EXISTS "Anyone can view active shipping providers" ON shipping_providers;
+CREATE POLICY "Anyone can view active shipping providers"
+  ON shipping_providers FOR SELECT
+  USING (is_active = true);
+
+-- ============================================================
+-- 7. SET ADMIN ROLE IN SUPABASE AUTH (run once per admin user)
 -- Replace the email below with your actual admin email.
 -- ============================================================
 -- UPDATE auth.users

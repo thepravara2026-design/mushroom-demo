@@ -1240,6 +1240,28 @@
   box-shadow: 0 4px 14px rgba(26, 150, 80, 0.3);
 }
 
+.ship-status-pill .section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.08);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+.ship-status-pill.active .section-count {
+  background: rgba(255,255,255,0.25);
+  color: #fff;
+}
+
+.ship-status-pill.active .section-count.zero { display: none; }
+
 /* ── Refund Stats Cards — Premium ──────────────────────────── */
 .refund-stat-card {
   background: #fff;
@@ -1287,6 +1309,90 @@
 .refund-stat-value--green { color: #059669; }
 .refund-stat-value--amber { color: #d97706; }
 .refund-stat-value--red   { color: #dc2626; }
+.refund-stat-value--blue  { color: #3b82f6; }
+
+/* ── Shipment Info in Order Cards ── */
+.aoc-shipment-info {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(16, 185, 129, 0.05);
+  border: 1px solid rgba(16, 185, 129, 0.12);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aoc-ship-line {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.aoc-ship-label {
+  font-weight: 600;
+  color: #94a3b8;
+  min-width: 48px;
+}
+
+.aoc-ship-awb {
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  background: rgba(15, 23, 42, 0.5);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #e2e8f0;
+}
+
+.aoc-ship-link {
+  color: #10b981;
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+.aoc-ship-link:hover {
+  text-decoration: underline;
+  color: #059669;
+}
+
+.aoc-ship-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+
+/* ── Shipments Table ── */
+.admin-shipments-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.admin-shipments-table th {
+  background: #f8fafc;
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 0.76rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.admin-shipments-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.admin-shipments-table tr:hover td {
+  background: #f8fafc;
+}
 
 .refund-section-card {
   background: #fff;
@@ -2252,4 +2358,89 @@
 @media (max-width: 400px) {
   .admin-content-inner { padding: 12px; }
   .admin-form-compact-grid { padding: 16px; gap: 12px; }
+}
+
+/* ── Fulfillment Pipeline UI ─────────────────────────────── */
+.aoc-fulfillment-pipeline {
+  background: linear-gradient(135deg, #f0fdf4, #ecfdf5);
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.aoc-fulfillment-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #166534;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.aoc-fulfillment-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aoc-ful-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.aoc-ful-btn:hover:not(:disabled) {
+  background: #f0fdf4;
+  border-color: #22c55e;
+  color: #166534;
+}
+
+.aoc-ful-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.aoc-ful-btn-primary {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+.aoc-ful-btn-primary:hover:not(:disabled) {
+  background: #15803d;
+  border-color: #15803d;
+  color: #fff;
+}
+
+.aoc-ful-btn-active {
+  background: #dcfce7;
+  border-color: #22c55e;
+  color: #166534;
+}
+
+.aoc-ful-btn-done {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #fff;
+}
+
+.aoc-fulfillment-status-text {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: #4b5563;
+}
+
+.aoc-fulfillment-status-text strong {
+  color: #166534;
+  text-transform: capitalize;
 }

@@ -38,8 +38,8 @@ router.post(
   validateBody(validator.adminApproveRejectSchema),
   async (req, res) => {
     try {
-      const { adminNote, refundType } = req.body;
-      const result = await service.approveCancellation(req.params.id, adminNote, req.user, refundType || 'auto');
+      const { adminNote } = req.body;
+      const result = await service.approveCancellation(req.params.id, adminNote, req.user);
       try {
         sendSseEvent(
           "order:updated",
@@ -243,6 +243,37 @@ router.post(
 );
 
 /**
+ * Admin: Progress manual refund step (no gateway - manual only)
+ * Steps: initiated → processing → completed
+ */
+router.post(
+  "/manual-refund/:id/progress",
+  requireAdmin,
+  validateBody(validator.refundProgressSchema),
+  async (req, res) => {
+    try {
+      const { step } = req.body;
+      const updatedOrder = await service.progressManualRefundStep(req.params.id, step, req.user);
+      try {
+        sendSseEvent(
+          "order:updated",
+          { order: updatedOrder },
+          (sub) =>
+            (sub.user && sub.user.role === "admin") ||
+            (sub.user && sub.user.userId === updatedOrder.user_id),
+        );
+      } catch (_) { /* ignore SSE errors */ }
+      return success(res, {
+        message: `Manual refund status updated to "${step}".`,
+        order: updatedOrder
+      });
+    } catch (err) {
+      return respondError(res, err.message, 500);
+    }
+  }
+);
+
+/**
  * Admin: Get Refund Dashboard Statistics & List (Queue)
  */
 router.get(
@@ -266,7 +297,7 @@ router.get(
       }
 
       const { data: users } = await db.from("users").select("id, email, full_name");
-      const { data: orders } = await db.from("orders").select("id, total, status, delivery_status");
+      const { data: orders } = await db.from("orders").select("id, total, status, delivery_status, cancel_reason");
 
       // Enrich refunds with order details & user details
       const userMap = {};
@@ -290,6 +321,7 @@ router.get(
           user_name: user.name,
           order_total: order.total,
           order_status: order.status,
+          order_cancel_reason: order.cancel_reason,
           order_delivery_status: order.delivery_status
         };
       });
@@ -314,8 +346,8 @@ router.get(
       const { data: allRefunds } = await db.from("refunds").select("*");
       const allRefundList = allRefunds || [];
       const stats = {
-        totalRefunded: allRefundList.filter(r => r.status === "processed").reduce((acc, r) => acc + Number(r.amount || 0), 0),
-        pendingCount: allRefundList.filter(r => r.status === "initiated" || r.status === "pending").length,
+        totalRefunded: allRefundList.filter(r => r.status === "processed" || r.status === "completed").reduce((acc, r) => acc + Number(r.amount || 0), 0),
+        pendingCount: allRefundList.filter(r => ["initiated", "pending", "processing"].includes(r.status)).length,
         failedCount: allRefundList.filter(r => r.status === "failed").length,
         totalCount: totalCount
       };
