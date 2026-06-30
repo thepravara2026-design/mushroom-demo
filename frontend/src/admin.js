@@ -21,7 +21,6 @@ let adminHistoryPageSize = 10;
 let adminHistorySort = 'date_desc';
 let _adminInventoryPage = 1;
 let adminInventoryPageSize = 10;
-let productImagePreviewValid = false;
 let trainImagePreviewValid = false;
 
 const loginPanel = document.getElementById('admin-login-panel');
@@ -35,15 +34,9 @@ const btnViewShop = document.getElementById('btn-admin-view-shop');
 const btnLogout = document.getElementById('btn-admin-logout');
 const adminActionMenuBtn = document.getElementById('admin-action-menu-btn');
 const adminActionMenu = document.getElementById('admin-action-menu');
-const resetFormBtn = document.getElementById('btn-admin-reset-form');
 const resetCatBtn = document.getElementById('btn-admin-reset-cat');
 const saveCatBtn = document.getElementById('btn-admin-save-cat');
-const productForm = document.getElementById('form-admin-add-product');
-const productIdDisplay = document.getElementById('admin-prod-id-display');
-const productImageUrl = document.getElementById('admin-prod-image-url');
-const weightPricingContainer = document.getElementById('admin-weight-pricing-container');
 const capsuleWeightContainer = document.getElementById('admin-capsule-weight-container');
-const btnAddWeightRow = document.getElementById('btn-add-weight-row');
 // Training DOM elements
 const trainForm = document.getElementById('form-admin-add-training');
 const trainEditId = document.getElementById('admin-train-edit-id');
@@ -63,17 +56,11 @@ const trainImageUrl = document.getElementById('admin-train-image-url');
 const trainImageBrowse = document.getElementById('admin-train-image-browse');
 const trainImageFile = document.getElementById('admin-train-image-file');
 const trainImagePreview = document.getElementById('admin-train-img-preview');
-const productImageBrowse = document.getElementById('admin-prod-image-browse');
-const productImageFile = document.getElementById('admin-prod-image-file');
 const categoryUidInput = document.getElementById('admin-cat-uid');
 const categoryImageUrl = document.getElementById('admin-cat-image-url');
 const categoryImageBrowse = document.getElementById('admin-cat-image-browse');
 const categoryImageFile = document.getElementById('admin-cat-image-file');
 const categoryImagePreview = document.getElementById('admin-cat-image-preview');
-const shippingChargeInput = document.getElementById('admin-shipping-charge');
-const saveShippingChargeBtn = document.getElementById(
-  'admin-save-shipping-charge',
-);
 // Blog DOM elements
 const blogModal = document.getElementById('admin-blog-modal');
 const blogModalTitle = document.getElementById('admin-blog-modal-title');
@@ -198,7 +185,7 @@ function showLoginPanel() {
 
   if (otpField) otpField.classList.add('hidden');
   if (emailField) emailField.classList.remove('hidden');
-  if (btn) btn.textContent = 'Send OTP';
+  if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
   if (sentEl) sentEl.textContent = '';
   if (emailInput) emailInput.value = '';
   if (otpInput) otpInput.value = '';
@@ -268,7 +255,7 @@ function generateProductId(categoryUid) {
   }
   const existingIds = _adminProducts
     .filter(
-      (p) => p.category === document.getElementById('admin-prod-category')?.value,
+      (p) => p.category === document.getElementById('admin-capsule-prod-category')?.value,
     )
     .map((p) => {
       const regex = new RegExp(`^${escapeRegExp(categoryUid)}-pid-(\\d+)$`);
@@ -310,22 +297,6 @@ function applyAdminInventorySort(products) {
     const nameB = String(b.name || '').toLowerCase();
     return sortMultiplier * nameA.localeCompare(nameB);
   });
-}
-
-async function updateProductIdDisplay() {
-  const editId = document.getElementById('admin-edit-id')?.value;
-  if (editId) return;
-  const productCategory = document.getElementById('admin-prod-category');
-  if (!productIdDisplay || !productCategory) return;
-  const selectedOption = productCategory.selectedOptions?.[0];
-  const categoryId = productCategory.value;
-  try {
-    const res = await fetchWithAuth(`/products/next-id${categoryId ? `?category=${encodeURIComponent(categoryId)}` : ''}`);
-    productIdDisplay.value = res.productId;
-  } catch {
-    // fallback: clear field on error
-    productIdDisplay.value = '';
-  }
 }
 
 function updateCategoryImagePreview() {
@@ -375,75 +346,6 @@ function updateCategoryImagePreview() {
 
   // Default placeholder
   categoryImagePreview.innerHTML = '<i class="fa-solid fa-image"></i><span>Category image preview</span>';
-}
-
-function renderUploadPreview(preview, file, url, label) {
-  if (!preview) return;
-
-  if (file) {
-    const reader = new FileReader();
-    preview.dataset.previewValid = 'false';
-    reader.onload = () => {
-      preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
-      preview.dataset.previewValid = 'true';
-      productImagePreviewValid = true;
-    };
-    reader.onerror = () => {
-      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Unable to read image file</span>';
-      preview.dataset.previewValid = 'false';
-      productImagePreviewValid = false;
-    };
-    reader.readAsDataURL(file);
-    return;
-  }
-
-  if (url) {
-    if (url.startsWith('//')) {
-      url = `https:${url}`;
-    } else if (
-      !/^https?:\/\//i.test(url)
-      && !/^data:/i.test(url)
-      && !/^blob:/i.test(url)
-      && url.includes('.')
-    ) {
-      url = `https://${url}`;
-    }
-
-    preview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
-    preview.dataset.previewValid = 'false';
-    productImagePreviewValid = false;
-
-    const img = new Image();
-    let handled = false;
-    img.onload = () => {
-      if (handled) return;
-      handled = true;
-      preview.innerHTML = `<img src="${url}" alt="Preview">`;
-      preview.dataset.previewValid = 'true';
-      productImagePreviewValid = true;
-    };
-    img.onerror = () => {
-      if (handled) return;
-      handled = true;
-      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image from URL. Use a direct image URL (jpg, png, webp, or data URL) or upload a local image file.</span>';
-      preview.dataset.previewValid = 'false';
-      productImagePreviewValid = false;
-    };
-
-    try {
-      img.src = url;
-    } catch (e) {
-      console.warn(e);
-      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
-      preview.dataset.previewValid = 'false';
-      productImagePreviewValid = false;
-    }
-    return;
-  }
-
-  preview.innerHTML = `<i class="fa-solid fa-image"></i><span>${label}</span>`;
-  preview.dataset.previewValid = 'false';
-  productImagePreviewValid = false;
 }
 
 function updateTrainingImagePreview() {
@@ -590,7 +492,7 @@ function wpwSetValue(root, value) {
 function wpwTransformStatic() {
   document.querySelectorAll('.admin-weight-select, .admin-capsule-weight-select').forEach(sel => {
     if (sel.closest('.wpw') || sel.hidden) return;
-    const ctr = sel.closest('#admin-weight-pricing-container, #admin-capsule-weight-container');
+    const ctr = sel.closest('#admin-capsule-weight-container');
     const mode = ctr?.dataset.mode;
     const wrap = document.createElement('div');
     wrap.className = 'wpw';
@@ -649,120 +551,6 @@ function getActivePricingMode() {
   return activeBtn ? activeBtn.getAttribute('data-mode') : 'weight';
 }
 
-function toggleStockField() {
-  const rows = weightPricingContainer.querySelectorAll('.admin-weight-pricing-row');
-  const hasVariants = rows.length > 0 && Array.from(rows).some(r => r.querySelector('.admin-weight-select')?.value);
-  const stockFieldContainer = document.getElementById('admin-prod-stock')?.closest('.admin-pf-field');
-  if (stockFieldContainer) {
-    stockFieldContainer.style.display = hasVariants ? 'none' : '';
-  }
-}
-
-function createWeightRow(value) {
-  const mode = weightPricingContainer?.dataset.mode;
-  const row = document.createElement('div');
-  row.className = 'admin-weight-pricing-row';
-  row.innerHTML = `
-    ${wpwHTML('admin-weight-select', mode)}
-    <div class="awp-fields">
-      <div class="awp-field">
-        <span class="awp-field-icon"><i class="fa-solid fa-rupee-sign"></i></span>
-        <input type="number" step="0.01" class="admin-weight-price" placeholder="Price" />
-      </div>
-      <div class="awp-field">
-        <span class="awp-field-icon awp-field-icon-muted"><i class="fa-solid fa-tag"></i></span>
-        <input type="number" step="0.01" class="admin-weight-mrp" placeholder="MRP" />
-      </div>
-      <div class="awp-field awp-field-stock">
-        <span class="awp-field-icon"><i class="fa-solid fa-cubes"></i></span>
-        <input type="number" class="admin-weight-stock" placeholder="Stock" min="0" />
-      </div>
-    </div>
-    <button type="button" class="btn-weight-remove" title="Remove variant"><i class="fa-solid fa-trash-can"></i></button>
-  `;
-  wpwAttach(row);
-  if (value) {
-    wpwSetValue(row, value);
-    row.querySelector('.admin-weight-price').value = value.price;
-    row.querySelector('.admin-weight-mrp').value = value.mrp_price || '';
-    row.querySelector('.admin-weight-stock').value = value.stock ?? '';
-  }
-  row.querySelector('.btn-weight-remove').addEventListener('click', () => {
-    if (weightPricingContainer.querySelectorAll('.admin-weight-pricing-row').length > 1) {
-      row.remove();
-    }
-    toggleStockField();
-    updateMainTotalStock();
-  });
-  return row;
-}
-
-function sortWeightVariants(data) {
-  return [...data].sort((a, b) => {
-    const toBase = (v) => (v.unit === 'kg' || v.unit === 'l') ? v.weight * 1000 : v.weight;
-    return toBase(a) - toBase(b);
-  });
-}
-
-function getWeightPricingData() {
-  const rows = weightPricingContainer.querySelectorAll('.admin-weight-pricing-row');
-  const data = [];
-  rows.forEach(row => {
-    const sel = row.querySelector('.admin-weight-select');
-    const price = row.querySelector('.admin-weight-price').value;
-    const mrp = row.querySelector('.admin-weight-mrp').value;
-    const stockVal = row.querySelector('.admin-weight-stock')?.value;
-    if (sel.value && price) {
-      const match = sel.value.match(/^(\d+)(g|kg|ml|l)$/);
-      if (match) {
-        data.push({
-          weight: parseInt(match[1], 10),
-          unit: match[2],
-          price: parseFloat(price),
-          ...(mrp ? { mrp_price: parseFloat(mrp) } : {}),
-          ...(stockVal ? { stock: parseInt(stockVal, 10) } : { stock: 0 }),
-        });
-      }
-    }
-  });
-  return sortWeightVariants(data);
-}
-
-function setWeightPricingData(data) {
-  weightPricingContainer.innerHTML = '';
-  if (Array.isArray(data) && data.length > 0) {
-    const isLitre = data.some(v => v.unit === 'ml' || v.unit === 'l');
-    const targetMode = isLitre ? 'litre' : 'weight';
-    weightPricingContainer.dataset.mode = targetMode;
-    document.querySelectorAll('.pricing-type-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.getAttribute('data-mode') === targetMode);
-    });
-    sortWeightVariants(data).forEach(item => weightPricingContainer.appendChild(createWeightRow(item)));
-  }
-  if (!weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
-    weightPricingContainer.appendChild(createWeightRow(null));
-  }
-  toggleStockField();
-  updateMainTotalStock();
-}
-// -----------------------------
-// Helper: product/category helpers
-// -----------------------------
-function buildProductBody({ name, category, description, gstRate, image_url, productId, editId, weightPricing, stock, image_urls }) {
-  const body = {
-    name,
-    category,
-    description,
-    gst_rate: Number.parseInt(String(gstRate || 0), 10),
-    weight_pricing: weightPricing,
-    stock: Math.max(0, stock || 0),
-  };
-  if (image_url) body.image_url = image_url;
-  if (image_urls && image_urls.length > 0) body.image_urls = image_urls;
-  if (!editId) body.id = productId;
-  return body;
-}
-
 async function submitJson(url, method, body) {
   const res = await fetch(url, {
     method,
@@ -786,11 +574,13 @@ function buildCategoryBody(editId, { categoryId, id, name, description, image_ur
 async function fetchAdminInventory() {
   const grid = document.getElementById('admin-inventory-grid');
   if (grid) {
-    grid.innerHTML = `
-      <div style="display:flex; justify-content:center; align-items:center; padding: 2rem; width:100%;">
-        <i class="fa-solid fa-spinner fa-spin loader-icon" style="font-size: 1.5rem;"></i>
+    grid.innerHTML = '<div class="skeleton-table">' + Array(5).fill(`
+      <div class="skeleton-row">
+        <span class="skeleton skeleton-avatar"></span>
+        <div style="flex:1;"><div class="skeleton skeleton-text"></div></div>
+        <div style="width:80px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
       </div>
-    `;
+    `).join('') + '</div>';
   }
 
   try {
@@ -906,6 +696,7 @@ function renderAdminInventory() {
       </div>`;
       }
 
+      const invThreshold = p.low_stock_threshold || 10;
       return `
       <div class="ac-card ${isRecent ? 'ac-card--recent' : ''}" data-id="${p.id}">
         <div class="ac-row" onclick="globalThis.toggleOrderExpand(this)">
@@ -914,7 +705,7 @@ function renderAdminInventory() {
           <span class="ac-meta">${categoryName}</span>
           <span class="ac-prod-price">₹${(p.price || 0).toFixed(2)}${p.mrp_price ? ` <span class="ac-mrp-strike">₹${p.mrp_price.toFixed(2)}</span>` : ''}</span>
           <span class="ac-prod-gst">GST ${p.gst_rate}%</span>
-          <span class="ac-prod-stock">Stock: ${p.stock ?? 0}</span>
+          <span class="ac-prod-stock" style="color:${(p.stock || 0) === 0 ? 'var(--color-red, #ef4444)' : (p.stock || 0) <= invThreshold ? 'var(--color-yellow, #f59e0b)' : 'inherit'};">${(p.stock || 0) === 0 ? '🔴 Out of Stock' : (p.stock || 0) <= invThreshold ? `🟡 Low: ${p.stock}` : `✅ Stock: ${p.stock}`}</span>
           <div class="ac-actions">
             <button class="ac-btn-edit" onclick="event.stopPropagation();globalThis.adminEditProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
             <button class="ac-btn-del" onclick="event.stopPropagation();globalThis.adminDeleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i></button>
@@ -1002,169 +793,6 @@ function updateGalleryCount(containerId, badgeId) {
   if (badge) badge.textContent = `${urls.length} / 3 min`;
 }
 
-function createGallerySlotHTML(index, previewPrefix, galleryName, initialValue) {
-  const dataAttr = galleryName ? `data-gallery="${galleryName}"` : '';
-  const previewContent = initialValue
-    ? `<img src="${initialValue}" alt="Gallery ${index + 1}" />`
-    : `<i class="fa-solid fa-image"></i><span>URL #${index + 1}</span>`;
-  return `
-    <div class="gallery-slot" data-slot="${index}">
-      <div class="gallery-preview" id="${previewPrefix}-${index}">
-        ${previewContent}
-      </div>
-      <div class="gallery-input-row">
-        <div class="gallery-input-wrap">
-          <i class="fa-solid fa-link"></i>
-          <input type="url" class="gallery-url-input" ${dataAttr} data-slot="${index}" placeholder="Paste image URL..." value="${initialValue || ''}" />
-        </div>
-        <button type="button" class="gallery-remove-btn" ${dataAttr} data-slot="${index}" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-    </div>`;
-}
-
-function wireGalleryInput(input, newIdx, previewPrefix) {
-  input.addEventListener('input', () => {
-    const preview = document.getElementById(`${previewPrefix}-${newIdx}`);
-    const val = input.value.trim();
-    if (preview) {
-      if (val) {
-        preview.innerHTML = `<img src="${val}" alt="Gallery ${newIdx + 1}" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-image\\\\\\'></i><span>URL #${newIdx + 1}</span>'">`;
-      } else {
-        preview.innerHTML = `<i class="fa-solid fa-image"></i><span>URL #${newIdx + 1}</span>`;
-      }
-    }
-  });
-}
-
-function wireGalleryRemove(rmBtn, newSlot, containerId, previewPrefix, badgeId) {
-  rmBtn.style.display = '';
-  rmBtn.addEventListener('click', () => {
-    const g = document.getElementById(containerId);
-    if (g && g.querySelectorAll('.gallery-slot').length <= 1) return;
-    newSlot.remove();
-    reindexGallerySlots(containerId, previewPrefix);
-    updateGalleryCount(containerId, badgeId);
-    const g2 = document.getElementById(containerId);
-    if (g2 && g2.querySelectorAll('.gallery-slot').length === 1) {
-      const lastRm = g2.querySelector('.gallery-remove-btn');
-      if (lastRm) lastRm.style.display = 'none';
-    }
-  });
-}
-
-function addGallerySlot(containerId, previewPrefix, galleryName, initialValue) {
-  const grid = document.getElementById(containerId);
-  if (!grid) return;
-  const slots = grid.querySelectorAll('.gallery-slot');
-  if (slots.length >= 8) return;
-  const newIdx = slots.length;
-  grid.insertAdjacentHTML('beforeend', createGallerySlotHTML(newIdx, previewPrefix, galleryName, initialValue));
-  const newSlot = grid.querySelector(`.gallery-slot[data-slot="${newIdx}"]`);
-  const input = newSlot?.querySelector('.gallery-url-input');
-  if (input) wireGalleryInput(input, newIdx, previewPrefix);
-  const rmBtn = newSlot?.querySelector('.gallery-remove-btn');
-  const badgeId = `${galleryName === 'capsule' ? 'capsule-' : ''}gallery-count-badge`;
-  if (rmBtn) wireGalleryRemove(rmBtn, newSlot, containerId, previewPrefix, badgeId);
-  updateGalleryCount(containerId, badgeId);
-  return newSlot;
-}
-
-async function handleGalleryFiles(fileInputId, containerId, previewPrefix, galleryName) {
-  const fileInput = document.getElementById(fileInputId);
-  if (!fileInput || !fileInput.files || !fileInput.files.length) return;
-  const badgeId = `${galleryName === 'capsule' ? 'capsule-' : ''}gallery-count-badge`;
-  const grid = document.getElementById(containerId);
-  // Determine starting slot — fill empty inputs first, then add new slots
-  const slots = grid ? [...grid.querySelectorAll('.gallery-slot')] : [];
-  let slotIdx = 0;
-  const files = [...fileInput.files];
-  for (let fi = 0; fi < files.length; fi++) {
-    if (slotIdx >= 8) break;
-    const file = files[fi];
-    let dataUrl;
-    try {
-      dataUrl = await readFileAsDataUrl(file);
-    } catch { continue; }
-    // Find next slot without a value
-    while (slotIdx < slots.length) {
-      const inp = slots[slotIdx].querySelector('.gallery-url-input');
-      if (inp && !inp.value.trim()) break;
-      slotIdx++;
-    }
-    if (slotIdx < slots.length) {
-      // Fill existing empty slot
-      const inp = slots[slotIdx].querySelector('.gallery-url-input');
-      const preview = document.getElementById(`${previewPrefix}-${slotIdx}`);
-      if (inp) { inp.value = dataUrl; inp.dispatchEvent(new Event('input', { bubbles: true })); }
-      slotIdx++;
-    } else {
-      // Add new slot
-      const newSlot = addGallerySlot(containerId, previewPrefix, galleryName, dataUrl);
-      if (newSlot) {
-        const newInp = newSlot.querySelector('.gallery-url-input');
-        if (newInp) newInp.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
-  }
-  // Reset file input so same files can be re-selected
-  fileInput.value = '';
-  updateGalleryCount(containerId, badgeId);
-}
-
-function reindexGallerySlots(containerId, previewPrefix) {
-  const grid = document.getElementById(containerId);
-  if (!grid) return;
-  grid.querySelectorAll('.gallery-slot').forEach((slot, i) => {
-    slot.dataset.slot = i;
-    const preview = slot.querySelector('.gallery-preview');
-    if (preview) preview.id = `${previewPrefix}-${i}`;
-    const input = slot.querySelector('.gallery-url-input');
-    if (input) {
-      input.dataset.slot = i;
-      // restore preview on reindex
-      const val = input.value.trim();
-      if (val) {
-        preview.innerHTML = `<img src="${val}" alt="Gallery ${i + 1}" onerror="this.parentElement.innerHTML='<i class=\\\\\\'fa-solid fa-image\\\\\\'></i><span>URL #${i + 1}</span>'">`;
-      } else {
-        preview.innerHTML = `<i class="fa-solid fa-image"></i><span>URL #${i + 1}</span>`;
-      }
-    }
-    const rmBtn = slot.querySelector('.gallery-remove-btn');
-    if (rmBtn) rmBtn.dataset.slot = i;
-  });
-}
-
-function resetGallery(containerId, previewPrefix, badgeId) {
-  const grid = document.getElementById(containerId);
-  if (!grid) return;
-  grid.innerHTML = createGallerySlotHTML(0, previewPrefix, '');
-  const firstSlot = grid.querySelector('.gallery-slot');
-  const firstInput = firstSlot?.querySelector('.gallery-url-input');
-  if (firstInput) wireGalleryInput(firstInput, 0, previewPrefix);
-  const rmBtn = firstSlot?.querySelector('.gallery-remove-btn');
-  if (rmBtn) rmBtn.style.display = 'none';
-  if (badgeId) {
-    const badge = document.getElementById(badgeId);
-    if (badge) badge.textContent = '0 / 3 min';
-  }
-}
-
-function initGallery(containerId, previewPrefix, badgeId, addBtnId, galleryName) {
-  const addBtn = document.getElementById(addBtnId);
-  if (addBtn) addBtn.addEventListener('click', () => addGallerySlot(containerId, previewPrefix, galleryName));
-  const grid = document.getElementById(containerId);
-  if (grid) {
-    grid.querySelectorAll('.gallery-slot').forEach((slot) => {
-      const input = slot.querySelector('.gallery-url-input');
-      const slotIdx = parseInt(slot.dataset.slot, 10);
-      if (input) wireGalleryInput(input, slotIdx, previewPrefix);
-      const rmBtn = slot.querySelector('.gallery-remove-btn');
-      if (rmBtn) wireGalleryRemove(rmBtn, slot, containerId, previewPrefix, badgeId);
-    });
-  }
-  updateGalleryCount(containerId, badgeId);
-}
-
 /* ── Premium Gallery Reset ────────────────────── */
 function resetPremiumGallery() {
   const grid = document.getElementById('capsule-gallery-grid');
@@ -1192,27 +820,11 @@ function updateCapsuleTotalStock() {
   totalEl.textContent = total;
 }
 
-function updateMainTotalStock() {
-  const container = document.getElementById('admin-weight-pricing-container');
-  const totalEl = document.getElementById('admin-total-stock');
-  if (!container || !totalEl) return;
-  let total = 0;
-  container.querySelectorAll('.admin-weight-stock').forEach(inp => {
-    const v = parseInt(inp.value, 10);
-    if (Number.isFinite(v) && v > 0) total += v;
-  });
-  totalEl.textContent = total;
-}
-
-// Delegate input events for both stock containers
+// Delegate input events for capsule stock container
 document.addEventListener('input', (ev) => {
   const target = ev.target;
-  if (target.classList.contains('admin-weight-stock')) {
-    if (target.closest('#admin-capsule-weight-container')) {
-      updateCapsuleTotalStock();
-    } else if (target.closest('#admin-weight-pricing-container')) {
-      updateMainTotalStock();
-    }
+  if (target.classList.contains('admin-weight-stock') && target.closest('#admin-capsule-weight-container')) {
+    updateCapsuleTotalStock();
   }
 });
 
@@ -1224,9 +836,6 @@ function populateCapsuleCategorySelect() {
   (_adminCategories || []).forEach(c => {
     sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
   });
-  // Sync default category from the main form if available
-  const mainCat = document.getElementById('admin-prod-category');
-  if (mainCat && mainCat.value) sel.value = mainCat.value;
 }
 
 function resetCapsuleAddForm() {
@@ -1617,7 +1226,16 @@ function adminEditProduct(productId) {
 
 async function fetchAdminOrders() {
   const list = document.getElementById('admin-orders-list');
-  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading orders...</div>';
+  if (list) list.innerHTML = '<div class="skeleton-table">' + Array(5).fill(`
+    <div class="skeleton-row">
+      <span class="skeleton skeleton-avatar"></span>
+      <div style="flex:1;">
+        <div class="skeleton skeleton-text w-60"></div>
+        <div class="skeleton skeleton-text w-40" style="height:0.75rem;"></div>
+      </div>
+      <div style="width:100px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
   try {
     const orders = await fetchWithAuth('/orders/all-orders');
     if (!Array.isArray(orders)) {
@@ -1801,6 +1419,15 @@ function renderAdminOrders(orders) {
           'REFUND_FAILED': { bg: '#fef2f2', color: '#ef4444', label: '❌ Refund Failed' },
           'MANUAL_REFUND_INITIATED': { bg: '#fffbeb', color: '#d97706', label: '🔄 Manual Refund Initiated' },
           'MANUAL_REFUND_COMPLETED': { bg: '#ecfdf5', color: '#10b981', label: '✅ Manual Refund Completed' },
+          'admin_pending': { bg: '#fffbeb', color: '#d97706', label: '⚠️ Pending Admin' },
+          'admin_rejected': { bg: '#fef2f2', color: '#ef4444', label: '❌ Admin Rejected' },
+          'self_cancelled': { bg: '#fef2f2', color: '#ef4444', label: '❌ Self Cancelled' },
+          'cancellation_window': { bg: '#fffbeb', color: '#d97706', label: '⏳ Cancel Window' },
+          'window_closed': { bg: '#f1f5f9', color: '#64748b', label: '🔒 Window Closed' },
+          'return_window': { bg: '#ecfdf5', color: '#10b981', label: '📦 Return Window' },
+          'order_created': { bg: '#ecfdf5', color: '#10b981', label: '🆕 Order Created' },
+          'payment_verified': { bg: '#eff6ff', color: '#3b82f6', label: '✅ Payment Verified' },
+          'approved': { bg: '#ecfdf5', color: '#10b981', label: '✅ Approved' },
         };
         // Handle new manual refund flow (status=cancelled, tracked via refund_status)
         if (status === 'cancelled' && refundStatus) {
@@ -1824,6 +1451,24 @@ function renderAdminOrders(orders) {
       } else if (isRefundState || isCancelState) {
         const b = getAdminBadge(o.status);
         badgeHtml = b ? `<span class="aoc-badge" style="background:${b.bg};color:${b.color};border:1px solid;font-weight:700;">${b.label}</span>` : '';
+      } else if (o.status === 'admin_pending') {
+        badgeHtml = `<span class="aoc-badge" style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700;">⚠️ Pending Admin</span>`;
+      } else if (o.status === 'admin_rejected') {
+        badgeHtml = `<span class="aoc-badge" style="background:#fef2f2;color:#ef4444;border:1px solid #fecaca;font-weight:700;">❌ Admin Rejected</span>`;
+      } else if (o.status === 'self_cancelled') {
+        badgeHtml = `<span class="aoc-badge" style="background:#fef2f2;color:#ef4444;border:1px solid #fecaca;font-weight:700;">❌ Self Cancelled</span>`;
+      } else if (o.status === 'cancellation_window') {
+        badgeHtml = `<span class="aoc-badge" style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700;">⏳ Cancel Window</span>`;
+      } else if (o.status === 'window_closed') {
+        badgeHtml = `<span class="aoc-badge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;">🔒 Window Closed</span>`;
+      } else if (o.status === 'return_window') {
+        badgeHtml = `<span class="aoc-badge" style="background:#ecfdf5;color:#10b981;border:1px solid #a7f3d0;">📦 Return Window</span>`;
+      } else if (o.status === 'order_created') {
+        badgeHtml = `<span class="aoc-badge" style="background:#ecfdf5;color:#10b981;border:1px solid #a7f3d0;">🆕 Order Created</span>`;
+      } else if (o.status === 'payment_verified') {
+        badgeHtml = `<span class="aoc-badge" style="background:#eff6ff;color:#3b82f6;border:1px solid #bfdbfe;">✅ Payment Verified</span>`;
+      } else if (o.status === 'approved') {
+        badgeHtml = `<span class="aoc-badge" style="background:#ecfdf5;color:#10b981;border:1px solid #a7f3d0;">✅ Approved</span>`;
       } else {
         badgeHtml = `<span class="aoc-badge aoc-badge--${o.delivery_status === 'cancelled' ? 'cancelled' : o.delivery_status}">
              ${o.delivery_status === 'cancelled' ? '' : statusEmoji[o.delivery_status] || ''} ${o.delivery_status === 'cancelled' ? 'Cancelled' : o.delivery_status}
@@ -1969,6 +1614,21 @@ function renderAdminOrders(orders) {
                     </div>
                   </div>
                 `
+          : o.status === 'admin_pending'
+          ? `
+                  <div class="aoc-cancelled-box" style="background:rgba(245,158,11,0.06);border-color:rgba(245,158,11,0.2);">
+                    <span class="aoc-cancelled-title" style="color:#d97706;">⚠️ Pending Admin Approval</span>
+                    <span class="aoc-cancelled-why" style="color:#94a3b8;">Order requires admin review before fulfillment can begin.</span>
+                    <div style="display:flex;gap:8px;margin-top:12px;">
+                      <button class="btn btn-primary" style="background:#1a9650;border:none;padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminOrderApproveModal('${o.id}')">
+                        <i class="fa-solid fa-check"></i> Approve
+                      </button>
+                      <button class="btn btn-cancel" style="padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminOrderRejectModal('${o.id}')">
+                        <i class="fa-solid fa-xmark"></i> Reject
+                      </button>
+                    </div>
+                  </div>
+                `
           : o.delivery_status === 'cancelled' || isRefundState || isCancelState
           ? `
                   <div class="aoc-cancelled-box">
@@ -2016,7 +1676,7 @@ function renderAdminOrders(orders) {
                       Current: <strong>${(o.fulfillment_status || 'pending_fulfillment').replace(/_/g, ' ')}</strong>
                     </div>
                   </div>
-                  ${!o.delivery_status !== 'cancelled' && !isRefundState && !isCancelState ? `
+                  ${!o.delivery_status !== 'cancelled' && !isRefundState && !isCancelState && !["shipped","in_transit","delivered"].includes(o.delivery_status) && o.fulfillment_status !== "with_carrier" ? `
                   <div class="aoc-cancel-controls">
                     <button class="aoc-btn-cancel" style="background:#ef4444;border-color:#ef4444;color:#fff;padding:8px 16px;font-size:0.82rem;" onclick="globalThis.adminDirectCancelModal('${o.id}')">
                       <i class="fa-solid fa-ban"></i> Cancel & Refund
@@ -2071,13 +1731,12 @@ function updateSectionCounts(orders) {
   const refundExclude = ['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
   const countMap = {
     all: allOrders.filter(o => o.delivery_status === 'placed' && !refundExclude.includes(o.status)).length,
-    new_orders: allOrders.filter(o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !refundExclude.includes(o.status)).length,
     placed: allOrders.filter(o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundExclude.includes(o.status)).length,
     processing: allOrders.filter(o => ['processing', 'inoculating'].includes(o.delivery_status) && !['cancelled'].includes(o.delivery_status) && !refundExclude.includes(o.status)).length,
     shipping: allOrders.filter(o => ['shipped','in_transit'].includes(o.delivery_status)).length,
     delivered: allOrders.filter(o => o.delivery_status === 'delivered').length,
     cancel_requests: allOrders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED').length,
-    cancelled: allOrders.filter(o => o.delivery_status === 'cancelled').length,
+    cancelled: allOrders.filter(o => ['cancelled', 'rejected'].includes(o.delivery_status)).length,
   };
   Object.entries(countMap).forEach(([key, count]) => {
     const el = document.getElementById(`sec-count-${key}`);
@@ -2088,13 +1747,6 @@ function updateSectionCounts(orders) {
   });
 }
 
-function switchSection(section) {
-  currentSection = section;
-  document.querySelectorAll('.admin-section-pill').forEach(p => p.classList.remove('active'));
-  document.querySelector(`.admin-section-pill[data-section="${section}"]`)?.classList.add('active');
-  renderCurrentSection();
-}
-
 function renderCurrentSection() {
   const orders = adminOrdersCache || [];
   updateSectionCounts(orders);
@@ -2103,80 +1755,24 @@ function renderCurrentSection() {
   const shippingStatuses = ['shipped','in_transit'];
 
   const sectionFilters = {
-    all: o => o.delivery_status === 'placed' && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','cancelled'].includes(o.status),
-    new_orders: o => o.status === 'paid' && (o.admin_approval_status || 'pending') === 'pending' && !refundStatuses.includes(o.status),
+    all: o => ['placed', 'admin_pending'].includes(o.delivery_status) && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','cancelled'].includes(o.status),
     placed: o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundStatuses.includes(o.status) && o.status !== 'CANCEL_REQUESTED',
     processing: o => ['processing', 'inoculating'].includes(o.delivery_status) && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED'].includes(o.status),
     shipping: o => shippingStatuses.includes(o.delivery_status),
     delivered: o => o.delivery_status === 'delivered',
     cancel_requests: o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED',
-    cancelled: o => o.delivery_status === 'cancelled',
+    cancelled: o => ['cancelled', 'rejected'].includes(o.delivery_status),
   };
 
   const filterFn = sectionFilters[currentSection];
 
   const filtered = orders.filter(filterFn);
 
-  if (currentSection === 'new_orders') {
-    renderNewOrdersSection(filtered);
-  } else if (currentSection === 'cancel_requests') {
+  if (currentSection === 'cancel_requests') {
     renderCancelRequestsSection(filtered);
   } else {
     renderAdminOrders(filtered);
   }
-}
-
-function renderNewOrdersSection(orders) {
-  const wrap = document.getElementById('admin-orders-list');
-  if (!wrap) return;
-
-  if (!orders.length) {
-    wrap.innerHTML = '<div class="admin-loading">No new orders pending approval.</div>';
-    return;
-  }
-
-  const headerHtml = `
-    <div class="admin-section-actions-bar">
-      <span class="section-title"><i class="fa-solid fa-sparkles"></i> Pending Approval</span>
-      <span class="section-count-badge">${orders.length}</span>
-      <span style="font-size:0.78rem;color:#6b7280;margin-left:4px;">Orders awaiting admin review</span>
-    </div>
-  `;
-
-  const cardsHtml = orders.map(o => {
-    const date = new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-    const customerName = o.customer_name || o.user_email || 'Customer';
-    const phone = o.delivery_phone || 'Not specified';
-    const address = o.delivery_address || 'Address not provided';
-    const orderItems = Array.isArray(o.items) ? o.items : [];
-    const itemCount = orderItems.length;
-    const items = orderItems.map(it => `${it.name} × ${it.quantity}`).join(', ');
-
-    return `
-      <div class="pending-approval-card">
-        <div class="pa-info">
-          <span class="pa-order-id">#${o.id}</span>
-          <span class="pa-meta">${customerName} · ${phone} · ${date}</span>
-          <span class="pa-meta" style="font-size:0.75rem;">₹${Number(o.total || 0).toFixed(2)} · ${o.payment_method || 'Razorpay'} · ${itemCount} item${itemCount > 1 ? 's' : ''}</span>
-          ${items ? `<span class="pa-meta" style="font-size:0.72rem;color:#9ca3af;">${items}</span>` : ''}
-          ${address ? `<span class="pa-meta" style="font-size:0.72rem;color:#9ca3af;">${address}</span>` : ''}
-        </div>
-        <div class="pa-actions">
-          <button class="btn btn-primary" style="background:#1a9650;border:none;padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminOrderApproveModal('${o.id}')">
-            <i class="fa-solid fa-check"></i> Approve
-          </button>
-          <button class="btn btn-cancel" style="padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminOrderRejectModal('${o.id}')">
-            <i class="fa-solid fa-xmark"></i> Reject
-          </button>
-          <button class="btn btn-secondary" style="padding:8px 16px;font-size:0.8rem;" onclick="globalThis.adminViewRefundDetails('${o.id}')">
-            <i class="fa-solid fa-eye"></i> View
-          </button>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  wrap.innerHTML = headerHtml + cardsHtml;
 }
 
 function renderCancelRequestsSection(orders) {
@@ -2389,28 +1985,6 @@ function attachAuditLogToggles() {
   });
 }
 
-// Override renderAdminOrders wrapper to attach audit logs after rendering
-const origRenderAdminOrders = window.renderAdminOrders || renderAdminOrders;
-/*
-function copyInvoiceLink(token) {
-  if (!token) return;
-  const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${token}`;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard
-      .writeText(invoiceUrl)
-      .then(() => showSuccessToast('Invoice share link copied to clipboard.'))
-      .catch(() => showErrorToast('Could not copy invoice link.'));
-  } else {
-    const textarea = document.createElement('textarea');
-    textarea.value = invoiceUrl;
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    textarea.remove();
-    showSuccessToast('Invoice share link copied to clipboard.');
-  }
-} */
-
 async function updateFulfillment(orderId, fulfillmentStatus) {
   try {
     const res = await fetch(`${API_BASE}/orders/${orderId}/fulfillment`, {
@@ -2434,161 +2008,6 @@ async function updateFulfillment(orderId, fulfillmentStatus) {
   }
 }
 globalThis.updateFulfillment = updateFulfillment;
-
-function adminToggleCancelReason(orderId, value) {
-  const otherInput = document.getElementById(`admin-cancel-other-${orderId}`);
-  if (!otherInput) return;
-  otherInput.style.display = value === 'Other' ? 'block' : 'none';
-  if (value !== 'Other') {
-    otherInput.value = '';
-  }
-}
-
-function renderAdminFilterValueControl(filterType) {
-  const container = document.getElementById('admin-filter-value');
-  if (!container) return;
-
-  let html = '';
-  switch (filterType) {
-    case 'modified_date': {
-      const today = new Date().toISOString().split('T')[0];
-      html = `<input type="date" id="admin-filter-value-input" class="admin-filter-input" max="${today}">`;
-      break;
-    }
-    case 'year':
-      html = `
-        <select id="admin-filter-value-input" class="admin-filter-input">
-          <option value="">All years</option>
-          <option value="2026">2026</option>
-          <option value="2025">2025</option>
-          <option value="2024">2024</option>
-          <option value="2023">2023</option>
-        </select>
-      `;
-      break;
-    case 'month':
-      html = `
-        <select id="admin-filter-value-input" class="admin-filter-input">
-          <option value="">All months</option>
-          <option value="01">Jan</option>
-          <option value="02">Feb</option>
-          <option value="03">Mar</option>
-          <option value="04">Apr</option>
-          <option value="05">May</option>
-          <option value="06">Jun</option>
-          <option value="07">Jul</option>
-          <option value="08">Aug</option>
-          <option value="09">Sep</option>
-          <option value="10">Oct</option>
-          <option value="11">Nov</option>
-          <option value="12">Dec</option>
-        </select>
-      `;
-      break;
-    case 'order_id':
-      html = '<input type="text" id="admin-filter-value-input" class="admin-filter-input" placeholder="Enter order id">';
-      break;
-    case 'phone':
-      html = '<input type="text" id="admin-filter-value-input" class="admin-filter-input" placeholder="Enter phone number">';
-      break;
-    case 'status':
-      html = `
-        <select id="admin-filter-value-input" class="admin-filter-input">
-          <option value="">All statuses</option>
-          <option value="placed">Placed</option>
-          <option value="processing">Processing</option>
-          <option value="shipped">Shipped</option>
-          <option value="delivered">Delivered</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-      `;
-      break;
-    case 'payment_method':
-      html = `
-        <select id="admin-filter-value-input" class="admin-filter-input">
-          <option value="">All payment modes</option>
-          <option value="Razorpay">Razorpay</option>
-          <option value="Pending">Pending</option>
-        </select>
-      `;
-      break;
-    default:
-      html = '<span class="admin-filter-hint">Select a filter above to apply</span>';
-  }
-
-  container.innerHTML = html;
-  const input = document.getElementById('admin-filter-value-input');
-  if (input) {
-    input.addEventListener(
-      input.tagName === 'SELECT' ? 'change' : 'input',
-      applyAdminOrderFilters,
-    );
-  }
-}
-
-function getAdminFilterValue() {
-  const filterType = document.getElementById('admin-filter-type')?.value || '';
-  const valueInput = document.getElementById('admin-filter-value-input');
-  const value = valueInput ? valueInput.value.trim() : '';
-  return { filterType, value };
-}
-
-function applyAdminOrderFilters() {
-  const { filterType, value } = getAdminFilterValue();
-  if (!filterType) {
-    renderAdminOrders(adminOrdersCache);
-    return;
-  }
-
-  const filtered = adminOrdersCache.filter((order) => {
-    const changedAt = new Date(order.updated_at || order.created_at);
-    const normalizedValue = value.toLowerCase();
-
-    switch (filterType) {
-      case 'modified_date':
-        return value
-          ? changedAt.toDateString() === new Date(value).toDateString()
-          : true;
-      case 'year':
-        return value ? String(changedAt.getFullYear()) === value : true;
-      case 'month':
-        return value
-          ? String(changedAt.getMonth() + 1).padStart(2, '0') === value
-          : true;
-      case 'order_id':
-        return value ? order.id.toLowerCase().includes(normalizedValue) : true;
-      case 'phone':
-        return value
-          ? (order.delivery_phone || '')
-            .replace(/\D/g, '')
-            .includes(value.replace(/\D/g, ''))
-          : true;
-      case 'status':
-        return value ? order.delivery_status === value : true;
-      case 'payment_method':
-        const method = (
-          order.payment_method
-          || (order.razorpay_order_id ? 'Razorpay' : 'Pending')
-          || ''
-        ).toLowerCase();
-        return value ? method === normalizedValue : true;
-      default:
-        return true;
-    }
-  });
-
-  renderAdminOrders(filtered);
-}
-
-function clearAdminOrderFilters() {
-  const filterType = document.getElementById('admin-filter-type');
-  if (filterType) filterType.value = '';
-  const valueContainer = document.getElementById('admin-filter-value');
-  if (valueContainer) {
-    valueContainer.innerHTML = '<span class="admin-filter-hint">Select a filter above to apply</span>';
-  }
-  renderAdminOrders(adminOrdersCache);
-}
 
 function renderAdminHistoryFilterValueControl(filterType) {
   const container = document.getElementById('admin-history-filter-value');
@@ -2733,11 +2152,6 @@ function renderAdminHistoryPagination(totalPages, currentPage, totalCount) {
 function renderAdminHistory() {
   const wrap = document.getElementById('admin-history-list');
   if (!wrap) return;
-  /*
-    const deliveredOrders = adminOrdersCache.filter(
-      (order) => String(order.delivery_status || '').toLowerCase() === 'delivered',
-    );
-    */
 
   const selectedStatus = document.getElementById('admin-history-status-filter')?.value || '';
   const deliveredOrders = adminOrdersCache.filter((order) => {
@@ -2830,52 +2244,6 @@ function clearAdminHistoryFilters() {
   renderAdminHistory();
 }
 
-async function adminCancelOrder(orderId) {
-  const reasonSelect = document.getElementById(
-    `admin-cancel-reason-${orderId}`,
-  );
-  if (!reasonSelect) return;
-
-  let reason = reasonSelect.value;
-  if (!reason) {
-    showErrorToast('Please select a cancellation reason.');
-    return;
-  }
-
-  if (reason === 'Other') {
-    const otherText = document.getElementById(`admin-cancel-other-${orderId}`);
-    if (!otherText?.value?.trim()) {
-      showErrorToast('Please specify a cancellation reason.');
-      return;
-    }
-    reason = otherText.value.trim();
-  }
-
-  if (!confirm('Cancel this order? This will stop further processing.')) return;
-
-  try {
-    const res = await fetch(`${API_BASE}/orders/${orderId}/cancel`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.token}`,
-      },
-      body: JSON.stringify({ reason }),
-    });
-
-    if (!res.ok) {
-      const payload = await res.json().catch(() => ({}));
-      throw new Error(payload.error || 'Cancellation failed');
-    }
-
-    showSuccessToast('❌ Order cancelled successfully.');
-    fetchAdminOrders();
-  } catch (err) {
-    console.error(err);
-    showErrorToast(getApiErrorMessage(err) || 'Failed to cancel order.');
-  }
-}
-
 async function adminDeleteProduct(productId) {
   if (
     !confirm(
@@ -2904,7 +2272,12 @@ async function adminDeleteProduct(productId) {
 
 async function fetchAdminCategories() {
   const list = document.getElementById('admin-categories-list');
-  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading categories...</div>';
+  if (list) list.innerHTML = '<div class="skeleton-table">' + Array(4).fill(`
+    <div class="skeleton-row">
+      <div style="flex:1;"><div class="skeleton skeleton-text w-50"></div></div>
+      <div style="width:60px;"><div class="skeleton skeleton-text w-40" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
   try {
     const res = await fetch(`${API_BASE}/categories`);
     if (!res.ok) throw new Error('Failed to load categories');
@@ -2925,7 +2298,15 @@ async function fetchAdminCategories() {
 // =====================
 async function fetchAdminTrainings() {
   const list = document.getElementById('admin-trainings-list');
-  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...</div>';
+  if (list) list.innerHTML = '<div class="skeleton-table">' + Array(4).fill(`
+    <div class="skeleton-row">
+      <span class="skeleton skeleton-avatar"></span>
+      <div style="flex:1;">
+        <div class="skeleton skeleton-text w-60"></div>
+        <div class="skeleton skeleton-text w-40" style="height:0.75rem;"></div>
+      </div>
+    </div>
+  `).join('') + '</div>';
   try {
     const trainings = await trainingApi.getTrainings();
     _adminTrainings = trainings || [];
@@ -3174,7 +2555,13 @@ async function adminDeleteTraining(id) {
 // =====================
 async function fetchAdminBlogs() {
   const list = document.getElementById('admin-blogs-list');
-  if (list) list.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading blogs...</div>';
+  if (list) list.innerHTML = '<div class="skeleton-table">' + Array(4).fill(`
+    <div class="skeleton-row">
+      <span class="skeleton skeleton-avatar" style="width:36px;height:36px;"></span>
+      <div style="flex:1;"><div class="skeleton skeleton-text w-60"></div></div>
+      <div style="width:80px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
   try {
     const result = await blogApi.getBlogs({ limit: 100, page: 1, status: 'all' });
     const blogs = result.blogs || result.data || result || [];
@@ -3512,17 +2899,6 @@ function renderAdminCategoriesList(categories) {
 }
 
 function populateAdminCategorySelect(categories) {
-  const select = document.getElementById('admin-prod-category');
-  if (!select) return;
-  select.innerHTML = categories
-    .map(
-      (cat) => `
-    <option value="${cat.id}" data-category-uid="${cat.category_id || cat.categoryId || ''}">${cat.name}</option>
-  `,
-    )
-    .join('');
-  updateProductIdDisplay();
-
   const filterCat = document.getElementById('admin-filter-cat');
   if (filterCat) {
     filterCat.innerHTML = `<option value="all">All Categories</option>` + categories
@@ -3762,7 +3138,7 @@ async function handleAdminSaveCategory() {
       showSuccessToast(editId ? `✅ Category "${name}" updated!` : `✅ Category "${name}" created!`);
       resetAdminCatForm();
       fetchAdminCategories();
-      fetchCategories();
+      fetchAdminCategories();
       try {
         bcCategories?.postMessage({ type: 'categories:updated' });
       } catch (e) {
@@ -3804,75 +3180,7 @@ async function adminDeleteCategory(catId) {
   }
 }
 
-function updateImagePreview() {
-  const preview = document.getElementById('admin-img-preview');
-  if (!preview) return;
-  const file = productImageFile?.files?.[0];
-  let url = productImageUrl?.value.trim();
 
-  // If a local file is selected, preview it (file takes precedence)
-  if (file) {
-    const reader = new FileReader();
-    preview.dataset.previewValid = 'false';
-    reader.onload = () => {
-      preview.innerHTML = `<img src="${String(reader.result)}" alt="Preview">`;
-      preview.dataset.previewValid = 'true';
-      productImagePreviewValid = true;
-    };
-    reader.onerror = () => {
-      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Unable to read image file</span>';
-      preview.dataset.previewValid = 'false';
-      productImagePreviewValid = false;
-    };
-    reader.readAsDataURL(file);
-    return;
-  }
-
-  // Handle URL (including data: and protocol-less URLs)
-  if (url) {
-    if (url.startsWith('//')) url = `https:${url}`;
-    else if (
-      !/^https?:\/\//i.test(url)
-      && !/^data:/i.test(url)
-      && !/^blob:/i.test(url)
-      && url.includes('.')
-    ) url = `https://${url}`;
-
-    preview.innerHTML = '<span style="color:var(--color-primary)">Loading preview...</span>';
-    preview.dataset.previewValid = 'false';
-    productImagePreviewValid = false;
-
-    const img = new Image();
-    let handled = false;
-    img.onload = () => {
-      if (handled) return;
-      handled = true;
-      preview.innerHTML = `<img src="${url}" alt="Preview">`;
-      preview.dataset.previewValid = 'true';
-      productImagePreviewValid = true;
-    };
-    img.onerror = () => {
-      if (handled) return;
-      handled = true;
-      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Failed to load image from URL. Use a direct image URL (jpg, png, webp, or data URL) or upload a local image file.</span>';
-      preview.dataset.previewValid = 'false';
-      productImagePreviewValid = false;
-    };
-
-    try {
-      img.src = url;
-    } catch (e) {
-      preview.innerHTML = '<i class="fa-solid fa-image"></i><span style="color:var(--color-danger)">Invalid image URL</span>';
-      preview.dataset.previewValid = 'false';
-      productImagePreviewValid = false;
-    }
-    return;
-  }
-
-  preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Image preview</span>';
-  preview.dataset.previewValid = 'false';
-  productImagePreviewValid = false;
-}
 
 // Using shared toast helpers from ./utils/notify.js
 
@@ -3937,8 +3245,19 @@ async function loadRefundsDashboard() {
   const tableContainer = document.getElementById('admin-refunds-table-container');
   const auditsContainer = document.getElementById('admin-refund-audits-container');
 
-  if (tableContainer) tableContainer.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading refund queue...</div>';
-  if (auditsContainer) auditsContainer.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading audit trail...</div>';
+  if (tableContainer) tableContainer.innerHTML = '<div class="skeleton-table">' + Array(3).fill(`
+    <div class="skeleton-row">
+      <div style="flex:1;"><div class="skeleton skeleton-text w-50"></div></div>
+      <div style="width:100px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+      <div style="width:80px;"><div class="skeleton skeleton-text w-60" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
+  if (auditsContainer) auditsContainer.innerHTML = '<div class="skeleton-table">' + Array(3).fill(`
+    <div class="skeleton-row">
+      <div style="flex:1;"><div class="skeleton skeleton-text w-40"></div></div>
+      <div style="width:120px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
 
   try {
     const searchVal = document.getElementById('admin-refunds-search')?.value?.trim() || '';
@@ -4618,11 +3937,226 @@ async function adminDirectCancelModal(orderId) {
 globalThis.adminDirectCancelModal = adminDirectCancelModal;
 globalThis.adminDirectCancel = adminDirectCancelModal;
 
+/* ── Returns Tab ── */
+
+async function loadReturnsDashboard() {
+  const container = document.getElementById('admin-returns-table-container');
+  if (!container) return;
+
+  const search = (document.getElementById('admin-returns-search')?.value || '').trim().toLowerCase();
+  const statusFilter = document.getElementById('admin-returns-filter-status')?.value || '';
+
+  container.innerHTML = '<div class="skeleton-table">' + Array(4).fill(`
+    <div class="skeleton-row">
+      <div style="flex:1;"><div class="skeleton skeleton-text w-50"></div></div>
+      <div style="width:100px;"><div class="skeleton skeleton-text w-40" style="margin-bottom:0;"></div></div>
+      <div style="width:80px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
+
+  try {
+    const res = await fetchWithAuth('/returns/admin/all');
+    let returns = Array.isArray(res.returns) ? res.returns :
+                  Array.isArray(res.data) ? res.data :
+                  Array.isArray(res) ? res : [];
+
+    let pending = 0, approved = 0, warehouse = 0;
+
+    if (search) {
+      returns = returns.filter(r =>
+        (r.id || '').toLowerCase().includes(search) ||
+        (r.order_id || '').toLowerCase().includes(search) ||
+        (r.user_email || r.email || '').toLowerCase().includes(search) ||
+        (r.user_phone || r.phone || '').toLowerCase().includes(search)
+      );
+    }
+    if (statusFilter) {
+      returns = returns.filter(r => r.status === statusFilter);
+    }
+
+    returns.forEach(r => {
+      if (r.status === 'requested') pending++;
+      if (r.status === 'approved' || r.status === 'pickup_scheduled' || r.status === 'pickup_completed') approved++;
+      if (r.status === 'warehouse_received' || r.status === 'qc_passed' || r.status === 'qc_failed') warehouse++;
+    });
+    document.getElementById('admin-return-stat-pending').textContent = pending;
+    document.getElementById('admin-return-stat-approved').textContent = approved;
+    document.getElementById('admin-return-stat-warehouse').textContent = warehouse;
+    document.getElementById('admin-return-stat-total').textContent = returns.length;
+
+    if (!returns.length) {
+      container.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-rotate-left" style="font-size:2rem;margin-bottom:12px;"></i><p>No returns found.</p></div>';
+      return;
+    }
+
+    container.innerHTML = `<div class="refund-table-wrap" style="overflow-x:auto;"><table class="refund-table">
+      <thead>
+        <tr>
+          <th>Return ID</th>
+          <th>Order ID</th>
+          <th>Customer</th>
+          <th>Type</th>
+          <th>Reason</th>
+          <th>Status</th>
+          <th>Date</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${returns.map(r => renderReturnRow(r)).join('')}
+      </tbody>
+    </table></div>`;
+  } catch (err) {
+    container.innerHTML = `<div class="admin-error">${getApiErrorMessage(err) || 'Failed to load returns'}</div>`;
+  }
+}
+globalThis.loadReturnsDashboard = loadReturnsDashboard;
+
+function renderReturnRow(r) {
+  const statusBadge = getReturnAdminBadge(r.status);
+  const dateStr = r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const customerName = r.user_name || r.user_email || r.email || '—';
+  const typeIcon = r.type === 'replacement' ? 'fa-box' : r.type === 'exchange' ? 'fa-arrows-rotate' : 'fa-money-bill-wave';
+
+  let actions = '';
+  if (r.status === 'requested') {
+    actions = `<div style="display:flex;gap:6px;">
+      <button class="btn btn-sm btn-primary" onclick="adminApproveReturn('${r.id}')">Approve</button>
+      <button class="btn btn-sm btn-danger" onclick="adminRejectReturn('${r.id}')" style="background:#dc2626;">Reject</button>
+    </div>`;
+  } else if (r.status === 'approved') {
+    actions = `<button class="btn btn-sm btn-secondary" onclick="adminSchedulePickup('${r.id}')">Schedule Pickup</button>`;
+  } else if (r.status === 'pickup_completed' || r.status === 'warehouse_received') {
+    actions = `<button class="btn btn-sm btn-secondary" onclick="adminPerformQC('${r.id}')">Perform QC</button>`;
+  }
+
+  return `<tr>
+    <td style="font-family:monospace;font-size:0.8rem;">${r.id.substring(0, 8)}</td>
+    <td style="font-family:monospace;font-size:0.8rem;">${r.order_id.substring(0, 8)}</td>
+    <td>${customerName}</td>
+    <td><i class="fa-solid ${typeIcon}"></i> ${r.type || 'refund'}</td>
+    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.reason || '—'}</td>
+    <td>${statusBadge}</td>
+    <td style="font-size:0.8rem;white-space:nowrap;">${dateStr}</td>
+    <td>${actions || '<span style="color:#94a3b8;font-size:0.8rem;">—</span>'}</td>
+  </tr>`;
+}
+
+function getReturnAdminBadge(status) {
+  const map = {
+    requested:          '<span class="admin-badge" style="background:#f59e0b20;color:#f59e0b;">Requested</span>',
+    approved:           '<span class="admin-badge" style="background:#3b82f620;color:#3b82f6;">Approved</span>',
+    rejected:           '<span class="admin-badge" style="background:#ef444420;color:#ef4444;">Rejected</span>',
+    pickup_scheduled:   '<span class="admin-badge" style="background:#8b5cf620;color:#8b5cf6;">Pickup Scheduled</span>',
+    pickup_completed:   '<span class="admin-badge" style="background:#8b5cf620;color:#8b5cf6;">Pickup Done</span>',
+    warehouse_received: '<span class="admin-badge" style="background:#06b6d420;color:#06b6d4;">Warehouse Received</span>',
+    qc_passed:          '<span class="admin-badge" style="background:#10b98120;color:#10b981;">QC Passed</span>',
+    qc_failed:          '<span class="admin-badge" style="background:#ef444420;color:#ef4444;">QC Failed</span>',
+    refund_pending:     '<span class="admin-badge" style="background:#f59e0b20;color:#f59e0b;">Refund Pending</span>',
+    refund_completed:   '<span class="admin-badge" style="background:#10b98120;color:#10b981;">Refunded</span>',
+    replacement_created:'<span class="admin-badge" style="background:#3b82f620;color:#3b82f6;">Replacement Created</span>',
+    closed:             '<span class="admin-badge" style="background:#64748b20;color:#64748b;">Closed</span>',
+  };
+  return map[status] || `<span class="admin-badge" style="background:#64748b20;color:#64748b;">${status}</span>`;
+}
+globalThis.getReturnAdminBadge = getReturnAdminBadge;
+
+async function adminApproveReturn(returnId) {
+  try {
+    const res = await fetchWithAuth(`/returns/admin/${returnId}/approve`, { method: 'POST' });
+    showSuccessToast(res.message || 'Return approved.');
+    searchAndFilterReturns();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to approve return.');
+  }
+}
+globalThis.adminApproveReturn = adminApproveReturn;
+
+async function adminRejectReturn(returnId) {
+  const reason = prompt('Enter rejection reason:');
+  if (!reason || !reason.trim()) return;
+  try {
+    const res = await fetchWithAuth(`/returns/admin/${returnId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    showSuccessToast(res.message || 'Return rejected.');
+    searchAndFilterReturns();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to reject return.');
+  }
+}
+globalThis.adminRejectReturn = adminRejectReturn;
+
+async function adminSchedulePickup(returnId) {
+  const date = prompt('Pickup date (YYYY-MM-DD):');
+  if (!date) return;
+  const timeSlot = prompt('Time slot (e.g., 10:00-14:00):', '10:00-14:00') || '10:00-14:00';
+  try {
+    const res = await fetchWithAuth(`/returns/admin/${returnId}/schedule-pickup`, {
+      method: 'POST',
+      body: JSON.stringify({ pickupDate: date, timeSlot }),
+    });
+    showSuccessToast(res.message || 'Pickup scheduled.');
+    searchAndFilterReturns();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to schedule pickup.');
+  }
+}
+globalThis.adminSchedulePickup = adminSchedulePickup;
+
+async function adminPerformQC(returnId) {
+  const result = prompt('QC result (pass/fail):');
+  if (!result || !['pass', 'fail'].includes(result.toLowerCase())) {
+    showErrorToast('Enter "pass" or "fail".');
+    return;
+  }
+  const comments = prompt('QC comments (optional):') || '';
+  try {
+    const res = await fetchWithAuth(`/returns/admin/${returnId}/qc`, {
+      method: 'POST',
+      body: JSON.stringify({ result: result.toLowerCase(), comments }),
+    });
+    showSuccessToast(res.message || 'QC recorded.');
+    searchAndFilterReturns();
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to record QC.');
+  }
+}
+globalThis.adminPerformQC = adminPerformQC;
+
+function searchAndFilterReturns() {
+  loadReturnsDashboard();
+}
+globalThis.searchAndFilterReturns = searchAndFilterReturns;
+
+// Wire up search/filter listeners for returns
+document.addEventListener('DOMContentLoaded', () => {
+  const searchEl = document.getElementById('admin-returns-search');
+  const filterEl = document.getElementById('admin-returns-filter-status');
+  if (searchEl) searchEl.addEventListener('input', debounce(() => searchAndFilterReturns(), 400));
+  if (filterEl) filterEl.addEventListener('change', () => searchAndFilterReturns());
+});
+
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
 /* ── Shipments Tab ── */
 async function loadShipmentsTab() {
   const container = document.getElementById('admin-shipments-table-container');
   if (!container) return;
-  container.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading shipments...</div>';
+  container.innerHTML = '<div class="skeleton-table">' + Array(4).fill(`
+    <div class="skeleton-row">
+      <span class="skeleton skeleton-avatar" style="width:32px;height:32px;"></span>
+      <div style="flex:1;"><div class="skeleton skeleton-text w-40"></div></div>
+      <div style="width:80px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
 
   try {
     let shipments = adminShipmentsCache;
@@ -4748,10 +4282,84 @@ async function refreshShipmentsCache() {
 }
 globalThis.refreshShipmentsCache = refreshShipmentsCache;
 
+// ── Inventory Tab (Phase 4) ──────────────────────────────────────────────
+async function loadInventoryTab() {
+  const container = document.getElementById('admin-inventory-list');
+  if (!container) return;
+  container.innerHTML = '<div class="skeleton-table">' + Array(5).fill(`
+    <div class="skeleton-row">
+      <span class="skeleton skeleton-avatar" style="width:32px;height:32px;"></span>
+      <div style="flex:1;"><div class="skeleton skeleton-text w-60"></div></div>
+      <div style="width:60px;"><div class="skeleton skeleton-text w-50" style="margin-bottom:0;"></div></div>
+      <div style="width:80px;"><div class="skeleton skeleton-text w-40" style="margin-bottom:0;"></div></div>
+    </div>
+  `).join('') + '</div>';
+  try {
+    const data = await fetchWithAuth('/products');
+    const products = Array.isArray(data) ? data : (data?.products || []);
+    if (!Array.isArray(products) || products.length === 0) { container.innerHTML = '<div class="admin-error">Failed to load products</div>'; return; }
+
+    const filter = document.getElementById('admin-inv-filter')?.value || '';
+    const search = (document.getElementById('admin-inv-search')?.value || '').toLowerCase();
+
+    let filtered = products;
+    if (filter === 'low') filtered = filtered.filter(p => {
+      const threshold = p.low_stock_threshold || 10;
+      return (p.stock || 0) > 0 && (p.stock || 0) <= threshold;
+    });
+    if (filter === 'out') filtered = filtered.filter(p => (p.stock || 0) <= 0);
+    if (filter === 'notify') filtered = filtered.filter(p => (p.stock || 0) <= 0);
+    if (search) filtered = filtered.filter(p => (p.name || '').toLowerCase().includes(search));
+
+    const lowCount = products.filter(p => {
+      const threshold = p.low_stock_threshold || 10;
+      return (p.stock || 0) > 0 && (p.stock || 0) <= threshold;
+    }).length;
+    const oosCount = products.filter(p => (p.stock || 0) <= 0).length;
+
+    document.getElementById('admin-inv-stat-low').textContent = lowCount;
+    document.getElementById('admin-inv-stat-oos').textContent = oosCount;
+
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="admin-empty">No products match the current filter.</div>';
+      return;
+    }
+
+    container.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;">
+      ${filtered.map(p => {
+        const threshold = p.low_stock_threshold || 10;
+        const available = (p.stock || 0) - (p.reserved_quantity || 0);
+        const stockStatus = (p.stock || 0) <= 0 ? '🔴 Out of Stock'
+          : (p.stock || 0) <= threshold ? '🟡 Low Stock'
+          : '✅ In Stock';
+        return `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--color-bg-secondary,#1a2332);border-radius:10px;border:1px solid var(--color-border,#334155);">
+            <img src="${p.image_url || ''}" alt="${p.name}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;" />
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:600;font-size:0.9rem;color:#f1f5f9;">${p.name}</div>
+              <div style="font-size:0.78rem;color:#94a3b8;">ID: ${p.id}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:0.78rem;color:#94a3b8;">${stockStatus}</div>
+              <div style="font-size:0.85rem;color:#f1f5f9;">Stock: ${p.stock || 0} <span style="color:#94a3b8;">| Reserved: ${p.reserved_quantity || 0}</span></div>
+              <div style="font-size:0.78rem;color:#64748b;">Available: ${available}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>`;
+  } catch (err) {
+    container.innerHTML = `<div class="admin-error">${err.message}</div>`;
+  }
+}
+
 // Wire up shipments search/filter
 document.addEventListener('input', (e) => {
   if (e.target.id === 'admin-shipments-search' || e.target.id === 'admin-shipments-filter-status') {
     loadShipmentsTab();
+  }
+  if (e.target.id === 'admin-inv-search' || e.target.id === 'admin-inv-filter') {
+    loadInventoryTab();
   }
 });
 
@@ -4766,13 +4374,181 @@ function activateAdminTab(tabName) {
     );
   });
   // Load refund dashboard data when tab is activated
+  if (tabName === 'returns') {
+    loadReturnsDashboard();
+  }
   if (tabName === 'refunds') {
     loadRefundsDashboard();
   }
   if (tabName === 'shipments') {
     loadShipmentsTab();
   }
+  if (tabName === 'inventory') {
+    loadInventoryTab();
+  }
+  if (tabName === 'analytics') {
+    loadAnalyticsTab();
+  }
 }
+
+/* ── Analytics Tab ── */
+
+async function loadAnalyticsTab() {
+  const startDate = document.getElementById('admin-analytics-start')?.value;
+  const endDate = document.getElementById('admin-analytics-end')?.value;
+  const params = new URLSearchParams();
+  if (startDate) params.set('startDate', startDate);
+  if (endDate) params.set('endDate', endDate);
+
+  try {
+    const [metricsRes, funnelRes, recoveryRes, eventsRes, topProductsRes] = await Promise.all([
+      fetchWithAuth(`/analytics/dashboard?${params}`),
+      fetchWithAuth(`/analytics/funnel?${params}`),
+      fetchWithAuth(`/analytics/recovery?${params}`),
+      fetchWithAuth(`/analytics/events?${params}`),
+      fetchWithAuth(`/analytics/top-products?${params}`),
+    ]);
+
+    renderAnalyticsStats(metricsRes);
+    renderFunnel(funnelRes);
+    renderDropOff(funnelRes);
+    renderTopProducts(topProductsRes.products || []);
+    renderRatesRates(metricsRes, recoveryRes);
+    renderEvents(eventsRes.events || []);
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to load analytics');
+  }
+}
+globalThis.loadAnalyticsTab = loadAnalyticsTab;
+
+function renderAnalyticsStats(m) {
+  setText('analytics-stat-orders', m.totalOrders ?? 0);
+  setText('analytics-stat-revenue', '\u20b9' + Number(m.totalRevenue || 0).toFixed(2));
+  setText('analytics-stat-aov', '\u20b9' + Number(m.averageOrderValue || 0).toFixed(2));
+  setText('analytics-stat-conversion', (m.conversionRate ?? 0).toFixed(1) + '%');
+  setText('analytics-stat-pageviews', m.totalPageViews ?? 0);
+  setText('analytics-stat-abandonment', (m.abandonmentRate ?? 0).toFixed(1) + '%');
+}
+
+function renderFunnel(funnel) {
+  const container = document.getElementById('analytics-funnel-container');
+  if (!container) return;
+  const stages = funnel.stages || [];
+  if (!stages.length) {
+    container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No funnel data yet</p>';
+    return;
+  }
+  const maxCount = Math.max(...stages.map(s => s.count), 1);
+  container.innerHTML = '<div style="display:flex;flex-direction:column;gap:10px;">' + stages.map(s => {
+    const pct = (s.count / maxCount) * 100;
+    const label = s.stage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return `<div style="display:flex;align-items:center;gap:10px;">
+      <span style="min-width:130px;font-size:0.8rem;color:#94a3b8;text-align:right;">${label}</span>
+      <div style="flex:1;background:#1a2e22;border-radius:6px;height:28px;overflow:hidden;position:relative;">
+        <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#38b17b,#2d8c63);border-radius:6px;transition:width 0.5s ease;"></div>
+      </div>
+      <span style="min-width:40px;font-size:0.82rem;color:#e2e8f0;font-weight:600;">${s.count}</span>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+function renderDropOff(funnel) {
+  const container = document.getElementById('analytics-dropoff-container');
+  if (!container) return;
+  const rates = funnel.dropOffRates || [];
+  if (!rates.length) {
+    container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No drop-off data yet</p>';
+    return;
+  }
+  container.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;"><thead><tr style="color:#64748b;text-align:left;"><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Stage</th><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Entered</th><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Converted</th><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Drop-off</th></tr></thead><tbody>' + rates.map(r => {
+    const fromLabel = r.from.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const toLabel = r.to.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const color = r.dropOffRate > 50 ? '#ef4444' : r.dropOffRate > 25 ? '#f59e0b' : '#10b981';
+    return `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#e2e8f0;">${fromLabel} \u2192 ${toLabel}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);">${r.entered}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);">${r.converted}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:${color};font-weight:600;">${r.dropOffRate}%</td>
+    </tr>`;
+  }).join('') + '</tbody></table>';
+}
+
+function renderTopProducts(products) {
+  const container = document.getElementById('analytics-top-products-container');
+  if (!container) return;
+  if (!products.length) {
+    container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No product data yet</p>';
+    return;
+  }
+  container.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;"><thead><tr style="color:#64748b;text-align:left;"><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">#</th><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Product</th><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Sold</th><th style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.1);">Revenue</th></tr></thead><tbody>' + products.slice(0, 10).map((p, i) => `<tr>
+    <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;">${i + 1}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#e2e8f0;">${p.name || p.productId}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);">${p.quantity}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid rgba(56,177,123,0.06);">\u20b9${Number(p.revenue || 0).toFixed(2)}</td>
+  </tr>`).join('') + '</tbody></table>';
+}
+
+function renderRatesRates(metrics, recovery) {
+  const container = document.getElementById('analytics-rates-container');
+  if (!container) return;
+  container.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div style="background:#1a2e22;border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Abandoned Carts</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#f59e0b;">${recovery.abandoned ?? metrics.abandonedCarts ?? 0}</div>
+    </div>
+    <div style="background:#1a2e22;border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Recovered</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#10b981;">${recovery.recovered ?? metrics.recoveredCarts ?? 0}</div>
+    </div>
+    <div style="background:#1a2e22;border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Cancellation Rate</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#e2e8f0;">${(metrics.cancellationRate ?? 0).toFixed(1)}%</div>
+    </div>
+    <div style="background:#1a2e22;border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Return Rate</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#e2e8f0;">${(metrics.returnRate ?? 0).toFixed(1)}%</div>
+    </div>
+  </div>`;
+}
+
+function renderEvents(events) {
+  const container = document.getElementById('analytics-events-container');
+  if (!container) return;
+  if (!events.length) {
+    container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No events recorded yet</p>';
+    return;
+  }
+  const recent = events.slice(-100).reverse();
+  container.innerHTML = '<div style="max-height:320px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.78rem;"><thead><tr style="color:#64748b;text-align:left;position:sticky;top:0;background:#0f1c16;"><th style="padding:6px 8px;">Event</th><th style="padding:6px 8px;">Page</th><th style="padding:6px 8px;">Session</th><th style="padding:6px 8px;">Time</th></tr></thead><tbody>' + recent.map(e => {
+    const time = e.created_at ? new Date(e.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
+    const label = (e.event_type || '').replace(/_/g, ' ');
+    return `<tr>
+      <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#e2e8f0;">${label}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;">${e.page || '\u2014'}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;font-family:monospace;">${(e.session_id || '').substring(0, 8)}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;">${time}</td>
+    </tr>`;
+  }).join('') + '</tbody></table></div>';
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+// Wire up analytics date filter on load
+document.addEventListener('DOMContentLoaded', () => {
+  const startEl = document.getElementById('admin-analytics-start');
+  const endEl = document.getElementById('admin-analytics-end');
+  if (startEl) {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    startEl.value = d.toISOString().split('T')[0];
+  }
+  if (endEl) {
+    endEl.value = new Date().toISOString().split('T')[0];
+  }
+});
 
 function setupAdminEventHandlers() {
   // Tab clicks
@@ -4821,7 +4597,7 @@ function setupAdminEventHandlers() {
 
         if (emailField) emailField.classList.add('hidden');
         if (otpField) otpField.classList.remove('hidden');
-        if (btn) btn.textContent = 'Verify & Login';
+        if (btn) { btn.disabled = false; btn.textContent = 'Verify & Login'; }
 
         if (result?.otp && sentEl) {
           sentEl.textContent = `Demo OTP: ${result.otp}`;
@@ -4847,7 +4623,7 @@ function setupAdminEventHandlers() {
     const btn = document.getElementById('admin-auth-btn');
     if (otpField) otpField.classList.add('hidden');
     if (emailField) emailField.classList.remove('hidden');
-    if (btn) btn.textContent = 'Send OTP';
+    if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
     clearAuthError();
   });
 
@@ -4868,49 +4644,17 @@ function setupAdminEventHandlers() {
     });
   }
 
-  // Product form
-  if (btnAddWeightRow) {
-    btnAddWeightRow.addEventListener('click', () => {
-      weightPricingContainer.appendChild(createWeightRow(null));
-      toggleStockField();
-      updateMainTotalStock();
-    });
-  }
-
-  // Pricing type toggle
+  // Pricing type toggle (capsule form only — CSS handles pill visibility)
   document.querySelectorAll('.pricing-type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.pricing-type-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const mode = btn.getAttribute('data-mode') || 'weight';
-      const ctr = btn.closest('.premium-weight-section, .input-field')
-        ?.querySelector('#admin-capsule-weight-container, #admin-weight-pricing-container');
-      if (!ctr) return;
-      ctr.dataset.mode = mode;
-      if (ctr.id === 'admin-weight-pricing-container') {
-        const existingData = getWeightPricingData();
-        ctr.innerHTML = '';
-        if (existingData.length > 0) {
-          existingData.forEach(item => ctr.appendChild(createWeightRow(item)));
-        } else {
-          ctr.appendChild(createWeightRow(null));
-        }
-        toggleStockField();
-      }
-      if (ctr.id === 'admin-capsule-weight-container') {
-        // CSS handles pill visibility via data-mode
-      }
+      const ctr = btn.closest('.premium-weight-section')
+        ?.querySelector('#admin-capsule-weight-container');
+      if (ctr) ctr.dataset.mode = mode;
     });
   });
-
-  // Toggle stock field when weight select changes in any variant row
-  if (weightPricingContainer) {
-    weightPricingContainer.addEventListener('change', (e) => {
-      if (e.target.classList.contains('admin-weight-select')) {
-        toggleStockField();
-      }
-    });
-  }
 
   // Category handlers
   if (saveCatBtn) saveCatBtn.addEventListener('click', handleAdminSaveCategory);
@@ -5248,12 +4992,6 @@ function setupAdminEventHandlers() {
   if (adminHistoryPageSize) adminHistoryPageSize.addEventListener('change', () => { adminHistoryPage = 1; renderAdminHistory(); });
   if (adminHistoryClear) adminHistoryClear.addEventListener('click', clearAdminHistoryFilters);
 
-  // Current orders filter bar
-  const adminFilterType = document.getElementById('admin-filter-type');
-  const adminFilterClear = document.getElementById('admin-filter-clear');
-  if (adminFilterType) adminFilterType.addEventListener('change', () => renderAdminFilterValueControl(adminFilterType.value));
-  if (adminFilterClear) adminFilterClear.addEventListener('click', clearAdminOrderFilters);
-
   // changes to ordershipment page modifications-pravara
   // Shipping sub-tabs
   document.querySelectorAll('.ship-tab').forEach((btn) => {
@@ -5283,40 +5021,6 @@ function setupAdminEventHandlers() {
     });
   });
 
-  // Status constants (shared)
-  const ACTIVE_STATUSES = ['placed', 'processing', 'inoculating', 'shipped', 'in_transit'];
-  const REFUND_STATUSES_ALL = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
-  const REFUND_STATUSES_AUTO = ['REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING', 'REFUND_COMPLETED', 'REFUND_FAILED'];
-  const REFUND_STATUSES_MANUAL = ['MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'];
-
-  function getActiveOrders() {
-    return adminOrdersCache.filter((o) => ACTIVE_STATUSES.includes(o.delivery_status));
-  }
-  function getRefundOrders(type) {
-    const map = { all: REFUND_STATUSES_ALL, auto: REFUND_STATUSES_AUTO, manual: REFUND_STATUSES_MANUAL };
-    return adminOrdersCache.filter((o) => (map[type] || REFUND_STATUSES_ALL).includes(o.status));
-  }
-  globalThis.getActiveOrders = getActiveOrders;
-  globalThis.getRefundOrders = getRefundOrders;
-
-  // 12-Section pills
-  document.querySelectorAll('.admin-section-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-      const section = pill.dataset.section;
-      if (section) switchSection(section);
-    });
-  });
-
-  // Refund filter (shown in refund sections only)
-  const refundSelect = document.getElementById('ship-refund-filter-select');
-  if (refundSelect) {
-    refundSelect.addEventListener('change', () => {
-      if (currentSection.startsWith('refund_')) {
-        renderAdminOrders(getRefundOrders(refundSelect.value));
-      }
-    });
-  }
-
   // Recent orders status dropdown-pravara
   const historyStatusFilter = document.getElementById('admin-history-status-filter');
   if (historyStatusFilter) {
@@ -5328,9 +5032,6 @@ function setupAdminEventHandlers() {
   // Expose globals
   globalThis.adminEditProduct = adminEditProduct;
   globalThis.adminDeleteProduct = adminDeleteProduct;
-  globalThis.adminUpdateShipping = adminUpdateShipping;
-  globalThis.adminToggleCancelReason = adminToggleCancelReason;
-  globalThis.adminCancelOrder = adminCancelOrder;
   globalThis.adminEditCategory = adminEditCategory;
   globalThis.adminDeleteCategory = adminDeleteCategory;
   globalThis.adminEditTraining = adminEditTraining;
@@ -5408,19 +5109,6 @@ function setupAdminEventHandlers() {
   }
   globalThis.shareInvoiceWhatsApp = shareInvoiceWhatsApp;
   globalThis.renderAdminOrders = renderAdminOrders;
-
-  // Initialize gallery grids (main form)
-  initGallery('admin-gallery-grid', 'gallery-preview', 'gallery-count-badge', 'btn-gallery-add-main', 'main');
-
-  // Gallery upload buttons (main form)
-  const uploadMainBtn = document.getElementById('btn-gallery-upload-main');
-  const galleryFileMain = document.getElementById('gallery-file-main');
-  if (uploadMainBtn && galleryFileMain) {
-    uploadMainBtn.addEventListener('click', () => galleryFileMain.click());
-    galleryFileMain.addEventListener('change', () => {
-      handleGalleryFiles('gallery-file-main', 'admin-gallery-grid', 'gallery-preview', 'main');
-    });
-  }
 
   // Premium capsule gallery
   const uploadCapsuleBtn = document.getElementById('btn-gallery-upload-capsule');
@@ -5548,17 +5236,10 @@ function setupAdminEventHandlers() {
   }
 
   // Ensure both containers have a default mode
-  const defaultMode = (() => {
+  // Set default mode on capsule weight container
+  if (capsuleWeightContainer && !capsuleWeightContainer.dataset.mode) {
     const ab = document.querySelector('.pricing-type-btn.active');
-    return ab ? ab.getAttribute('data-mode') || 'weight' : 'weight';
-  })();
-  [weightPricingContainer, capsuleWeightContainer].forEach(ctr => {
-    if (ctr && !ctr.dataset.mode) ctr.dataset.mode = defaultMode;
-  });
-
-  // Initialize weight pricing with one empty row (mode must be set first)
-  if (weightPricingContainer && !weightPricingContainer.querySelector('.admin-weight-pricing-row')) {
-    setWeightPricingData(null);
+    capsuleWeightContainer.dataset.mode = ab ? ab.getAttribute('data-mode') || 'weight' : 'weight';
   }
 
   // Transform static weight selects into pill widgets

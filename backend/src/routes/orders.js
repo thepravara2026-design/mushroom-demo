@@ -6,6 +6,7 @@ const db = require("../config/db");
 const razorpay = require("../config/razorpay");
 const authMiddleware = require("../middleware/auth");
 const { validateBody, Joi } = require("../middleware/validate");
+const { validateCancelRequest } = require("../middleware/orderValidation");
 const { success, error: respondError } = require("../lib/response");
 const { validatePromoCode } = require("../services/promoService");
 const jwt = require("jsonwebtoken");
@@ -13,11 +14,13 @@ const { supabaseAdmin } = require("../config/supabase");
 const { sendInvoiceWhatsApp } = require("../services/notificationService");
 const { JWT_SECRET } = require("../config/jwt");
 const refundService = require("../modules/refunds/RefundService");
-const { OrderStates, assertForwardOnly, assertCancellable, resolveState } = require("../modules/orders/OrderStateService");
+const { OrderStates, assertCancellable, resolveState, selfCancel, getCancelWindow, adminReject, adminApprove, startReturnWindow, canSelfCancel } = require("../modules/orders/OrderStateService");
 const { logAuditAction, AUDIT_ACTIONS } = require("../services/AuditLogService");
 const { notify } = require("../services/notificationService");
 const logger = require("../utils/logger");
 const { sendSseEvent, addSseSubscriber } = require("../lib/sse");
+const FEATURE_FLAGS = require("../config/featureFlags");
+const inventoryService = require("../services/inventoryService");
 
 function buildInvoiceData(order, user) {
   const gstSummary = {
@@ -129,6 +132,87 @@ const checkoutSchema = Joi.object({
     .optional(),
 });
 
+const orderPreviewSchema = Joi.object({
+  items: Joi.array().items(
+    Joi.object({
+      id: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      quantity: Joi.number().integer().min(1).required(),
+      weight: Joi.number().optional(),
+      unit: Joi.string().valid("g", "kg").optional(),
+    }),
+  ).min(1).required(),
+  promoCode: Joi.string().allow("", null).optional(),
+  pincode: Joi.string().pattern(/^\d{6}$/).allow("").optional(),
+});
+
+// POST /api/orders/review — Generate order preview (Phase 2)
+router.post(
+  "/review",
+  authMiddleware,
+  validateBody(orderPreviewSchema),
+  async (req, res) => {
+    try {
+      const { items, promoCode, pincode } = req.body;
+      if (!items || !items.length) return respondError(res, "Cart is empty.", 400);
+
+      const { data: dbProducts } = await db.from("products").select("*");
+      let subtotal = 0;
+      let discountPercent = 0;
+      let discountAmount = 0;
+      const reviewItems = [];
+
+      for (const cartItem of items) {
+        const product = dbProducts.find(p => p.id === cartItem.id);
+        if (!product) return respondError(res, `Product ${cartItem.id} not found.`, 400);
+        const qty = parseInt(cartItem.quantity, 10) || 1;
+        const price = product.price || 0;
+        const lineTotal = price * qty;
+        subtotal += lineTotal;
+        reviewItems.push({
+          id: product.id,
+          name: product.name,
+          quantity: qty,
+          price,
+          lineTotal,
+          image: product.image_url || null,
+        });
+      }
+
+      if (promoCode) {
+        const result = validatePromoCode(promoCode);
+        if (result.valid) discountPercent = result.discountPercent;
+        discountAmount = +(subtotal * discountPercent / 100).toFixed(2);
+      }
+
+      const gst = +(subtotal * 0.05).toFixed(2);
+      const shipping = 0;
+      const total = subtotal + gst + shipping - discountAmount;
+
+      let deliveryEstimate = null;
+      if (pincode) {
+        const { data: pinData } = await db.from("pincode_serviceability").select("*").eq("pincode", pincode).single().catch(() => ({}));
+        if (pinData) {
+          deliveryEstimate = { min: pinData.estimated_days_min, max: pinData.estimated_days_max };
+        }
+      }
+
+      return success(res, {
+        items: reviewItems,
+        subtotal: +subtotal.toFixed(2),
+        gst,
+        shipping,
+        discount: discountAmount,
+        discountPercent,
+        total: +total.toFixed(2),
+        promoCode: promoCode || null,
+        deliveryEstimate,
+      });
+    } catch (err) {
+      return respondError(res, err.message || "Review failed", 500);
+    }
+  },
+);
+
 // POST /api/orders/checkout
 // Create order and Razorpay order ID
 router.post(
@@ -193,7 +277,7 @@ router.post(
         deliveryPhone = req.user.whatsapp_number;
       }
 
-      // Fetch products to verify pricing & tax rates
+      // ── PHASE 1: Fetch products & validate stock for ALL items upfront ──
       const { data: dbProducts } = await db.from("products").select("*");
 
       // Determine discount percentage
@@ -207,8 +291,9 @@ router.post(
       let discountAmount = 0;
       let gstAmount = 0;
       const orderItems = [];
+      const stockDeductions = []; // { productId, quantity, name }
 
-      // Calculate itemized details
+      // First pass: validate all items for stock
       for (const cartItem of items) {
         const product = dbProducts.find((p) => p.id === cartItem.id);
         if (!product) {
@@ -220,43 +305,36 @@ router.post(
         }
 
         const quantity = parseInt(cartItem.quantity, 10) || 1;
-        if (product.stock !== undefined && quantity > product.stock) {
-          return respondError(
-            res,
-            `Insufficient stock for ${product.name}. Only ${product.stock} unit(s) available.`,
-            400,
-          );
-        }
 
-        // Reserve stock immediately to prevent overselling
-        const newStock = (product.stock || 0) - quantity;
-        if (!db.isMock) {
-          try {
-            await supabaseAdmin.rpc("decrement_stock", {
-              p_product_id: product.id,
-              p_quantity: quantity,
-            });
-          } catch (rpcErr) {
-            logger.error(`[orders] decrement_stock RPC failed for ${product.id}:`, rpcErr.message);
-          }
-        } else {
+        // Check if inventory tracking is enabled for this product
+        const trackInventory = product.track_inventory !== false;
+
+        if (trackInventory) {
+          // Fetch fresh stock data for this product
           const { data: freshProduct } = await db
             .from("products")
-            .select("stock")
+            .select("stock, reserved_quantity")
             .eq("id", product.id)
             .single();
+
           const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
-          if (quantity > currentStock) {
+          const reservedQty = freshProduct ? (freshProduct.reserved_quantity || 0) : 0;
+          const available = currentStock - reservedQty;
+
+          if (quantity > available) {
             return respondError(
               res,
-              `Insufficient stock for ${product.name}. Only ${currentStock} unit(s) available.`,
+              `Insufficient stock for ${product.name}. Only ${Math.max(0, available)} unit(s) available.`,
               400,
             );
           }
-          await db
-            .from("products")
-            .update({ stock: currentStock - quantity })
-            .eq("id", product.id);
+
+          stockDeductions.push({
+            productId: product.id,
+            name: product.name,
+            quantity,
+            currentStock,
+          });
         }
 
         // Determine base price — use weight variant price if applicable
@@ -362,6 +440,81 @@ router.post(
       if (dbError || !newOrder) {
         logger.error('[checkout] DB insert failed:', { dbError: dbError?.message, insertPayload });
         return respondError(res, dbError?.message || 'Failed to create order', 500);
+      }
+
+      // ── PHASE 2: Decrement stock for all validated items ──
+      const decrementedProducts = [];
+      for (const sd of stockDeductions) {
+        try {
+          if (!db.isMock) {
+            await supabaseAdmin.rpc("decrement_stock", {
+              p_product_id: sd.productId,
+              p_quantity: sd.quantity,
+            });
+          } else {
+            const { data: freshProduct } = await db
+              .from("products")
+              .select("stock")
+              .eq("id", sd.productId)
+              .single();
+            const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
+            await db
+              .from("products")
+              .update({ stock: currentStock - sd.quantity })
+              .eq("id", sd.productId);
+          }
+          decrementedProducts.push(sd);
+        } catch (dedErr) {
+          // Rollback already-decremented products
+          logger.error(`[checkout] Stock decrement failed for ${sd.productId}: ${dedErr.message}. Rolling back...`);
+          for (const done of decrementedProducts) {
+            try {
+              if (!db.isMock) {
+                const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
+                if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+              } else {
+                const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
+                if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+              }
+            } catch (rollbackErr) {
+              logger.error(`[checkout] Rollback failed for ${done.productId}: ${rollbackErr.message}`);
+            }
+          }
+          // Delete the order since we couldn't reserve stock
+          await db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
+          return respondError(res, `Failed to reserve stock for ${sd.name}. Please try again.`, 500);
+        }
+      }
+
+      // Store product IDs in order metadata for potential restock later
+      newOrder._decrementedProducts = decrementedProducts;
+
+      // ── Fire-and-forget low-stock alert for admin ──
+      setImmediate(async () => {
+        try {
+          for (const sd of stockDeductions) {
+            const { data: p } = await db.from("products").select("stock, low_stock_threshold, name").eq("id", sd.productId).single();
+            if (p && p.stock <= (p.low_stock_threshold || 10)) {
+              const adminMsg = `⚠️ Low Stock Alert: "${p.name}" has only ${p.stock} unit(s) left (threshold: ${p.low_stock_threshold || 10}).`;
+              logger.warn(`[Inventory] ${adminMsg}`);
+              try {
+                const { notify } = require("../services/notificationService");
+                await notify("ORDER_PLACED", newOrder, { role: "admin" }, { alert: adminMsg, _adminOnly: true });
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      });
+
+      // Phase 5: Auto-start cancellation window on order creation
+      if (FEATURE_FLAGS.SELF_CANCEL_WINDOW) {
+        try {
+          const { setCancelWindow } = require("../modules/orders/OrderStateService");
+          await setCancelWindow(generatedOrderId, 30);
+          logger.info(`[checkout] Cancel window set for order ${generatedOrderId}`);
+        } catch (cwErr) {
+          logger.warn(`[checkout] Failed to set cancel window for ${generatedOrderId}: ${cwErr.message}`);
+        }
       }
 
       // Backfill customer_email via an immediate UPDATE if the column now exists
@@ -482,6 +635,25 @@ router.post(
         return respondError(res, error.message || "Failed to update order", 500);
       }
 
+      // Phase 4: Deduct inventory for UPI orders
+      if (FEATURE_FLAGS.INVENTORY_SERVICE) {
+        try {
+          const { data: reservations } = await db
+            .from("inventory_reservations")
+            .select("id, product_id, quantity")
+            .eq("order_id", updatedOrder.id)
+            .eq("status", "active");
+          if (reservations && reservations.length > 0) {
+            for (const res of reservations) {
+              await inventoryService.confirmReservation(res.id, updatedOrder.id);
+              await inventoryService.deductStock(res.product_id, res.quantity, updatedOrder.id);
+            }
+          }
+        } catch (invErr) {
+          logger.warn(`[orders] Inventory deduction failed for UPI order ${updatedOrder.id}: ${invErr.message}`);
+        }
+      }
+
       try {
         sendSseEvent(
           "order:updated",
@@ -561,6 +733,25 @@ router.post(
 
       if (error) {
         return respondError(res, error.message || "Failed to update order", 500);
+      }
+
+      // Phase 4: Deduct inventory for COD orders
+      if (FEATURE_FLAGS.INVENTORY_SERVICE) {
+        try {
+          const { data: reservations } = await db
+            .from("inventory_reservations")
+            .select("id, product_id, quantity")
+            .eq("order_id", updatedOrder.id)
+            .eq("status", "active");
+          if (reservations && reservations.length > 0) {
+            for (const res of reservations) {
+              await inventoryService.confirmReservation(res.id, updatedOrder.id);
+              await inventoryService.deductStock(res.product_id, res.quantity, updatedOrder.id);
+            }
+          }
+        } catch (invErr) {
+          logger.warn(`[orders] Inventory deduction failed for COD order ${updatedOrder.id}: ${invErr.message}`);
+        }
       }
 
       try {
@@ -650,7 +841,24 @@ router.post(
           );
         }
 
-        // Stock was already reserved at checkout time — no additional decrement needed.
+        // Phase 4: Confirm reservation + hard-deduct stock
+        if (FEATURE_FLAGS.INVENTORY_SERVICE) {
+          try {
+            const { data: reservations } = await db
+              .from("inventory_reservations")
+              .select("id, product_id, quantity")
+              .eq("order_id", updatedOrder.id)
+              .eq("status", "active");
+            if (reservations && reservations.length > 0) {
+              for (const res of reservations) {
+                await inventoryService.confirmReservation(res.id, updatedOrder.id);
+                await inventoryService.deductStock(res.product_id, res.quantity, updatedOrder.id);
+              }
+            }
+          } catch (invErr) {
+            logger.warn(`[orders] Inventory reservation/deduction failed for order ${updatedOrder.id}: ${invErr.message}`);
+          }
+        }
 
         // Emit SSE event for updated order (admins + order owner)
         try {
@@ -690,11 +898,30 @@ router.post(
       // concurrent cancel/refund flow.
       const { data: currentOrder } = await db
         .from("orders")
-        .select("status, user_id")
+        .select("*")
         .eq("razorpay_order_id", razorpay_order_id)
         .single();
 
       if (currentOrder && ["pending", "pending_upi_verification"].includes(currentOrder.status)) {
+        // Restock items since stock was decremented during checkout but payment failed
+        if (Array.isArray(currentOrder.items) && currentOrder.items.length > 0) {
+          setImmediate(async () => {
+            for (const item of currentOrder.items) {
+              try {
+                const qty = parseInt(item.quantity, 10) || 0;
+                if (qty <= 0 || !item.productId) continue;
+                const { data: prod } = await db.from("products").select("stock").eq("id", item.productId).single();
+                if (prod) {
+                  await db.from("products").update({ stock: (prod.stock || 0) + qty }).eq("id", item.productId);
+                  logger.info(`[verify-payment] Restocked ${item.productId} x${qty} due to payment failure for order ${currentOrder.id}`);
+                }
+              } catch (restockErr) {
+                logger.error(`[verify-payment] Failed to restock ${item.productId}: ${restockErr.message}`);
+              }
+            }
+          });
+        }
+
         const { data: failedOrder } = await db
           .from("orders")
           .update({ status: "failed" })
@@ -1070,6 +1297,15 @@ router.put("/:id/fulfillment", authMiddleware, async (req, res) => {
         .catch(() => ({}));
       if (user) {
         notify('ORDER_DELIVERED', finalOrder, user, {}).catch(() => { });
+      }
+
+      // Phase 5: Auto-start return window on delivery
+      try {
+        const { startReturnWindow } = require("../modules/orders/OrderStateService");
+        await startReturnWindow(order.id);
+        logger.info(`[fulfillment] Return window started for order ${order.id}`);
+      } catch (rwErr) {
+        logger.warn(`[fulfillment] Failed to start return window for ${order.id}: ${rwErr.message}`);
       }
     }
 
@@ -1536,7 +1772,7 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       return success(res, {
         orderId: order.id,
         paymentStatus: order.status,
-        paymentMethod: order.razorpay_order_id ? "Razorpay" : "Pending",
+        paymentMethod: order.payment_method || (order.razorpay_order_id ? "Razorpay" : "Pending"),
         refundStatus: order.refund_status || "none",
         refundAmount: order.total_refunded_amount || 0,
         paymentId: order.razorpay_payment_id || "",
@@ -1550,6 +1786,8 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
         progressPercent: progressMap[shipment.status] || 10,
         trackingMessage: `Shipment is ${shipment.status}. Courier: ${shipment.courier_name || "N/A"}${shipment.awb_code ? `. AWB: ${shipment.awb_code}` : ""}`,
         cancelReason: order.cancel_reason || "",
+        cancelWindowExpires: order.cancel_window_expires || null,
+        returnWindowExpires: order.return_window_expires || null,
         timestamp: new Date().toISOString(),
         timeline,
         hasRealTracking: true,
@@ -1700,6 +1938,8 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       progressPercent: responseProgress,
       trackingMessage: responseMessage,
       cancelReason: order.cancel_reason || "",
+      cancelWindowExpires: order.cancel_window_expires || null,
+      returnWindowExpires: order.return_window_expires || null,
       timestamp: new Date().toISOString(),
       timeline,
       hasRealTracking: false,
@@ -1793,7 +2033,7 @@ const requestCancelSchema = Joi.object({
 router.post(
   "/:id/request-cancel",
   authMiddleware,
-  validateBody(requestCancelSchema),
+  validateCancelRequest,
   async (req, res) => {
     try {
       const { reason } = req.body;
@@ -2014,22 +2254,12 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
     const { restockOrderItems } = require("../modules/orders/OrderStateService");
     await restockOrderItems(order);
 
-    if (isPaid) {
-      const { createRefund } = require("../modules/refunds/RefundRepository");
+    if (isPaid && order.razorpay_payment_id) {
       try {
-        await createRefund({
-          order_id: order.id,
-          user_id: order.user_id,
-          razorpay_payment_id: order.razorpay_payment_id || null,
-          razorpay_refund_id: null,
-          amount: order.total,
-          refund_reason: reason,
-          status: "pending",
-          cancelled_by: "admin",
-          admin_note: adminNote
-        });
+        const { executeRefundProcess } = require("../modules/refunds/RefundService");
+        await executeRefundProcess(order, order.total, "admin", reason, adminNote, req.user);
       } catch (refundErr) {
-        logger.error(`[orders] Failed to create refund record for rejected order ${order.id}:`, refundErr.message);
+        logger.error(`[orders] Auto-refund failed for rejected order ${order.id}: ${refundErr.message}`);
       }
     }
 
@@ -2074,6 +2304,189 @@ router.get("/admin/:id/audit-logs", authMiddleware, async (req, res) => {
     return success(res, logs || []);
   } catch (err) {
     return respondError(res, err.message || "Failed to fetch audit logs", 500);
+  }
+});
+
+// ==========================================================================
+// Phase 3 — COD OTP & Payment Retry
+// ==========================================================================
+
+const otpService = require("../services/otpService");
+const FEATURE_FLAGS_PHASE3 = require("../config/featureFlags");
+
+// POST /api/orders/send-cod-otp — Send OTP for COD order
+router.post("/send-cod-otp", authMiddleware, async (req, res) => {
+  if (!FEATURE_FLAGS_PHASE3.COD_OTP) return respondError(res, "COD OTP disabled", 404);
+  try {
+    const { orderId, phone } = req.body;
+    if (!orderId || !phone) return respondError(res, "orderId and phone are required", 400);
+    const result = await otpService.sendCodOtp(orderId, phone);
+    if (result.error) return respondError(res, result.error.message, 400);
+    return success(res, result.data);
+  } catch (err) {
+    return respondError(res, err.message || "Failed to send COD OTP", 500);
+  }
+});
+
+// POST /api/orders/verify-cod-otp — Verify OTP
+router.post("/verify-cod-otp", authMiddleware, async (req, res) => {
+  if (!FEATURE_FLAGS_PHASE3.COD_OTP) return respondError(res, "COD OTP disabled", 404);
+  try {
+    const { orderId, otp } = req.body;
+    if (!orderId || !otp) return respondError(res, "orderId and otp are required", 400);
+    const result = await otpService.verifyCodOtp(orderId, otp);
+    if (result.error) return respondError(res, result.error.message, 400, { ...result });
+    // OTP verified — confirm the order
+    const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+    if (order && order.payment_method === "cod") {
+      await db.from("orders").update({ status: "confirmed", delivery_status: "placed" }).eq("id", orderId);
+    }
+    return success(res, { verified: true, message: "Order confirmed!" });
+  } catch (err) {
+    return respondError(res, err.message || "Failed to verify COD OTP", 500);
+  }
+});
+
+// POST /api/orders/retry-payment — Retry with different payment method
+router.post("/retry-payment", authMiddleware, async (req, res) => {
+  if (!FEATURE_FLAGS_PHASE3.PAYMENT_RETRY) return respondError(res, "Payment retry disabled", 404);
+  try {
+    const { orderId, method } = req.body;
+    if (!orderId) return respondError(res, "orderId is required", 400);
+
+    const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+    if (!order) return respondError(res, "Order not found", 404);
+    if (order.status === "paid" || order.status === "confirmed") return respondError(res, "Order is already paid", 400);
+
+    // Mark old payment attempt as failed
+    if (order.razorpay_order_id) {
+      await db.from("orders").update({ payment_status: "failed" }).eq("id", orderId);
+    }
+
+    if (method === "cod") {
+      await db.from("orders").update({ payment_method: "cod", status: "pending" }).eq("id", orderId);
+      return success(res, { method: "cod", message: "Switched to COD. Please proceed." });
+    }
+
+    // Create new Razorpay order for online payment
+    const razorpay = require("../config/razorpay");
+    const amount = (order.total || order.amount || 0) * 100; // paise
+    const rzpOrder = await razorpay.orders.create({
+      amount: Math.round(amount),
+      currency: "INR",
+      receipt: `retry_${orderId}_${Date.now()}`,
+      notes: { orderId },
+    });
+
+    await db.from("orders").update({
+      razorpay_order_id: rzpOrder.id,
+      payment_method: method || "online",
+      payment_status: "pending",
+      status: "pending",
+    }).eq("id", orderId);
+
+    return success(res, {
+      razorpay_order_id: rzpOrder.id,
+      amount: rzpOrder.amount,
+      method: method || "online",
+      keyId: razorpay.key_id || process.env.RAZORPAY_KEY_ID || "",
+    });
+  } catch (err) {
+    return respondError(res, err.message || "Failed to retry payment", 500);
+  }
+});
+
+// ==========================================================================
+// Phase 5 — Order Lifecycle: Self-Cancel, Admin Reject, Return Window
+// ==========================================================================
+
+// POST /api/orders/:id/self-cancel — Customer self-cancel within cancellation window
+router.post("/:id/self-cancel", authMiddleware, async (req, res) => {
+  if (!FEATURE_FLAGS.SELF_CANCEL_WINDOW) return respondError(res, "Self-cancellation window is disabled", 404);
+  try {
+    const result = await selfCancel(req.params.id, req.user.userId);
+    try {
+      const { data: updated } = await db.from("orders").select("*").eq("id", req.params.id).single();
+      if (updated) {
+        sendSseEvent("order:updated", { order: updated },
+          (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === updated.user_id));
+      }
+    } catch (_) { }
+    return success(res, result);
+  } catch (err) {
+    return respondError(res, err.message, 400);
+  }
+});
+
+// GET /api/orders/:id/cancel-window — Check cancellation window status
+router.get("/:id/cancel-window", authMiddleware, async (req, res) => {
+  try {
+    const result = await getCancelWindow(req.params.id);
+    return success(res, result);
+  } catch (err) {
+    return respondError(res, err.message, 400);
+  }
+});
+
+// POST /api/orders/admin/order-reject/:id — Admin rejects an order with reason (v3)
+const orderRejectSchema = Joi.object({
+  reason: Joi.string().trim().min(1).max(500).required().messages({
+    "string.empty": "Rejection reason is required.",
+    "any.required": "Rejection reason is required."
+  }),
+});
+
+router.post("/admin/order-reject/:id", authMiddleware, validateBody(orderRejectSchema), async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return respondError(res, "Access denied. Admins only.", 403);
+
+    const result = await adminReject(req.params.id, req.body.reason, req.user);
+    try {
+      const { data: updated } = await db.from("orders").select("*").eq("id", req.params.id).single();
+      if (updated) {
+        sendSseEvent("order:updated", { order: updated },
+          (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === updated.user_id));
+      }
+    } catch (_) { }
+    return success(res, result);
+  } catch (err) {
+    return respondError(res, err.message, 400);
+  }
+});
+
+// POST /api/orders/admin/order-approve/:id — Admin approves an order (v3)
+router.post("/admin/order-approve/:id", authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return respondError(res, "Access denied. Admins only.", 403);
+
+    const result = await adminApprove(req.params.id);
+    try {
+      sendSseEvent("order:updated", { order: result.order },
+        (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === result.order.user_id));
+    } catch (_) { }
+    return success(res, result);
+  } catch (err) {
+    return respondError(res, err.message, 400);
+  }
+});
+
+// POST /api/orders/:id/return-window — Start return window for delivered orders
+router.post("/:id/return-window", authMiddleware, async (req, res) => {
+  try {
+    const isAdmin = req.user.role === "admin";
+    if (!isAdmin) return respondError(res, "Access denied. Admins only.", 403);
+
+    const result = await startReturnWindow(req.params.id);
+    try {
+      const { data: updated } = await db.from("orders").select("*").eq("id", req.params.id).single();
+      if (updated) {
+        sendSseEvent("order:updated", { order: updated },
+          (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === updated.user_id));
+      }
+    } catch (_) { }
+    return success(res, result);
+  } catch (err) {
+    return respondError(res, err.message, 400);
   }
 });
 

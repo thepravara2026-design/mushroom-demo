@@ -160,8 +160,13 @@ router.post('/webhooks/:providerKey', async (req, res) => {
       // Auto-cancel + refund on RTO/return
       if (newStatus === 'returned' || newStatus === 'cancelled') {
         try {
-          const { cancelCarrierShipment } = require('../modules/refunds/RefundService');
+          const { cancelCarrierShipment, executeRefundProcess } = require('../modules/refunds/RefundService');
           await cancelCarrierShipment(shipment.order_id, 'RTO: Shipment returned to sender');
+          // Also trigger payment gateway refund if order was paid
+          const { data: rtoOrder } = await db.from('orders').select('*').eq('id', shipment.order_id).single();
+          if (rtoOrder && rtoOrder.razorpay_payment_id) {
+            await executeRefundProcess(rtoOrder, rtoOrder.total, 'system', 'RTO: Shipment returned to sender');
+          }
         } catch (refundErr) {
           logger.error(`[shipping-webhook] Auto-refund failed after RTO for ${shipment.order_id}: ${refundErr.message}`);
         }

@@ -266,7 +266,6 @@ export class AuthModal {
 
     const backBtnPhone = document.getElementById('link-back-method-phone');
     if (backBtnPhone) {
-      // BUG-13: buyers should also be able to go back and switch to email
       backBtnPhone.classList.remove('hidden');
     }
 
@@ -275,7 +274,6 @@ export class AuthModal {
       if (role === 'admin') {
         backRequestBtn.textContent = '← Use a different method';
       }
-      // BUG-12: label is set contextually in showVerifyView based on activeMethod
     }
 
     if (role === 'admin') {
@@ -306,7 +304,7 @@ export class AuthModal {
     this._lastPhone = undefined;
     this._mockPhoneEmail = undefined;
     this._pendingContact = null;
-    this._lastResendParams = null; // BUG-10: clear stale resend params on close
+    this._lastResendParams = null;
     this.modal.classList.remove('open');
     this.formRequest?.reset();
     this.formVerify?.reset();
@@ -383,7 +381,6 @@ export class AuthModal {
         // In mock/dev mode, show the OTP directly in the UI
         subtitle.textContent = `Mock OTP: ${mockOtp} — enter it below to log in`;
       } else {
-        // BUG-9: For phone login, clarify OTP is sent via SMS (not the synthetic email)
         const displayContact = this.activeMethod === 'phone'
           ? contact.replace(/^(\+91)?/, '+91 ').trim()
           : contact;
@@ -403,7 +400,6 @@ export class AuthModal {
       }, 300);
     }
 
-    // BUG-12: set back button label contextually based on active method
     const backRequestBtn = document.getElementById('link-back-request');
     if (backRequestBtn) {
       if (this.activeMethod === 'phone') {
@@ -752,7 +748,6 @@ export class AuthModal {
 
   async _lookupAndPrefillName(value, method) {
     if (!value) return;
-    // BUG-4: slice last 10 digits to handle both "6123456789" and "+916123456789" formats
     if (method === 'phone' && !/^[6-9]\d{9}$/.test(value.replace(/\D/g, '').slice(-10))) return;
     if (method === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return;
     const nameField = method === 'phone'

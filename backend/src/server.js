@@ -25,6 +25,13 @@ const { startBlogLockScheduler } = require("./services/blogService");
 const refundRoutes = require("./modules/refunds/RefundController");
 const logger = require("./utils/logger");
 
+// Phase 1 — New module routes (feature-flag gated)
+const inventoryModuleRoutes = require("./modules/inventory");
+const couponModuleRoutes = require("./modules/coupons");
+const guestCheckoutRoutes = require("./modules/guestCheckout");
+const pincodeRoutes = require("./routes/pincode");
+const FEATURE_FLAGS = require("./config/featureFlags");
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -121,6 +128,26 @@ app.use("/api/locations", locationRoutes);
 app.use("/api/shipping", shippingRoutes);
 app.use("/api", shippingWebhookRoutes);
 app.use("/api/refunds", refundRoutes);
+
+// Phase 1 — New feature-flagged routes
+app.use("/api/inventory", inventoryModuleRoutes);
+app.use("/api/coupons", couponModuleRoutes);
+app.use("/api/guest", guestCheckoutRoutes);
+app.use("/api/pincode", pincodeRoutes);
+
+// Phase 3 — Abandonment routes
+const abandonmentRoutes = require("./routes/abandonment");
+const notifyMeRoutes = require("./routes/notifyMe");
+app.use("/api/abandonment", abandonmentRoutes);
+app.use("/api/notify-me", notifyMeRoutes);
+
+// Phase 6 — Returns & Exchange
+const returnRoutes = require("./routes/returns");
+app.use("/api/returns", returnRoutes);
+
+// Phase 8 — Analytics
+const analyticsRoutes = require("./routes/analytics");
+app.use("/api/analytics", analyticsRoutes);
 
 // Reset mock database (dev only)
 app.post("/api/reset", (req, res) => {
@@ -327,15 +354,31 @@ async function runMigrations() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
       )`,
       `CREATE INDEX IF NOT EXISTS idx_fulfillment_tasks_order ON fulfillment_tasks(order_id)`,
+      `CREATE TABLE IF NOT EXISTS refund_queue (
+        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        refund_type VARCHAR(20) NOT NULL,
+        status VARCHAR(30) NOT NULL,
+        assigned_to VARCHAR(255),
+        priority INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+      )`,
       // ── Performance indexes ──
       `CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id)`,
       `CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`,
       `CREATE INDEX IF NOT EXISTS idx_orders_delivery_status ON orders(delivery_status)`,
       `CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_orders_fulfillment_status ON orders(fulfillment_status)`,
+      `CREATE INDEX IF NOT EXISTS idx_orders_admin_approval ON orders(admin_approval_status)`,
+      `CREATE INDEX IF NOT EXISTS idx_refund_queue_status ON refund_queue(status)`,
       `CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_shipments_awb_unique ON shipments(awb_code) WHERE awb_code IS NOT NULL`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_shipping_providers_default ON shipping_providers(is_default) WHERE is_default = true`,
+      // ── Data backfill queries ──
+      `UPDATE orders SET admin_approval_status = 'approved' WHERE status IN ('paid', 'cancelled') AND admin_approval_status IS NULL`,
+      `UPDATE orders SET admin_approval_status = 'pending' WHERE admin_approval_status IS NULL`,
       // ── Seed shipping providers ──
       `INSERT INTO shipping_providers (provider_key, name, is_active, is_default, config) VALUES
         ('shiprocket', 'Shiprocket', true, true, '{"base_url": "https://apiv2.shiprocket.in/v1/external"}'::jsonb),
@@ -356,6 +399,69 @@ async function runMigrations() {
       `DROP POLICY IF EXISTS "Anyone can view active shipping providers" ON shipping_providers`,
       `CREATE POLICY "Anyone can view active shipping providers" ON shipping_providers FOR SELECT
         USING (is_active = true)`,
+      // ── Phase 1 — New columns ──
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_guest BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS guest_token TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_opt_in BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{}'`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_window_expires TIMESTAMPTZ`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS guest_token TEXT`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_id TEXT`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code TEXT`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC DEFAULT 0`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS return_window_expires TIMESTAMPTZ`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS inventory_confirmed BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_timeline_communicated BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS reserved_quantity INTEGER DEFAULT 0`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_threshold INTEGER DEFAULT 5`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS track_inventory BOOLEAN DEFAULT TRUE`,
+      `ALTER TABLE shipments ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'forward'`,
+      `ALTER TABLE shipments ADD COLUMN IF NOT EXISTS return_shipment_id TEXT`,
+      `ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pickup_scheduled_at TIMESTAMPTZ`,
+      `ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pickup_request_id TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS source TEXT`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS timeline_communicated BOOLEAN DEFAULT FALSE`,
+      `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS gateway_refund_id TEXT`,
+      // ── Phase 1 — New tables ──
+      `CREATE TABLE IF NOT EXISTS coupons (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, code TEXT UNIQUE NOT NULL, type TEXT NOT NULL CHECK (type IN ('percentage','fixed','free_shipping')), value NUMERIC NOT NULL, min_order NUMERIC DEFAULT 0, max_discount NUMERIC, usage_limit INTEGER DEFAULT 0, used_count INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT TRUE, is_auto_apply BOOLEAN DEFAULT FALSE, customer_id TEXT, starts_at TIMESTAMPTZ, expires_at TIMESTAMPTZ, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS coupon_usage (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, coupon_id TEXT NOT NULL REFERENCES coupons(id), order_id TEXT NOT NULL REFERENCES orders(id), user_id TEXT REFERENCES users(id), discount_amount NUMERIC NOT NULL, applied_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS returns (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, order_id TEXT NOT NULL REFERENCES orders(id), user_id TEXT NOT NULL REFERENCES users(id), reason TEXT NOT NULL, type TEXT NOT NULL CHECK (type IN ('refund','replacement','exchange')), status TEXT NOT NULL DEFAULT 'requested', admin_notes TEXT, requested_at TIMESTAMPTZ DEFAULT NOW(), approved_at TIMESTAMPTZ, rejected_at TIMESTAMPTZ, rejection_reason TEXT, qc_status TEXT, qc_notes TEXT, qc_performed_by TEXT, qc_performed_at TIMESTAMPTZ, pickup_address_id TEXT, pickup_scheduled_at TIMESTAMPTZ, pickup_completed_at TIMESTAMPTZ, received_at_warehouse TIMESTAMPTZ, replacement_order_id TEXT, refund_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS return_items (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, return_id TEXT NOT NULL REFERENCES returns(id), product_id TEXT NOT NULL REFERENCES products(id), quantity INTEGER NOT NULL DEFAULT 1, condition_note TEXT)`,
+      `CREATE TABLE IF NOT EXISTS return_evidence (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, return_id TEXT NOT NULL REFERENCES returns(id), image_url TEXT NOT NULL, uploaded_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS inventory_reservations (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, product_id TEXT NOT NULL REFERENCES products(id), cart_id TEXT, user_id TEXT, guest_token TEXT, quantity INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active', reserved_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ NOT NULL, released_at TIMESTAMPTZ, converted_to_order_id TEXT REFERENCES orders(id))`,
+      `CREATE TABLE IF NOT EXISTS inventory_log (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, product_id TEXT NOT NULL REFERENCES products(id), action TEXT NOT NULL, quantity_change INTEGER NOT NULL, new_stock INTEGER NOT NULL, new_reserved INTEGER NOT NULL, reference_type TEXT, reference_id TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS notify_me_requests (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, product_id TEXT NOT NULL REFERENCES products(id), user_id TEXT REFERENCES users(id), email TEXT, phone TEXT, notified BOOLEAN DEFAULT FALSE, notified_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS abandoned_carts (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, user_id TEXT REFERENCES users(id), guest_token TEXT, cart_data JSONB NOT NULL, cart_total NUMERIC, email TEXT, phone TEXT, status TEXT DEFAULT 'active', first_trigger_at TIMESTAMPTZ, second_trigger_at TIMESTAMPTZ, third_trigger_at TIMESTAMPTZ, recovered BOOLEAN DEFAULT FALSE, recovered_order_id TEXT REFERENCES orders(id), expired_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS abandonment_triggers (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, cart_id TEXT NOT NULL REFERENCES abandoned_carts(id), trigger_number INTEGER NOT NULL, channel TEXT NOT NULL, sent_at TIMESTAMPTZ DEFAULT NOW(), clicked BOOLEAN DEFAULT FALSE, clicked_at TIMESTAMPTZ)`,
+      `CREATE TABLE IF NOT EXISTS pincode_serviceability (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, pincode TEXT NOT NULL, courier_id TEXT, cod_available BOOLEAN DEFAULT FALSE, estimated_days_min INTEGER, estimated_days_max INTEGER, is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(pincode, courier_id))`,
+      `CREATE TABLE IF NOT EXISTS order_cod_otps (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, order_id TEXT NOT NULL REFERENCES orders(id), otp TEXT NOT NULL, phone TEXT NOT NULL, attempts INTEGER DEFAULT 0, verified BOOLEAN DEFAULT FALSE, verified_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS notification_triggers (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, event_type TEXT NOT NULL, channels JSONB NOT NULL, delay_minutes INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT TRUE, template_id TEXT)`,
+      `CREATE TABLE IF NOT EXISTS notification_log (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, user_id TEXT REFERENCES users(id), order_id TEXT REFERENCES orders(id), event_type TEXT NOT NULL, channel TEXT NOT NULL, recipient TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', sent_at TIMESTAMPTZ, error TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS analytics_events (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, event_type TEXT NOT NULL, user_id TEXT, guest_token TEXT, session_id TEXT, page TEXT, metadata JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
+      `CREATE TABLE IF NOT EXISTS notification_preferences (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, user_id TEXT NOT NULL REFERENCES users(id), channel TEXT NOT NULL CHECK (channel IN ('email','sms','whatsapp','push')), enabled BOOLEAN DEFAULT TRUE, UNIQUE(user_id, channel))`,
+      // ── Phase 1 — Indexes ──
+      `CREATE INDEX IF NOT EXISTS idx_orders_guest_token ON orders(guest_token)`,
+      `CREATE INDEX IF NOT EXISTS idx_orders_cancel_window ON orders(cancel_window_expires) WHERE cancel_window_expires IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code)`,
+      `CREATE INDEX IF NOT EXISTS idx_coupons_auto_apply ON coupons(is_auto_apply) WHERE is_auto_apply = TRUE`,
+      `CREATE INDEX IF NOT EXISTS idx_returns_order_id ON returns(order_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_inventory_reservations_expires ON inventory_reservations(expires_at) WHERE status = 'active'`,
+      `CREATE INDEX IF NOT EXISTS idx_inventory_reservations_product ON inventory_reservations(product_id) WHERE status = 'active'`,
+      `CREATE INDEX IF NOT EXISTS idx_notify_me_product ON notify_me_requests(product_id) WHERE notified = FALSE`,
+      `CREATE INDEX IF NOT EXISTS idx_abandoned_carts_status ON abandoned_carts(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_pincode_serviceability_pincode ON pincode_serviceability(pincode)`,
+      `CREATE INDEX IF NOT EXISTS idx_order_cod_otps_order ON order_cod_otps(order_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_inventory_log_product ON inventory_log(product_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_notification_log_event ON notification_log(event_type, created_at)`,
+      // ── Phase 1/2 — Seed data ──
+      `INSERT INTO notification_triggers (event_type, channels, delay_minutes) VALUES ('payment.success', '["email","whatsapp","sms"]', 0), ('payment.failed', '["sms","whatsapp"]', 0), ('order.confirmed', '["email","whatsapp"]', 0), ('admin.approved', '["email"]', 0), ('order.shipped', '["whatsapp","sms","email"]', 0), ('out.for.delivery', '["whatsapp","sms"]', 0), ('delivered', '["whatsapp","email"]', 0), ('ndr.raised', '["sms","whatsapp"]', 0), ('order.cancelled', '["email","whatsapp"]', 0), ('refund.initiated', '["email","whatsapp"]', 0), ('refund.completed', '["email","sms"]', 0), ('cart.abandoned.1hr', '["whatsapp"]', 60), ('cart.abandoned.12hr', '["email"]', 720), ('cart.abandoned.24hr', '["email","sms"]', 1440) ON CONFLICT DO NOTHING`,
+      `INSERT INTO coupons (code, type, value, min_order, max_discount, usage_limit, description, is_active, auto_apply, expires_at) VALUES ('SAVE10', 'percentage', 10, 500, 150, 1000, '10% off on orders above Rs500 (max Rs150)', TRUE, TRUE, '2027-12-31'), ('WELCOME5', 'fixed', 5, 0, NULL, 500, 'Rs5 off for new customers', TRUE, TRUE, '2027-12-31'), ('FREESHIP', 'free_shipping', 0, 299, NULL, 500, 'Free shipping on orders above Rs299', TRUE, TRUE, '2027-12-31'), ('SPORE15', 'percentage', 15, 1000, 300, 200, '15% off on orders above Rs1000 (max Rs300)', TRUE, FALSE, '2027-06-30'), ('FIRST50', 'fixed', 50, 200, NULL, 100, 'Rs50 off on first order', TRUE, FALSE, '2027-12-31'), ('MONSOON20', 'percentage', 20, 1500, 500, 50, 'Monsoon special: 20% off above Rs1500', TRUE, FALSE, '2026-09-30') ON CONFLICT (code) DO NOTHING`,
+      `INSERT INTO pincode_serviceability (pincode, cod_available, estimated_days_min, estimated_days_max, courier_id) VALUES ('110001', TRUE, 1, 3, 'default'), ('400001', TRUE, 1, 3, 'default'), ('700001', TRUE, 2, 4, 'default'), ('600001', TRUE, 2, 4, 'default'), ('500001', TRUE, 1, 3, 'default'), ('380001', TRUE, 2, 4, 'default'), ('560001', TRUE, 1, 3, 'default'), ('800001', TRUE, 3, 5, 'default'), ('226001', TRUE, 2, 4, 'default'), ('302001', TRUE, 2, 4, 'default') ON CONFLICT (pincode, courier_id) DO NOTHING`,
     ];
 
     for (const sql of statements) {
@@ -392,6 +498,27 @@ function startServer(port, attempts = 0) {
     setInterval(() => {
       runAutoRefundSweep().catch(err => logger.error(`[Server] Auto-refund sweep error: ${err.message}`));
     }, 5 * 60 * 1000);
+
+    // Phase 3 — Scheduled cron jobs
+    const { runAbandonmentCron } = require("./jobs/abandonmentCron");
+    const { runReservationCleanup } = require("./jobs/reservationCleanup");
+    const { runCodOtpCleanup } = require("./jobs/codOtpCleanup");
+
+    setInterval(() => runAbandonmentCron().catch(() => {}), 15 * 60 * 1000);
+    setInterval(() => runReservationCleanup().catch(() => {}), 5 * 60 * 1000);
+    setInterval(() => runCodOtpCleanup().catch(() => {}), 30 * 60 * 1000);
+
+    // Phase 5 — Cancel window expiry sweep
+    const { runCancelWindowCleanup } = require("./jobs/cancelWindowCleanup");
+    setInterval(() => runCancelWindowCleanup().catch(() => {}), 60 * 1000);
+
+    // Phase 7 — Notification retry cron
+    const { runNotificationRetry } = require("./jobs/notificationRetry");
+    setInterval(() => runNotificationRetry().catch(() => {}), 5 * 60 * 1000);
+
+    // Phase 8 — Analytics aggregation (every 6 hours)
+    const { runAnalyticsAggregation } = require("./jobs/analyticsAggregation");
+    setInterval(() => runAnalyticsAggregation().catch(() => {}), 6 * 60 * 60 * 1000);
 
     logger.info("==================================================");
   });

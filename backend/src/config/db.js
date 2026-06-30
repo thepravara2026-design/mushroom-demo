@@ -91,23 +91,7 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 120,
-      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
-      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
-      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
-      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
-      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
-      highlights: [
-        'Cultured in sterile laboratory conditions',
-        'High germination rate — tested for viability',
-        'Packaged in sterile, contamination-proof containers',
-        'Shelf life: 6 months under proper storage',
-        'Suitable for both beginners and experienced growers',
-      ],
-      certificates: [
-        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
-        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
-        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
-      ],
+      low_stock_threshold: 10,
       weight_pricing: [
         { weight: 100, unit: "g", price: 100, mrp_price: 149 },
         { weight: 200, unit: "g", price: 180, mrp_price: 269 },
@@ -133,23 +117,7 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 85,
-      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
-      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
-      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
-      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
-      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
-      highlights: [
-        'Cultured in sterile laboratory conditions',
-        'High germination rate — tested for viability',
-        'Packaged in sterile, contamination-proof containers',
-        'Shelf life: 6 months under proper storage',
-        'Suitable for both beginners and experienced growers',
-      ],
-      certificates: [
-        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
-        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
-        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
-      ],
+      low_stock_threshold: 10,
     },
     {
       id: "prod-3",
@@ -165,23 +133,7 @@ const mockStore = {
       difficulty: "intermediate",
       gst_rate: 5,
       stock: 50,
-      storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
-      warranty_policy: '14-day viability guarantee — free replacement if no germination.',
-      return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
-      shipping_info: 'Free shipping on orders above ₹499. Discreet, secure packaging with temperature control.',
-      compliance_info: 'Produced in ISO-certified laboratory facility. Meets DBT guidelines for microbial cultures. Lot-wise QC tested.',
-      highlights: [
-        'Cultured in sterile laboratory conditions',
-        'High germination rate — tested for viability',
-        'Packaged in sterile, contamination-proof containers',
-        'Shelf life: 6 months under proper storage',
-        'Suitable for both beginners and experienced growers',
-      ],
-      certificates: [
-        { icon: 'fa-solid fa-microscope', label: 'Lab Tested' },
-        { icon: 'fa-solid fa-check-circle', label: 'Contamination-Free' },
-        { icon: 'fa-solid fa-flask', label: 'Sterile Pack' },
-      ],
+      low_stock_threshold: 10,
     },
     {
       id: "prod-4",
@@ -197,6 +149,7 @@ const mockStore = {
       difficulty: "advanced",
       gst_rate: 5,
       stock: 60,
+      low_stock_threshold: 10,
       storage_handling: 'Store in a cool, dark place (4-8°C refrigerator recommended). Keep away from heat and moisture. Use within 6 months.',
       warranty_policy: '14-day viability guarantee — free replacement if no germination.',
       return_policy: 'Sealed packs non-returnable for hygiene. Replacement issued for contamination or low viability within 7 days.',
@@ -229,6 +182,7 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 40,
+      low_stock_threshold: 10,
       storage_handling: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
       warranty_policy: '7-day freshness guarantee — replace if spoiled on arrival.',
       return_policy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
@@ -261,6 +215,7 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 45,
+      low_stock_threshold: 10,
       storage_handling: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
       warranty_policy: '7-day freshness guarantee — replace if spoiled on arrival.',
       return_policy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
@@ -293,6 +248,7 @@ const mockStore = {
       difficulty: "advanced",
       gst_rate: 5,
       stock: 100,
+      low_stock_threshold: 10,
       storage_handling: 'Store in an airtight container in a cool, dry place away from direct sunlight. Refrigeration extends shelf life.',
       warranty_policy: '30-day quality guarantee — replace if damaged or infested.',
       return_policy: 'Unopened packages can be returned within 7 days. Opened packages replaced only if quality issues found.',
@@ -325,6 +281,7 @@ const mockStore = {
       difficulty: "intermediate",
       gst_rate: 5,
       stock: 75,
+      low_stock_threshold: 10,
       storage_handling: 'Store in an airtight container in a cool, dry place away from direct sunlight. Refrigeration extends shelf life.',
       warranty_policy: '30-day quality guarantee — replace if damaged or infested.',
       return_policy: 'Unopened packages can be returned within 7 days. Opened packages replaced only if quality issues found.',
@@ -357,6 +314,7 @@ const mockStore = {
       difficulty: "beginner",
       gst_rate: 5,
       stock: 65,
+      low_stock_threshold: 10,
       storage_handling: 'Store at room temperature (20-30°C) away from direct sunlight. Use within 3 months of purchase for best results.',
       warranty_policy: '30-day germination guarantee — free replacement if no growth.',
       return_policy: 'Unused kits can be returned within 7 days. Used kits replaced only under warranty terms.',
@@ -395,6 +353,7 @@ const mockStore = {
       difficulty: "intermediate",
       gst_rate: 5,
       stock: 35,
+      low_stock_threshold: 10,
       storage_handling: 'Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality. Do not freeze. Store in a breathable container.',
       warranty_policy: '7-day freshness guarantee — replace if spoiled on arrival.',
       return_policy: 'Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs.',
@@ -413,10 +372,202 @@ const mockStore = {
         { icon: 'fa-solid fa-check-circle', label: 'Non-GMO' },
       ],
     },
+    {
+      id: "gthn",
+      created_at: "2026-06-30T10:00:00.000Z",
+      name: "Grain Spawn - Trial Pack (500g)",
+      description: "Sterilized rye grain spawn for trial cultivation. Ideal for first-time growers testing mushroom cultivation at home.",
+      price: 299.0,
+      mrp_price: 499.0,
+      image_url: "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=600",
+      category: "spawn",
+      difficulty: "beginner",
+      gst_rate: 5,
+      stock: 1,
+      low_stock_threshold: 10,
+      storage_handling: 'Store in a cool, dark place (4-8°C). Use within 3 months.',
+      highlights: ['Sterile rye grain substrate', 'Ready-to-use spawn', 'Beginner-friendly trial size'],
+      certificates: [{ icon: 'fa-solid fa-flask', label: 'Lab Tested' }],
+    },
+    {
+      id: "demo-limited",
+      created_at: "2026-06-30T10:00:00.000Z",
+      name: "Oyster Mushroom Starter Kit (Small)",
+      description: "Compact starter kit for growing oyster mushrooms at home. Includes substrate, spawn, and grow bag.",
+      price: 599.0,
+      mrp_price: 849.0,
+      image_url: "https://images.unsplash.com/photo-1590511794760-4168f8e55f1e?auto=format&fit=crop&q=80&w=600",
+      category: "kits",
+      difficulty: "beginner",
+      gst_rate: 5,
+      stock: 9,
+      low_stock_threshold: 10,
+      storage_handling: 'Store at room temperature (20-30°C). Use within 3 months.',
+      highlights: ['Everything included to start growing', 'First harvest in 10-14 days', 'Compact size'],
+      certificates: [{ icon: 'fa-solid fa-leaf', label: 'Beginner Friendly' }],
+    },
+    {
+      id: "demo-available",
+      created_at: "2026-06-30T10:00:00.000Z",
+      name: "Shiitake Log Grow Kit",
+      description: "Pre-inoculated shiitake log for outdoor cultivation. Produces multiple flushes over several months.",
+      price: 1299.0,
+      mrp_price: 1799.0,
+      image_url: "https://images.unsplash.com/photo-1590511794760-4168f8e55f1e?auto=format&fit=crop&q=80&w=600",
+      category: "kits",
+      difficulty: "intermediate",
+      gst_rate: 5,
+      stock: 10,
+      low_stock_threshold: 10,
+      storage_handling: 'Store outdoors in a shaded area. Mist regularly to maintain humidity.',
+      highlights: ['Pre-inoculated shiitake log', 'Produces multiple harvests', 'Outdoor cultivation'],
+      certificates: [{ icon: 'fa-solid fa-certificate', label: 'Premium Quality' }],
+    },
   ],
 
   refunds: [],
   refund_audits: [],
+  order_audit_logs: [],
+  notification_logs: [],
+  refund_queue: [],
+  coupons: [],
+  coupon_usage: [],
+  returns: [],
+  return_items: [],
+  return_evidence: [],
+  inventory_reservations: [],
+  inventory_log: [],
+  notify_me_requests: [],
+  abandoned_carts: [],
+  abandonment_triggers: [],
+  pincode_serviceability: [],
+  order_cod_otps: [],
+  notification_triggers: [
+    { id: 'nt-1', event_type: 'payment.success', channels: ['email', 'whatsapp', 'sms'], delay_minutes: 0, is_active: true },
+    { id: 'nt-2', event_type: 'payment.failed', channels: ['sms', 'whatsapp'], delay_minutes: 0, is_active: true },
+    { id: 'nt-3', event_type: 'order.confirmed', channels: ['email', 'whatsapp'], delay_minutes: 0, is_active: true },
+    { id: 'nt-4', event_type: 'admin.approved', channels: ['email'], delay_minutes: 0, is_active: true },
+    { id: 'nt-5', event_type: 'order.shipped', channels: ['whatsapp', 'sms', 'email'], delay_minutes: 0, is_active: true },
+  ],
+  notification_log: [],
+  analytics_summaries: [],
+  analytics_events: (() => {
+    const events = [];
+    const now = Date.now();
+    const guests = ['gst-a1b2c3', 'gst-d4e5f6', 'gst-g7h8i9', 'gst-j0k1l2', 'gst-m3n4o5', 'gst-n6o7p8', 'gst-q9r0s1'];
+    const sessions = Array.from({ length: 25 }, (_, i) => 'ses-' + String(i + 1).padStart(3, '0'));
+    const pages = ['/', '/products', '/cart', '/checkout', '/track', '/categories/spawn', '/product/prod-1', '/product/prod-5', '/product/prod-9'];
+    const prodIds = Array.from({ length: 10 }, (_, i) => 'prod-' + (i + 1));
+    const prodNames = [
+      'Pink Oyster Spore Syringe (10ml)', 'Lion\'s Mane Spore Culture (10ml)',
+      'Shiitake Grain Spawn (1kg)', 'Reishi Spore Print',
+      'Fresh Pink Oyster Mushrooms (500g)', 'Fresh King Oyster Mushrooms (500g)',
+      'Dried Reishi Mushrooms (100g)', 'Dried Cordyceps Militaris (50g)',
+      'Oyster Mushroom Grow Kit', 'Wild Forest Mushroom Mix (300g)',
+    ];
+
+    function seededRand(seed) {
+      return ((seed * 9301 + 49297) % 233280) / 233280;
+    }
+
+    // funnel retention rates per stage (deterministic by day+stage)
+    const stageRetention = [1.0, 0.75, 0.40, 0.25, 0.18, 0.12]; // page_view → purchase
+
+    for (let day = 29; day >= 0; day--) {
+      const dayStart = new Date(now - day * 86400000);
+      const isWeekend = dayStart.getDay() === 0 || dayStart.getDay() === 6;
+      const baseCount = 18 + (day % 5) + (isWeekend ? 7 : 0);
+      const totalSessions = baseCount;
+
+      // For each session, determine which stages it reaches (cumulative funnel)
+      for (let s = 0; s < totalSessions; s++) {
+        const session = sessions[s % sessions.length];
+        const guest = guests[(day * 7 + s * 13) % guests.length];
+        const baseSeed = day * 10000 + s * 7919;
+        const maxStageRand = seededRand(baseSeed + 55555); // single roll determines max funnel depth
+
+        let maxStage = -1;
+        for (let st = 0; st < 6; st++) {
+          if (maxStageRand <= stageRetention[st]) maxStage = st;
+        }
+
+        for (let st = 0; st <= maxStage; st++) {
+          const stageNames = ['page_view', 'view_item', 'add_to_cart', 'begin_checkout', 'add_payment_info', 'purchase'];
+          const eventType = stageNames[st];
+          const ts = new Date(dayStart.getTime() + s * 60000 + seededRand(baseSeed + st * 7919) * 43200000);
+          const page = st <= 1 ? pages[(day + s + st) % pages.length] : (st <= 2 ? '/cart' : '/checkout');
+          const metadata = {};
+
+          if (st >= 2) {
+            const prodIdx = (day + s + st) % prodIds.length;
+            metadata.productId = prodIds[prodIdx];
+            if (st >= 4) metadata.paymentMethod = (day + s) % 2 === 0 ? 'cod' : 'upi';
+            if (st === 2) { metadata.quantity = 1 + (day + s) % 3; metadata.price = 300 + ((day * 13 + s * 7) % 500); }
+            if (st === 3 || st === 4) { metadata.total = 500 + ((day * 17 + s * 11) % 1500); }
+            if (st === 5) {
+              const itemCount = 1 + (day + s) % 3;
+              const items = [];
+              let total = 0;
+              for (let j = 0; j < itemCount; j++) {
+                const pIdx = (day + s + j) % prodIds.length;
+                const qty = 1 + (day + j) % 2;
+                const price = 200 + ((day * 23 + s * 17 + j * 11) % 600);
+                items.push({ productId: prodIds[pIdx], product_id: prodIds[pIdx], name: prodNames[pIdx], quantity: qty, price, total: price * qty });
+                total += price * qty;
+              }
+              metadata.total = total;
+              metadata.items = items;
+              metadata.products = items;
+              metadata.orderId = `order-${day}-${s}`;
+            }
+          }
+
+          events.push({
+            id: `aev-${eventType[0]}${eventType[1]}-${day}-${s}`,
+            event_type: eventType,
+            user_id: null,
+            guest_token: guest,
+            session_id: session,
+            page,
+            metadata,
+            created_at: ts.toISOString(),
+          });
+        }
+
+        // cancellation events — ~8% of purchases
+        if (maxStage === 5 && day > 0 && day % 3 === 0) {
+          if (seededRand(baseSeed + 77777) <= 0.08) {
+            const ts = new Date(dayStart.getTime() + s * 60000 + seededRand(baseSeed + 99991) * 43200000 + 3600000);
+            events.push({ id: `aev-cxl-${day}-${s}`, event_type: 'order.cancelled', user_id: null, guest_token: guest, session_id: session, page: '/track', metadata: { reason: 'changed_mind' }, created_at: ts.toISOString() });
+          }
+        }
+
+        // return events — ~4% of purchases
+        if (maxStage === 5 && day > 0 && day % 4 === 0) {
+          if (seededRand(baseSeed + 88888) <= 0.04) {
+            const ts = new Date(dayStart.getTime() + s * 60000 + seededRand(baseSeed + 88883) * 43200000 + 7200000);
+            events.push({ id: `aev-ret-${day}-${s}`, event_type: 'return.requested', user_id: null, guest_token: guest, session_id: session, page: '/track', metadata: { reason: 'quality_issue' }, created_at: ts.toISOString() });
+          }
+        }
+      }
+    }
+
+    // Some user-associated events (logged-in buyer)
+    const buyerSession = 'ses-buyer-1';
+    const nowDate = new Date();
+    for (let i = 0; i < 5; i++) {
+      const ts = new Date(nowDate.getTime() - i * 3600000);
+      events.push({ id: `aev-user-page-${i}`, event_type: 'page_view', user_id: 'user-buyer', guest_token: null, session_id: buyerSession, page: '/products', metadata: {}, created_at: ts.toISOString() });
+      events.push({ id: `aev-user-view-${i}`, event_type: 'view_item', user_id: 'user-buyer', guest_token: null, session_id: buyerSession, page: '/product/prod-5', metadata: { productId: 'prod-5' }, created_at: ts.toISOString() });
+    }
+    events.push({ id: 'aev-user-cart', event_type: 'add_to_cart', user_id: 'user-buyer', guest_token: null, session_id: buyerSession, page: '/cart', metadata: { productId: 'prod-5', quantity: 1, price: 500 }, created_at: new Date(nowDate.getTime() - 1800000).toISOString() });
+    events.push({ id: 'aev-user-co', event_type: 'begin_checkout', user_id: 'user-buyer', guest_token: null, session_id: buyerSession, page: '/checkout', metadata: { total: 500 }, created_at: new Date(nowDate.getTime() - 900000).toISOString() });
+    events.push({ id: 'aev-user-pi', event_type: 'add_payment_info', user_id: 'user-buyer', guest_token: null, session_id: buyerSession, page: '/checkout', metadata: { paymentMethod: 'upi', total: 500 }, created_at: new Date(nowDate.getTime() - 600000).toISOString() });
+    events.push({ id: 'aev-user-pur', event_type: 'purchase', user_id: 'user-buyer', guest_token: null, session_id: buyerSession, page: '/checkout', metadata: { total: 500, items: [{ productId: 'prod-5', product_id: 'prod-5', name: 'Fresh Pink Oyster Mushrooms (500g)', quantity: 1, price: 500, total: 500 }], products: [{ productId: 'prod-5', product_id: 'prod-5', name: 'Fresh Pink Oyster Mushrooms (500g)', quantity: 1, price: 500, total: 500 }], orderId: 'order-user-1' }, created_at: new Date(nowDate.getTime() - 300000).toISOString() });
+
+    return events;
+  })(),
+  notification_preferences: [],
   settings: [
     {
       key: "shipping_charge",
@@ -870,6 +1021,16 @@ class MockQueryBuilder {
     return this;
   }
 
+  gte(column, value) {
+    this.data = this.data.filter((item) => item[column] >= value);
+    return this;
+  }
+
+  lte(column, value) {
+    this.data = this.data.filter((item) => item[column] <= value);
+    return this;
+  }
+
   delete() {
     this.shouldDelete = true;
     return this;
@@ -937,6 +1098,16 @@ class SupabaseQueryBuilderWrapper {
     return this;
   }
 
+  gte(column, value) {
+    this.builder = this.builder.gte(column, value);
+    return this;
+  }
+
+  lte(column, value) {
+    this.builder = this.builder.lte(column, value);
+    return this;
+  }
+
   ilike(column, pattern) {
     this.builder = this.builder.ilike(column, pattern);
     return this;
@@ -996,6 +1167,22 @@ function resetMockStore() {
   mockStore.shipment_tracking_events = [];
   mockStore.order_status_history = [];
   mockStore.fulfillment_tasks = [];
+  mockStore.coupons = [];
+  mockStore.coupon_usage = [];
+  mockStore.returns = [];
+  mockStore.return_items = [];
+  mockStore.return_evidence = [];
+  mockStore.inventory_reservations = [];
+  mockStore.inventory_log = [];
+  mockStore.notify_me_requests = [];
+  mockStore.abandoned_carts = [];
+  mockStore.abandonment_triggers = [];
+  mockStore.pincode_serviceability = [];
+  mockStore.order_cod_otps = [];
+  mockStore.notification_log = [];
+  mockStore.analytics_events = [];
+  mockStore.analytics_summaries = [];
+  mockStore.notification_preferences = [];
 }
 
 module.exports = db;

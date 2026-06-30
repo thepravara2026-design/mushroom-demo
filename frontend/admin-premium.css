@@ -998,63 +998,6 @@
   padding: 8px;
 }
 
-/* ── 12-Section Admin Pills ─────────────────────────────────── */
-.admin-section-pills {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-}
-
-.admin-section-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1.5px solid #d1d5db;
-  background: #fff;
-  color: #4b5563;
-  font-size: 0.75rem;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: var(--adm-transition);
-  position: relative;
-}
-
-.admin-section-pill:hover { border-color: #86efac; color: #1a9650; background: #f0fdf4; }
-
-.admin-section-pill.active {
-  background: linear-gradient(135deg, #1a9650, #147a40);
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(26, 150, 80, 0.3);
-}
-
-.admin-section-pill .section-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.1);
-  font-size: 0.65rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.admin-section-pill.active .section-count {
-  background: rgba(255,255,255,0.25);
-  color: #fff;
-}
-
-.admin-section-pill.active .section-count.zero { display: none; }
-
 /* Secondary status pills (shown inside sections) */
 #section-status-pills.ship-status-pills {
   margin-top: -4px;

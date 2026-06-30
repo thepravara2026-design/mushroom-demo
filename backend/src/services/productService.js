@@ -3,9 +3,9 @@ const categoryRepo = require("../repositories/categoryRepository");
 const escapeRegExp = require("../utils/escapeRegExp");
 
 function _computeStockStatus(stock) {
-  if (stock > 10) return { label: "Available", variant: "available" };
-  if (stock > 5) return { label: "Limited Stocks", variant: "limited" };
-  return { label: "Few Available", variant: "few" };
+  if (stock >= 10) return { label: "Available", variant: "available" };
+  if (stock > 0) return { label: "Limited Stock", variant: "limited" };
+  return { label: "Out of Stock", variant: "out" };
 }
 
 function _attachStockStatus(product) {

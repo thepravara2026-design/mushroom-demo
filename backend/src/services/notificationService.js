@@ -2,6 +2,8 @@ const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 const { sendSseEvent } = require('../lib/sse');
 const { logAuditAction, AUDIT_ACTIONS } = require('./AuditLogService');
+const FEATURE_FLAGS = require('../config/featureFlags');
+const engine = require('./notificationEngine');
 
 // ── Channel Map: which channels each event uses ──
 const EVENT_CHANNELS = {
@@ -14,6 +16,12 @@ const EVENT_CHANNELS = {
   CANCEL_REQUESTED:        { email: true, sms: true,  whatsapp: false, in_app: true },
   CANCEL_APPROVED:         { email: true, sms: true,  whatsapp: false, in_app: true },
   CANCEL_REJECTED:         { email: true, sms: true,  whatsapp: false, in_app: true },
+  SELF_CANCELLED:          { email: true, sms: true,  whatsapp: true,  in_app: true },
+  ADMIN_REJECTED:          { email: true, sms: true,  whatsapp: true,  in_app: true },
+  RETURN_WINDOW:           { email: true, sms: true,  whatsapp: true,  in_app: true },
+  RETURN_APPROVED:         { email: true, sms: true,  whatsapp: true,  in_app: true },
+  RETURN_REJECTED:         { email: true, sms: true,  whatsapp: false, in_app: true },
+  RETURN_PICKUP_SCHEDULED: { email: true, sms: true,  whatsapp: true,  in_app: true },
   REFUND_INITIATED:        { email: true, sms: true,  whatsapp: true,  in_app: true },
   REFUND_FAILED:           { email: true, sms: true,  whatsapp: false, in_app: true },
   REFUND_COMPLETED:        { email: true, sms: true,  whatsapp: true,  in_app: true },
@@ -32,6 +40,12 @@ const EMAIL_SUBJECTS = {
   CANCEL_REQUESTED:        'Cancellation Request Received — Sporekart',
   CANCEL_APPROVED:         'Cancellation Approved — Sporekart',
   CANCEL_REJECTED:         'Cancellation Update — Sporekart',
+  SELF_CANCELLED:          'Self Cancellation Confirmed — Sporekart',
+  ADMIN_REJECTED:          'Order Rejected — Sporekart',
+  RETURN_WINDOW:           'Return Window Open — Sporekart',
+  RETURN_APPROVED:         'Return Request Approved — Sporekart',
+  RETURN_REJECTED:         'Return Request Update — Sporekart',
+  RETURN_PICKUP_SCHEDULED: 'Return Pickup Scheduled — Sporekart',
   REFUND_INITIATED:        'Refund Initiated — Sporekart',
   REFUND_FAILED:           'Refund Update — Sporekart',
   REFUND_COMPLETED:        'Refund Completed — Sporekart',
@@ -42,17 +56,20 @@ const EMAIL_SUBJECTS = {
 // ── Transport (lazy singleton) ──
 let _transporter = null;
 function getTransporter() {
-  if (!_transporter) {
-    _transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: parseInt(process.env.EMAIL_PORT, 10) || 465,
-      secure: parseInt(process.env.EMAIL_PORT, 10) === 465,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+  if (_transporter) return _transporter;
+  const host = process.env.EMAIL_HOST || '';
+  if (!host || host.includes('xxxx') || host.includes('your-') || process.env.FORCE_MOCK === 'true') {
+    return null;
   }
+  _transporter = nodemailer.createTransport({
+    host,
+    port: parseInt(process.env.EMAIL_PORT, 10) || 465,
+    secure: parseInt(process.env.EMAIL_PORT, 10) === 465,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
   return _transporter;
 }
 
@@ -73,6 +90,12 @@ function buildEmailHtml(eventType, order, metadata) {
     CANCEL_REQUESTED:        'Your cancellation request has been received and is pending admin approval.',
     CANCEL_APPROVED:         'Your cancellation has been approved. Refund will be initiated shortly.',
     CANCEL_REJECTED:         `Your cancellation request was not approved. ${metadata.reason ? `Reason: ${metadata.reason}` : ''}`,
+    SELF_CANCELLED:          'Your order has been self-cancelled successfully. Refund will be processed shortly.',
+    ADMIN_REJECTED:          `Your order could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for more details.'}`,
+    RETURN_WINDOW:           'Your order has been delivered! You have 7 days to request a return if needed.',
+    RETURN_APPROVED:         'Your return request has been approved. We will schedule a pickup shortly.',
+    RETURN_REJECTED:         `Your return request was not approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for details.'}`,
+    RETURN_PICKUP_SCHEDULED: 'Your return pickup has been scheduled. Our courier partner will collect the item from your address.',
     REFUND_INITIATED:        'Your refund has been initiated. It may take 3-7 business days to reflect in your account.',
     REFUND_FAILED:           'Your refund encountered an issue. Our team is looking into it and will contact you shortly.',
     REFUND_COMPLETED:        `Your refund of ₹${Number(total).toFixed(2)} has been completed.`,
@@ -140,6 +163,12 @@ function buildSmsMessage(eventType, order, metadata) {
     CANCEL_REQUESTED:        `Cancellation request for Order #${orderId} has been received. Awaiting admin approval. — Sporekart`,
     CANCEL_APPROVED:         `Cancellation for Order #${orderId} approved. Refund will be initiated shortly. — Sporekart`,
     CANCEL_REJECTED:         `Cancellation for Order #${orderId} was not approved. ${metadata.reason || ''} — Sporekart`,
+    SELF_CANCELLED:          `Order #${orderId} has been self-cancelled. Refund will be processed shortly. — Sporekart`,
+    ADMIN_REJECTED:          `Order #${orderId} could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support.'} — Sporekart`,
+    RETURN_WINDOW:           `Order #${orderId} delivered! Return window is open for 7 days. — Sporekart`,
+    RETURN_APPROVED:         `Return for Order #${orderId} has been approved. Pickup will be scheduled shortly. — Sporekart`,
+    RETURN_REJECTED:         `Return for Order #${orderId} was not approved. ${metadata.reason || ''} — Sporekart`,
+    RETURN_PICKUP_SCHEDULED: `Return pickup for Order #${orderId} has been scheduled. Courier will contact you. — Sporekart`,
     REFUND_INITIATED:        `Refund for Order #${orderId} has been initiated. 3-7 business days to reflect. — Sporekart`,
     REFUND_FAILED:           `Refund for Order #${orderId} encountered an issue. We'll contact you shortly. — Sporekart`,
     REFUND_COMPLETED:        `Refund of ₹${Number(total).toFixed(2)} for Order #${orderId} has been completed! — Sporekart`,
@@ -160,6 +189,12 @@ function buildWhatsAppMessage(eventType, order, metadata) {
     ORDER_APPROVED:    `✅ *Order Approved!*\n\nOrder #${shortId} of ${amountStr} has been approved and is being processed.`,
     ORDER_SHIPPED:     `🚚 *Order Shipped!*\n\nOrder #${shortId} is on its way! ${metadata.eta ? `Expected delivery: ${metadata.eta}` : ''}`,
     ORDER_DELIVERED:   `🎉 *Order Delivered!*\n\nOrder #${shortId} has been delivered. Thank you for choosing Sporekart! 🍄`,
+    SELF_CANCELLED:    `✅ *Self Cancellation Confirmed*\n\nOrder #${shortId} has been self-cancelled. Refund of ${amountStr} will be processed shortly.`,
+    ADMIN_REJECTED:    `❌ *Order Rejected*\n\nOrder #${shortId} could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support.'}`,
+    RETURN_WINDOW:     `📦 *Return Window Open*\n\nOrder #${shortId} delivered! You have 7 days to request a return. Log in to your account to start a return.`,
+    RETURN_APPROVED:   `✅ *Return Approved*\n\nYour return for Order #${shortId} has been approved. We will schedule a pickup shortly.`,
+    RETURN_REJECTED:   `❌ *Return Rejected*\n\nYour return for Order #${shortId} was not approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support for details.'}`,
+    RETURN_PICKUP_SCHEDULED: `📬 *Pickup Scheduled*\n\nReturn pickup for Order #${shortId} has been scheduled. Our courier will collect the item from your address.`,
     REFUND_INITIATED:  `🔄 *Refund Initiated*\n\nRefund of ${amountStr} for Order #${shortId} has been initiated. 3-7 business days to reflect.`,
     REFUND_COMPLETED:  `💰 *Refund Completed*\n\nRefund of ${amountStr} for Order #${shortId} has been completed!`,
     MANUAL_REFUND_COMPLETED: `💰 *Manual Refund Completed*\n\nManual refund of ${amountStr} for Order #${shortId} has been completed!`,
@@ -312,6 +347,23 @@ async function sendInApp(eventType, order, metadata) {
 // ── Unified Notify ──
 // Fire-and-forget, never blocks the caller
 async function notify(eventType, order, user, metadata = {}) {
+  if (FEATURE_FLAGS.NOTIFICATION_TRIGGERS) {
+    const context = {
+      orderId: order?.id || order?.order_id,
+      userId: user?.id,
+      email: user?.email || order?.customer_email,
+      phone: user?.phone || order?.delivery_phone,
+      whatsapp: user?.whatsapp_number || order?.delivery_phone,
+      name: user?.name || user?.fullName || '',
+      amount: order?.total || order?.amount || 0,
+      order,
+      user,
+      metadata,
+      date: order?.created_at ? new Date(order.created_at).toLocaleDateString('en-IN') : '',
+    };
+    return engine.dispatch(eventType, context);
+  }
+
   const channels = EVENT_CHANNELS[eventType];
   if (!channels) {
     logger.warn(`[NotificationService] Unknown event type: ${eventType}`);
@@ -320,8 +372,9 @@ async function notify(eventType, order, user, metadata = {}) {
 
   const promises = [];
 
-  if (channels.email && user?.email) {
-    promises.push(sendEmail(user.email, eventType, order, metadata));
+  const contactEmail = user?.email || order?.customer_email;
+  if (channels.email && contactEmail) {
+    promises.push(sendEmail(contactEmail, eventType, order, metadata));
   }
 
   if (channels.sms) {
@@ -344,7 +397,6 @@ async function notify(eventType, order, user, metadata = {}) {
 
   const results = await Promise.allSettled(promises);
 
-  // Audit log for notification sent
   logAuditAction({
     orderId: order.id || order.order_id,
     action: AUDIT_ACTIONS.NOTIFICATION_SENT,

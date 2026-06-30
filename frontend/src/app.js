@@ -18,10 +18,39 @@ import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
 import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal } from './utils/notify.js';
 import { isValidIndianPhone } from './utils/validation.js';
 import { createEventSourceWithAuth } from './utils/auth.js';
+import { renderReturnPage } from './components/ReturnPage.js';
 import { initDeliveryCheck } from './shipping/deliveryCheck.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
+
+// ── Analytics tracking helper (fire-and-forget) ──
+window.trackEvent = function trackEvent(eventType, metadata = {}) {
+  try {
+    const body = {
+      eventType,
+      metadata,
+      page: window.location.hash || window.location.pathname,
+    };
+    if (state?.token) {
+      fetch(`${API_BASE}/analytics/track`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify(body),
+      }).catch(() => {});
+    } else {
+      const guestToken = localStorage.getItem('guest_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (guestToken) headers['x-guest-token'] = guestToken;
+      fetch(`${API_BASE}/analytics/track`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      }).catch(() => {});
+    }
+  } catch (e) { /* fire-and-forget */ }
+};
+window.__appState = state;
 
 let _statesCache = [];
 let _citiesCache = {};
@@ -117,6 +146,7 @@ function _resetInactivityTimer() {
 
 function _onInactivityTimeout() {
   saveCart();
+  trackEvent('cart_abandonment', { items: state.cart, total: state.cartTotal });
   showInfoToast('Session expired due to inactivity. Your cart has been saved.');
   logout();
 }
@@ -313,6 +343,7 @@ function renderCategoryGrid(categories) {
 
 function handleRouting(opts = {}) {
   const hash = window.location.hash || '#shop';
+  setTimeout(() => trackEvent('page_view', { hash }), 100);
   const navShop = document.getElementById('btn-nav-shop');
   const navTrack = document.getElementById('btn-nav-track');
   const navAdmin = document.getElementById('btn-nav-admin');
@@ -396,6 +427,20 @@ function handleRouting(opts = {}) {
       state.activeTrackingId = match[1];
       startTrackingPoll(match[1]);
     }
+  } else if (hash.startsWith('#returns=')) {
+    if (!state.user) {
+      authModal.open('buyer', () => {
+        window.location.hash = hash;
+      });
+      return;
+    }
+    navTrack.classList.add('active');
+    pageTrack.classList.add('active');
+    if (heroSection) heroSection.classList.add('hidden');
+    const orderId = hash.replace('#returns=', '');
+    fetchOrders().then(() => {
+      renderReturnPage(orderId);
+    });
   } else {
     navShop.classList.add('active');
     pageShop.classList.add('active');
@@ -714,6 +759,30 @@ function initEventListeners() {
     .getElementById('cart-drawer-overlay')
     .addEventListener('click', () => { toggleCartDrawer(false); });
 
+  // Reservation countdown ticker (every 5s to avoid over-rendering)
+  setInterval(() => {
+    const timers = document.querySelectorAll('.cart-reservation-timer');
+    if (!timers.length) return;
+    let needsUpdate = false;
+    timers.forEach(el => {
+      const cartId = el.getAttribute('data-cart-id');
+      const item = state.cart.find(i => i._cartId === cartId || i.id === cartId);
+      if (item && item._reservedAt) {
+        const elapsed = (Date.now() - item._reservedAt) / 1000;
+        const remaining = Math.max(0, 900 - elapsed);
+        const mins = Math.floor(remaining / 60);
+        const secs = Math.floor(remaining % 60);
+        el.innerHTML = `<i class="fa-solid fa-clock"></i> Reserved ${mins}:${String(secs).padStart(2, '0')}`;
+        if (remaining < 300) { el.classList.add('urgent'); needsUpdate = true; }
+        if (remaining <= 0) {
+          el.innerHTML = '<i class="fa-solid fa-clock"></i> Reservation expired — refresh cart';
+          el.classList.add('expired');
+        }
+      }
+    });
+    if (needsUpdate) { /* visual hint only, no full re-render */ }
+  }, 5000);
+
   // Promo application
   document
     .getElementById('btn-apply-promo')
@@ -1016,7 +1085,7 @@ async function loadUser() {
     updateAuthHeaderUI();
     try {
       window.dispatchEvent(new CustomEvent('auth:changed', { detail: { token: state.token, user: state.user } }));
-    } catch (e) { }
+    } catch (e) { console.error('dispatchEvent failed', e); }
     handleRouting(); // trigger routing refresh for access checks
   } catch (err) {
     if (state.token !== tokenAtStart) return;
@@ -1165,6 +1234,17 @@ let _productRetryCount = 0;
 const MAX_PRODUCT_RETRIES = 5;
 
 async function fetchProducts() {
+  const grid = document.getElementById('product-grid');
+  if (grid) {
+    grid.innerHTML = '<div class="skeleton-product-grid">' + Array(8).fill(`
+      <div class="skeleton-card">
+        <div class="skeleton skeleton-image"></div>
+        <div class="skeleton skeleton-text w-75"></div>
+        <div class="skeleton skeleton-text w-50"></div>
+        <div class="skeleton skeleton-text w-40" style="margin-top:8px;"></div>
+      </div>
+    `).join('') + '</div>';
+  }
   try {
     const params = new URLSearchParams();
     const sort = getShopInventorySortValue();
@@ -1214,9 +1294,9 @@ function _formatCurrency(n) {
 }
 
 function _getStockMeta(stock) {
-  if (stock > 10) return { label: 'Available', variant: 'available' };
-  if (stock > 5) return { label: 'Limited Stocks', variant: 'limited' };
-  return { label: 'Few Available', variant: 'few' };
+  if (stock >= 10) return { label: 'Available', variant: 'available' };
+  if (stock > 0) return { label: 'Limited Stock', variant: 'limited' };
+  return { label: 'Out of Stock', variant: 'out' };
 }
 
 function renderProducts() {
@@ -1593,18 +1673,48 @@ async function updateSearchSuggestions(query) {
     return;
   }
 
-  const { trainings = [] } = result || {};
+  const { products = [], categories = [], trainings = [] } = result || {};
+  const hasProducts = Array.isArray(products) && products.length > 0;
+  const hasCategories = Array.isArray(categories) && categories.length > 0;
   const hasTrainings = Array.isArray(trainings) && trainings.length > 0;
 
-  if (!hasTrainings) {
+  if (!hasProducts && !hasCategories && !hasTrainings) {
     dd.innerHTML = `<div class="suggestions-empty"><i class="fa-solid fa-magnifying-glass"></i> No results found for "${query}"</div>`;
     dd.classList.remove('hidden');
     return;
   }
 
-  const trainingItems = trainings
-    .slice(0, 4)
-    .map((t) => {
+  let html = '';
+
+  if (hasProducts) {
+    html += `<div class="suggestions-group-label"><i class="fa-solid fa-box"></i> Products</div>`;
+    html += products.slice(0, 4).map(p => `
+      <div class="suggestion-item" data-type="product" data-name="${p.name}">
+        <div class="suggestion-item-icon"><i class="fa-solid fa-seedling"></i></div>
+        <div class="suggestion-item-info">
+          <div class="suggestion-item-name">${p.name}</div>
+          ${p.price ? `<span class="suggestion-item-price">₹${Number(p.price).toFixed(2)}</span>` : ''}
+        </div>
+        <span class="suggestion-item-cat">${p.category || ''}</span>
+      </div>
+    `).join('');
+  }
+
+  if (hasCategories) {
+    html += `<div class="suggestions-group-label"><i class="fa-solid fa-tag"></i> Categories</div>`;
+    html += categories.slice(0, 4).map(c => `
+      <div class="suggestion-item" data-type="category" data-name="${c.name}">
+        <div class="suggestion-item-icon"><i class="fa-solid fa-folder"></i></div>
+        <div class="suggestion-item-info">
+          <div class="suggestion-item-name">${c.name}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  if (hasTrainings) {
+    html += `<div class="suggestions-group-label"><i class="fa-solid fa-graduation-cap"></i> Training & Courses</div>`;
+    html += trainings.slice(0, 4).map(t => {
       const priceDisplay = t.price_actual
         ? `<span class="suggestion-item-price">₹${Number(t.price_actual).toFixed(2)}</span>`
         : '';
@@ -1618,12 +1728,7 @@ async function updateSearchSuggestions(query) {
         <span class="suggestion-item-cat">${t.category || 'Course'}</span>
       </div>
     `;
-    })
-    .join('');
-
-  let html = '';
-  if (trainingItems) {
-    html += `<div class="suggestions-group-label"><i class="fa-solid fa-graduation-cap"></i> Training & Courses</div>${trainingItems}`;
+    }).join('');
   }
 
   dd.innerHTML = html;
@@ -1634,11 +1739,18 @@ async function updateSearchSuggestions(query) {
     item.addEventListener('click', () => {
       const type = item.getAttribute('data-type');
       const id = item.getAttribute('data-id');
+      const name = item.getAttribute('data-name');
       dd.classList.add('hidden');
       document.getElementById('shop-search').value = '';
 
       if (type === 'training') {
         window.location.hash = '#training-section';
+      } else if (type === 'product') {
+        window.location.hash = '#shop';
+      } else if (type === 'category') {
+        const input = document.getElementById('shop-search');
+        if (input) input.value = '';
+        window.location.hash = '#shop';
       }
     });
   });
@@ -1738,6 +1850,7 @@ function showPremiumProductModal(productId) {
   const body = document.getElementById('ppm-body');
   const product = state.products.find(p => p.id === productId);
   if (!product) { body.innerHTML = '<p style="padding:2rem;text-align:center;color:#94a3b8;">Product not found.</p>'; modal.classList.add('active'); return; }
+  trackEvent('view_item', { productId, name: product.name, category: product.category, price: product.price });
 
   const images = (Array.isArray(product.image_urls) && product.image_urls.length > 0)
     ? product.image_urls.filter(Boolean)
@@ -2255,14 +2368,21 @@ async function openProductDetails(id) {
         
         ${metaHTML}
 
+        <div id="pincode-check-detail" style="margin-top: 1rem;"></div>
+
         ${state.user?.role === 'admin' ? `
           <div style="margin-top: 1rem; padding: 0.75rem; background: var(--color-bg-muted, #f5f5f5); border-radius: 8px; text-align: center; color: var(--color-text-muted);">
             <i class="fa-solid fa-eye"></i> Admin — View Only
           </div>
-        ` : `
+        ` : product.stock > 0 ? `
           <button class="btn btn-primary" id="btn-modal-add" style="margin-top: 1rem;">
             <i class="fa-solid fa-basket-shopping"></i> Add to Basket
           </button>
+        ` : `
+          <button class="btn btn-outline notify-me-btn" id="btn-notify-me" style="margin-top: 1rem;">
+            <i class="fa-solid fa-bell"></i> Notify Me
+          </button>
+          <div id="notify-me-form" class="notify-me-form hidden" style="margin-top: 0.75rem;"></div>
         `}
       </div>
     `;
@@ -2301,7 +2421,7 @@ async function openProductDetails(id) {
       });
     });
 
-    document.getElementById('btn-modal-add').addEventListener('click', () => {
+    document.getElementById('btn-modal-add')?.addEventListener('click', () => {
       let weightInfo = null;
       const activeDetailChip = body.querySelector('.detail-weight-chip.active');
       if (activeDetailChip) {
@@ -2313,6 +2433,59 @@ async function openProductDetails(id) {
       addToCart(product.id, weightInfo);
       modal.classList.remove('open');
     });
+
+    // Phase 4: Notify Me handler
+    document.getElementById('btn-notify-me')?.addEventListener('click', async () => {
+      const formContainer = document.getElementById('notify-me-form');
+      if (!formContainer) return;
+      if (!formContainer.classList.contains('hidden')) return;
+      formContainer.innerHTML = `
+        <div class="notify-me-inline">
+          <p style="font-size:0.85rem;color:var(--color-text-muted);margin:0 0 0.5rem;">We'll email you when back in stock.</p>
+          <div style="display:flex;gap:0.5rem;">
+            <input type="email" id="notify-me-email" placeholder="Your email" class="co-input" style="flex:1;" />
+            <button class="btn btn-primary btn-sm" id="notify-me-submit">Notify</button>
+          </div>
+          <div id="notify-me-feedback" style="font-size:0.8rem;margin-top:0.4rem;"></div>
+        </div>
+      `;
+      formContainer.classList.remove('hidden');
+      document.getElementById('notify-me-submit')?.addEventListener('click', async () => {
+        const email = document.getElementById('notify-me-email')?.value.trim();
+        if (!email) return;
+        const submitBtn = document.getElementById('notify-me-submit');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+        try {
+          const token = state.token ? `Bearer ${state.token}` : '';
+          const resp = await fetch(`/api/notify-me/${product.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: token } : {}) },
+            body: JSON.stringify({ email }),
+          });
+          const data = await resp.json();
+          const feedback = document.getElementById('notify-me-feedback');
+          if (feedback) {
+            if (data.success || data.id) {
+              feedback.innerHTML = '<span style="color:#38b17b;">✅ You\'re on the list!</span>';
+            } else if (data.error === 'Already registered for notifications') {
+              feedback.innerHTML = '<span style="color:#fbbf24;">📋 Already registered</span>';
+            } else {
+              feedback.innerHTML = `<span style="color:#ef4444;">${data.error || 'Failed to register'}</span>`;
+            }
+          }
+        } catch (err) {
+          const feedback = document.getElementById('notify-me-feedback');
+          if (feedback) feedback.innerHTML = '<span style="color:#ef4444;">Network error</span>';
+        }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Notify'; }
+      });
+    });
+
+    // Render pincode check inside detail modal
+    const pincodeContainer = document.getElementById('pincode-check-detail');
+    if (pincodeContainer) {
+      renderPincodeCheck(pincodeContainer, product.id);
+    }
   } catch (err) {
     body.innerHTML = '<p style="color: var(--color-danger); text-align:center; padding: 2rem;">Error retrieving specimen record.</p>';
   }
@@ -2375,10 +2548,20 @@ function addToCart(productId, weightInfo) {
   const existing = state.cart.find((item) => item._cartId === cartId || (item.id === productId && !weightInfo && !item._cartId));
   let addedItem;
 
+  const productStock = product.stock || 0;
+
   if (existing) {
+    if (productStock > 0 && existing.quantity + 1 > productStock) {
+      showErrorToast(`Only ${productStock} unit(s) of "${product.name}" available.`);
+      return;
+    }
     existing.quantity += 1;
     addedItem = existing;
   } else {
+    if (productStock > 0 && 1 > productStock) {
+      showErrorToast(`"${product.name}" is out of stock.`);
+      return;
+    }
     const newItem = {
       id: product.id,
       _cartId: cartId,
@@ -2388,6 +2571,8 @@ function addToCart(productId, weightInfo) {
       gst_rate: product.gst_rate,
       quantity: 1,
       weightInfo: weightInfo || null,
+      _stock: productStock,
+      _reservedAt: Date.now(),
     };
     state.cart.push(newItem);
     addedItem = newItem;
@@ -2396,6 +2581,12 @@ function addToCart(productId, weightInfo) {
   saveCart();
   updateCartUI();
   showAddedToCartPopup(addedItem);
+
+  // Track cart activity (Phase 3 — abandonment recovery)
+  trackCartAbandonment();
+
+  // Analytics (Phase 8)
+  trackEvent('add_to_cart', { productId, name: product?.name, price: effectivePrice, quantity: addedItem?.quantity || 1 });
 }
 
 function showAddedToCartPopup(item) {
@@ -2437,25 +2628,38 @@ function changeQuantity(cartId, delta) {
   const item = state.cart.find((item) => (item._cartId || item.id) === cartId);
   if (!item) return;
 
-  item.quantity += delta;
+  const newQty = item.quantity + delta;
 
-  if (item.quantity <= 0) {
+  if (newQty <= 0) {
     state.cart = state.cart.filter((item) => (item._cartId || item.id) !== cartId);
+    saveCart();
+    updateCartUI();
+    if (typeof trackCartAbandonment === 'function') trackCartAbandonment();
+    if (state.cart.length === 0) {
+      toggleCartDrawer(false);
+      if (window.location.hash === '#checkout') window.location.hash = '#shop';
+    }
+    return;
   }
 
+  // Stock check when increasing quantity
+  const maxStock = item._stock || 999999;
+  if (delta > 0 && newQty > maxStock) {
+    showErrorToast(`Only ${maxStock} unit(s) available for "${item.name}".`);
+    return;
+  }
+
+  item.quantity = newQty;
   saveCart();
   updateCartUI();
-
-  if (state.cart.length === 0) {
-    toggleCartDrawer(false);
-    if (window.location.hash === '#checkout') window.location.hash = '#shop';
-  }
+  if (typeof trackCartAbandonment === 'function') trackCartAbandonment();
 }
 
 function removeFromCart(cartId) {
   state.cart = state.cart.filter((item) => (item._cartId || item.id) !== cartId);
   saveCart();
   updateCartUI();
+  if (typeof trackCartAbandonment === 'function') trackCartAbandonment();
 
   if (state.cart.length === 0) {
     toggleCartDrawer(false);
@@ -2543,6 +2747,16 @@ function updateCartUI() {
     .map(
       (cartItem) => {
         const cartId = cartItem._cartId || cartItem.id;
+        const reservedAt = cartItem._reservedAt;
+        let timerHTML = '';
+        if (reservedAt) {
+          const elapsed = (Date.now() - reservedAt) / 1000;
+          const remaining = Math.max(0, 900 - elapsed); // 15 min = 900s
+          const mins = Math.floor(remaining / 60);
+          const secs = Math.floor(remaining % 60);
+          const isUrgent = remaining < 300;
+          timerHTML = `<div class="cart-reservation-timer${isUrgent ? ' urgent' : ''}" data-cart-id="${cartId}"><i class="fa-solid fa-clock"></i> Reserved ${mins}:${String(secs).padStart(2, '0')}</div>`;
+        }
         return `
       <div class="cart-item">
         <img src="${cartItem.image_url}" alt="${cartItem.name}">
@@ -2552,9 +2766,12 @@ function updateCartUI() {
           <div class="cart-item-qty-row">
             <button class="qty-btn" onclick="window.changeQty('${cartId}', -1)">-</button>
             <span class="qty-val">${cartItem.quantity}</span>
-            <button class="qty-btn" onclick="window.changeQty('${cartId}', 1)">+</button>
+            <button class="qty-btn" onclick="window.changeQty('${cartId}', 1)" ${cartItem._stock > 0 && cartItem.quantity >= cartItem._stock ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : ''}>+</button>
           </div>
           <div class="cart-item-shipping-note">Free shipping</div>
+          ${cartItem._stock > 0 && cartItem._stock < 10 ? `<div style="font-size:0.75rem;color:#d97706;margin-top:2px;"><i class="fa-solid fa-circle-exclamation"></i> Only ${cartItem._stock} left</div>` : ''}
+          ${cartItem._stock === 0 && cartItem._stock !== undefined ? `<div style="font-size:0.75rem;color:#dc2626;margin-top:2px;"><i class="fa-solid fa-circle-exclamation"></i> Out of stock</div>` : ''}
+          ${timerHTML}
         </div>
         <button class="btn-remove-item" onclick="window.removeCartItem('${cartId}')">
           <i class="fa-solid fa-trash-can"></i>
@@ -3409,6 +3626,21 @@ async function handleCheckoutInitiation() {
     return;
   }
 
+  // Reserve inventory for cart items (Phase 2)
+  try {
+    const invResp = await fetch('/api/inventory/reserve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: state.cart.map(i => ({ productId: i.id, quantity: i.quantity })),
+      }),
+    });
+    const invData = await invResp.json();
+    if (invData.error) console.warn('[Inventory] Reserve warning:', invData.error);
+  } catch (e) {
+    console.warn('[Inventory] Reserve failed (non-blocking):', e.message);
+  }
+
   toggleCartDrawer(false);
   window.location.hash = '#checkout';
 }
@@ -3430,19 +3662,44 @@ function renderCheckoutPage() {
   renderCheckoutOrderSummary(summaryContainer);
 
   if (!state.token || !state.user || state.user.role !== 'buyer') {
-    renderCheckoutLoginSection();
+    renderCheckoutWithGuestOption();
+  } else {
+    renderCheckoutDeliveryForm();
+  }
+}
+
+function renderCheckoutWithGuestOption() {
+  const formPanel = document.querySelector('.checkout-form-panel');
+  if (!formPanel) return;
+
+  if (!state.token || !state.user) {
+    import('./components/GuestCheckoutModal.js').then(mod => {
+      mod.renderGuestCheckoutModal(formPanel);
+      formPanel.__proceedGuest = () => {
+        window.__guestInfo = window.__guestInfo || {};
+        renderCheckoutDeliveryForm();
+      };
+    });
+  } else if (state.user.role !== 'buyer') {
+    formPanel.innerHTML = `<p style="padding:2rem;text-align:center;">Cultivator profiles are read-only. Please use a Buyer account.</p>`;
   } else {
     renderCheckoutDeliveryForm();
   }
 }
 
 function renderCheckoutOrderSummary(container) {
+  let hasStockWarning = false;
   const lines = state.cart.map((item) => {
     const product = state.products.find((p) => p.id === item.id) || {};
+    const stock = item._stock || product.stock || 0;
+    const lowStock = stock > 0 && stock < 10 && stock < item.quantity * 2;
+    if (lowStock) hasStockWarning = true;
+    const stockNote = stock > 0 && stock < 10 ? `<div style="font-size:0.75rem;color:#d97706;margin-top:2px;"><i class="fa-solid fa-circle-exclamation"></i> Only ${stock} left</div>` : '';
     return `
       <div class="checkout-summary-line">
         <span>${item.quantity}× ${item.name}</span>
         <strong>₹${(item.price * item.quantity).toFixed(2)}</strong>
+        ${stockNote}
       </div>
     `;
   });
@@ -3465,7 +3722,26 @@ function renderCheckoutOrderSummary(container) {
       <div><span>Discount</span><span>₹${discount.toFixed(2)}</span></div>
       <div class="checkout-summary-total"><span>Total</span><strong>₹${total.toFixed(2)}</strong></div>
     </div>
+    <div id="checkout-coupon-section"></div>
   `;
+
+  // Mount coupon section
+  const couponContainer = document.getElementById('checkout-coupon-section');
+  if (couponContainer) {
+    import('./components/CouponSection.js').then(mod => {
+      mod.renderCouponSection(couponContainer, {
+        subtotal,
+        onApply: (code) => {
+          state.activePromo = code;
+          renderCheckoutOrderSummary(container);
+        },
+        onRemove: () => {
+          state.activePromo = '';
+          renderCheckoutOrderSummary(container);
+        },
+      });
+    });
+  }
 }
 
 function renderCheckoutLoginSection() {
@@ -4120,6 +4396,48 @@ async function handlePaymentContinue() {
     }
   }
 
+  // Save form data for order review / payment continuation
+  const deliveryFormData = {
+    customer_name: deliveryName,
+    customer_email: deliveryEmail,
+    delivery_phone: deliveryPhone,
+    address_line1: addressLine1,
+    address_line2: addressLine2,
+    landmark,
+    city,
+    state: stateVal,
+    pincode: deliveryPincode,
+    items: state.cart.map((item) => ({
+      id: item.id,
+      quantity: item.quantity,
+      ...(item.weightInfo ? { weight: item.weightInfo.weight, unit: item.weightInfo.unit } : {}),
+    })),
+    promoCode: state.activePromo || '',
+  };
+
+  // Check stock for all cart items before proceeding
+  for (const cartItem of state.cart) {
+    const product = state.products.find(p => p.id === cartItem.id);
+    if (product) {
+      const available = product.stock || 0;
+      if (available > 0 && cartItem.quantity > available) {
+        showErrorToast(`"${cartItem.name}" — only ${available} unit(s) available. Reduce quantity and try again.`);
+        if (feedback) { feedback.textContent = `"${cartItem.name}" has only ${available} unit(s) in stock. Please reduce quantity.`; feedback.classList.remove('hidden'); }
+        return;
+      }
+    }
+  }
+
+  window.__orderReviewData = deliveryFormData;
+
+  // Show order review step before payment
+  const formPanel = document.querySelector('.checkout-form-panel');
+  if (formPanel) {
+    const { renderOrderReviewPage } = await import('./components/OrderReviewPage.js');
+    renderOrderReviewPage(formPanel, deliveryFormData, state);
+    return;
+  }
+
   const btnContinue = document.getElementById('btn-payment-continue');
   const originalBtnText = btnContinue ? btnContinue.innerHTML : '';
 
@@ -4344,6 +4662,9 @@ function renderInlinePaymentScreen(rzpDetails, orderRecord) {
       showMockPaymentModal(rzpDetails, orderRecord);
     } else {
       const rzp = new Razorpay(buildRzpOptions(method));
+      rzp.on('payment.failed', (response) => {
+        showPaymentRetryScreen(rzpDetails, method);
+      });
       rzp.open();
     }
   }
@@ -4372,50 +4693,106 @@ function renderInlinePaymentScreen(rzpDetails, orderRecord) {
     const btn = document.getElementById('co-pay-cod');
     if (btn) { btn.disabled = true; btn.querySelector('.co-pay-title').textContent = 'Placing order…'; }
     try {
-      const res = await fetch(`${API_BASE}/orders/confirm-cod-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
-        },
-        body: JSON.stringify({ razorpay_order_id: rzpDetails.orderId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        clearCart();
-        updateCartUI();
-        state.activePromo = null;
-        state.promoDiscountPct = 0;
-        const promoInput = document.getElementById('promo-input');
-        if (promoInput) promoInput.value = '';
-        const promoMsg = document.getElementById('promo-message');
-        if (promoMsg) promoMsg.classList.add('hidden');
-        state.activeCategory = 'all';
-        document.querySelectorAll('#product-filters-row .cat-btn').forEach((b) => {
-          b.classList.toggle('active', b.getAttribute('data-category') === 'all');
+      const phone = document.getElementById('checkout-delivery-phone')?.value.trim() || state.user?.whatsappNumber || state.user?.whatsapp_number || '';
+      // COD OTP flow (Phase 3)
+      const orderId = orderRecord?.id || rzpDetails?.orderId;
+      if (orderId && phone) {
+        const otpResp = await fetch(`${API_BASE}/orders/send-cod-otp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+          },
+          body: JSON.stringify({ orderId, phone }),
         });
-        await fetchProducts();
-        await loadUser();
-        const userName = state.user?.fullName || state.user?.full_name || 'Valued Cultivator';
-        try {
-          const bcOrders = new BroadcastChannel('spore-orders');
-          bcOrders.postMessage({ type: 'orders:updated', orderId: orderRecord?.id || null });
-        } catch (e) { /* ignore */ }
-        showPopupModal({
-          title: '🛵 Order Placed!',
-          message: `${userName}, your Cash on Delivery order has been placed. Our team will confirm it shortly.`,
-          duration: 2000,
-          redirectHash: '#shop',
-        });
-      } else {
-        showPayError(data.error || 'Could not place COD order. Please try again.');
-        if (btn) { btn.disabled = false; btn.querySelector('.co-pay-title').textContent = 'Cash on Delivery'; }
+        const otpData = await otpResp.json();
+        if (!otpResp.ok && !otpData.expiresIn) {
+          // Fallback: proceed without OTP
+          throw new Error('OTP_SKIP');
+        }
+        // Show COD OTP screen
+        const formPanel = document.querySelector('.checkout-form-panel');
+        if (formPanel) {
+          const { renderCodOtpScreen } = await import('./components/CodOtpModal.js');
+          renderCodOtpScreen(formPanel, {
+            orderId,
+            phone,
+            onVerified: () => {
+              doCodConfirm(orderRecord, rzpDetails);
+            },
+            onSwitchToOnline: () => {
+              renderInlinePaymentScreen(rzpDetails, orderRecord);
+            },
+          });
+        }
+        if (btn) btn.disabled = false;
+        return;
       }
+
+      // Direct COD confirm (no OTP flow)
+      await doCodConfirm(orderRecord, rzpDetails);
+      if (btn) { btn.disabled = false; btn.querySelector('.co-pay-title').textContent = 'Cash on Delivery'; }
     } catch (err) {
-      showPayError('Network error. Please try again.');
+      if (err.message === 'OTP_SKIP') {
+        // OTP not available — proceed with direct COD
+        if (btn) { btn.disabled = false; btn.querySelector('.co-pay-title').textContent = 'Cash on Delivery'; }
+        await doCodConfirm(orderRecord, rzpDetails);
+        return;
+      }
+      showPayError(err.message || 'Network error. Please try again.');
       if (btn) { btn.disabled = false; btn.querySelector('.co-pay-title').textContent = 'Cash on Delivery'; }
     }
   });
+}
+
+window.renderInlinePaymentScreen = renderInlinePaymentScreen;
+
+// ── COD Confirm Helper (Phase 3) ──────────────────────────────────────────
+async function doCodConfirm(orderRecord, rzpDetails) {
+  try {
+    const API_BASE = '/api';
+    const res = await fetch(`${API_BASE}/orders/confirm-cod-payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+      },
+      body: JSON.stringify({ razorpay_order_id: rzpDetails.orderId }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      clearCart();
+      updateCartUI();
+      state.activePromo = null;
+      state.promoDiscountPct = 0;
+      const promoInput = document.getElementById('promo-input');
+      if (promoInput) promoInput.value = '';
+      const promoMsg = document.getElementById('promo-message');
+      if (promoMsg) promoMsg.classList.add('hidden');
+      state.activeCategory = 'all';
+      document.querySelectorAll('#product-filters-row .cat-btn').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-category') === 'all');
+      });
+      await fetchProducts();
+      await loadUser();
+      const userName = state.user?.fullName || state.user?.full_name || 'Valued Cultivator';
+      try {
+        const bcOrders = new BroadcastChannel('spore-orders');
+        bcOrders.postMessage({ type: 'orders:updated', orderId: orderRecord?.id || null });
+      } catch (e) { /* ignore */ }
+        trackEvent('purchase', { orderId: orderRecord?.id, method: 'COD', total: state.cartTotal, items: state.cart?.length });
+        showPopupModal({
+        title: '🛵 Order Placed!',
+        message: `${userName}, your Cash on Delivery order has been placed. Our team will confirm it shortly.`,
+        duration: 2000,
+        redirectHash: '#shop',
+      });
+    } else {
+      showPayError(data.error || 'Could not place COD order. Please try again.');
+    }
+  } catch (err) {
+    showPayError('Network error. Please try again.');
+  }
 }
 
 // ── Payment Method Choice Modal (for real Razorpay) ────────────────────────
@@ -4506,6 +4883,9 @@ function showPaymentChoiceModal(rzpDetails, orderRecord) {
   document.getElementById('pcm-btn-razorpay')?.addEventListener('click', () => {
     choiceModal.remove();
     const rzp = new Razorpay(buildRzpOptions());
+    rzp.on('payment.failed', (response) => {
+      showPaymentRetryScreen(rzpDetails, null);
+    });
     rzp.open();
   });
   document.getElementById('pcm-btn-upi-id')?.addEventListener('click', () => {
@@ -4633,6 +5013,7 @@ function showUpiIdModal(rzpDetails, orderRecord) {
           // ignore if BroadcastChannel isn't available
         }
 
+        trackEvent('purchase', { orderId: orderRecord?.id, method: 'UPI', total: state.cartTotal, upiId });
         showPopupModal({
           title: isPending ? '📋 UPI Payment Submitted' : '🎉 Payment Successful!',
           message: isPending
@@ -4756,6 +5137,7 @@ function showUpiQrModal(rzpDetails, orderRecord) {
           // ignore if BroadcastChannel isn't available
         }
 
+        trackEvent('purchase', { orderId: orderRecord?.id, method: 'UPI', total: state.cartTotal });
         showPopupModal({
           title: isPending ? '📋 UPI Payment Submitted' : '🎉 Payment Successful!',
           message: isPending
@@ -5637,6 +6019,51 @@ function getStatusBadgeHTML(status) {
       color = "#10b981";
       label = "Manual Refund Completed";
       break;
+    case "cancellation_window":
+      bg = "rgba(245,158,11,0.15)";
+      color = "#f59e0b";
+      label = "Cancellation Window";
+      break;
+    case "window_closed":
+      bg = "rgba(100,116,139,0.15)";
+      color = "#94a3b8";
+      label = "Window Closed";
+      break;
+    case "self_cancelled":
+      bg = "rgba(239,68,68,0.15)";
+      color = "#ef4444";
+      label = "Self-Cancelled";
+      break;
+    case "admin_pending":
+      bg = "rgba(245,158,11,0.15)";
+      color = "#f59e0b";
+      label = "Pending Admin";
+      break;
+    case "admin_rejected":
+      bg = "rgba(239,68,68,0.15)";
+      color = "#ef4444";
+      label = "Admin Rejected";
+      break;
+    case "return_window":
+      bg = "rgba(16,185,129,0.15)";
+      color = "#10b981";
+      label = "Return Window";
+      break;
+    case "order_created":
+      bg = "rgba(56,187,123,0.10)";
+      color = "#38b17b";
+      label = "Order Created";
+      break;
+    case "payment_verified":
+      bg = "rgba(16,185,129,0.12)";
+      color = "#10b981";
+      label = "Payment Verified";
+      break;
+    case "approved":
+      bg = "rgba(16,185,129,0.15)";
+      color = "#10b981";
+      label = "Approved";
+      break;
   }
 
   return `<span class="order-status-badge" style="background:${bg}; color:${color}; padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:600; text-transform:uppercase;">${label}</span>`;
@@ -5644,6 +6071,20 @@ function getStatusBadgeHTML(status) {
 
 async function fetchOrders() {
   if (!state.token) return;
+
+  const ordersList = document.getElementById('orders-list');
+  if (ordersList) {
+    ordersList.innerHTML = Array(3).fill(`
+      <div class="skeleton-order-card">
+        <div class="skeleton skeleton-avatar" style="width:44px;height:44px;border-radius:8px;flex-shrink:0;"></div>
+        <div style="flex:1;">
+          <div class="skeleton skeleton-text w-60"></div>
+          <div class="skeleton skeleton-text w-40"></div>
+          <div class="skeleton skeleton-text w-25" style="height:0.75rem;"></div>
+        </div>
+      </div>
+    `).join('');
+  }
 
   try {
     const res = await fetch(`${API_BASE}/orders/my-orders`, {
@@ -5655,6 +6096,7 @@ async function fetchOrders() {
       renderOrdersSidebar();
       checkAndShowReviewModal();
       window.dispatchEvent(new CustomEvent('orders:refreshed', { detail: { orders: state.orders } }));
+      setTimeout(initWindowTimers, 200);
     }
   } catch (err) {
     showErrorToast(getApiErrorMessage(err));
@@ -5682,9 +6124,10 @@ function renderOrdersSidebar() {
         year: 'numeric',
       });
       const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
-      // Handle new manual refund flow (status=cancelled, tracked via refund_status)
+      const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved"];
+      // Handle new manual refund flow via refundStatus field
       const hasRefundStatus = order.status === 'cancelled' && order.refund_status && order.refund_status !== 'none';
-      const displayStatus = hasRefundStatus ? `REFUND_${order.refund_status.toUpperCase()}` : (refundStates.includes(order.status) ? order.status : order.delivery_status);
+      const displayStatus = hasRefundStatus ? `REFUND_${order.refund_status.toUpperCase()}` : (refundStates.includes(order.status) ? order.status : (v3States.includes(order.status) ? order.status : order.delivery_status));
       const badgeHTML = getStatusBadgeHTML(displayStatus);
 
       const cancelOrRefundReason = (refundStates.includes(order.status) || hasRefundStatus) && order.cancel_reason ? order.cancel_reason : "";
@@ -5724,6 +6167,19 @@ function startTrackingPoll(orderId) {
 
   panelEmpty.classList.remove('empty');
   viewActive.classList.remove('hidden');
+  viewActive.innerHTML = `
+    <div class="skeleton-timeline">
+      ${Array(4).fill(`
+        <div class="skeleton-timeline-step">
+          <span class="skeleton skeleton-node"></span>
+          <div style="flex:1;">
+            <div class="skeleton skeleton-text w-60"></div>
+            <div class="skeleton skeleton-text w-40" style="height:0.75rem;"></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
 
   pollTrackingData(orderId);
 
@@ -5775,12 +6231,15 @@ function renderTrackingDetails(track) {
     .join('');
 
   const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
+  const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved"];
   // Handle new manual refund flow via refundStatus field
   const hasRefundStatus = track.paymentStatus === 'cancelled' && track.refundStatus && track.refundStatus !== 'none';
-  const displayStatus = hasRefundStatus ? `REFUND_${track.refundStatus.toUpperCase()}` : (refundStates.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus);
+  const displayStatus = hasRefundStatus ? `REFUND_${track.refundStatus.toUpperCase()}` : (refundStates.includes(track.paymentStatus) ? track.paymentStatus : (v3States.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus));
   const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus) && !["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED"].includes(track.paymentStatus);
+  const shippedStatuses = ["shipped", "in_transit", "delivered"];
+  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && !shippedStatuses.includes(track.deliveryStatus) && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus) && !["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED", "SELF_CANCELLED", "ADMIN_REJECTED"].includes(track.paymentStatus);
+  const hasCancelWindow = track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !shippedStatuses.includes(track.deliveryStatus) && !["cancelled", "self_cancelled", "window_closed", "SELF_CANCELLED", "ADMIN_REJECTED", "CANCEL_REQUESTED", "CANCEL_APPROVED"].includes(track.paymentStatus);
   const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `
@@ -5846,7 +6305,61 @@ function renderTrackingDetails(track) {
       ${timelineHTML}
     </div>
 
+    <!-- Cancel Window Countdown -->
+    ${track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !shippedStatuses.includes(track.deliveryStatus) && !["cancelled","self_cancelled","window_closed","CANCEL_REQUESTED","CANCEL_APPROVED","CANCEL_REJECTED","REFUND_PENDING","REFUND_INITIATED","REFUND_PROCESSING","REFUND_COMPLETED","REFUND_FAILED"].includes(track.paymentStatus) ? `
+      <div class="tracker-cancel-window-card" id="cancel-window-card-${track.orderId}">
+        <div class="cancel-window-header">
+          <i class="fa-solid fa-clock"></i> <strong>Cancellation Window</strong>
+        </div>
+        <p>You can self-cancel this order within the next</p>
+        <div class="cancel-window-timer" id="cancel-window-timer-${track.orderId}" data-expires="${track.cancelWindowExpires}" data-order-id="${track.orderId}">
+          <span class="cancel-window-countdown">--:--</span>
+        </div>
+        <p style="font-size:0.78rem;color:#94a3b8;">After this window closes, cancellation requires admin approval.</p>
+        <button class="btn btn-cancel" onclick="window.selfCancelOrder('${track.orderId}')">
+          <i class="fa-solid fa-ban"></i> Self-Cancel Now
+        </button>
+      </div>
+    ` : ""}
+
+    <!-- Return Window Countdown -->
+    ${track.returnWindowExpires && new Date(track.returnWindowExpires) > new Date() && track.deliveryStatus === "delivered" ? `
+      <div class="tracker-return-window-card" id="return-window-card-${track.orderId}">
+        <div class="return-window-header">
+          <i class="fa-solid fa-rotate-left"></i> <strong>Return Window Open</strong>
+        </div>
+        <p>Return window expires in</p>
+        <div class="return-window-timer" id="return-window-timer-${track.orderId}" data-expires="${track.returnWindowExpires}">
+          <span class="return-window-countdown">--:--:--</span>
+        </div>
+        <p style="font-size:0.78rem;color:#94a3b8;">Request a return within 7 days of delivery.</p>
+      </div>
+    ` : track.returnWindowExpires && new Date(track.returnWindowExpires) <= new Date() && track.deliveryStatus === "delivered" ? `
+      <div class="tracker-return-window-card tracker-return-window-expired">
+        <div class="return-window-header" style="color:#ef4444;">
+          <i class="fa-solid fa-circle-check"></i> <strong>Order Completed</strong>
+        </div>
+        <p>The 7-day return window has closed. This order is now marked as completed.</p>
+      </div>
+    ` : ""}
+
     <div class="tracker-cancel-section">
+      ${track.paymentStatus === "SELF_CANCELLED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#10b981; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-circle-check"></i> <strong>Self-Cancellation Confirmed</strong>: Your order has been self-cancelled. Refund will be processed shortly. For queries, contact <a href="mailto:support@sporekart.com" style="color:#10b981;font-weight:600;">support@sporekart.com</a>.
+        </div>
+      `
+      : ""
+    }
+      ${track.paymentStatus === "ADMIN_REJECTED"
+      ? `
+        <div class="tracker-status-box" style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#ef4444; border-radius:10px; padding:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-times-circle"></i> <strong>Order Rejected</strong>: Your order was not approved by the admin. ${track.cancelReason ? `Reason: ${track.cancelReason}` : 'Please contact support for more details.'}
+        </div>
+      `
+      : ""
+    }
       ${track.paymentStatus === "CANCEL_REQUESTED"
       ? `
         <div class="tracker-status-box" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); color:#fbbf24; border-radius:10px; padding:12px; margin-bottom:15px;">
@@ -5940,7 +6453,9 @@ function renderTrackingDetails(track) {
       <button class="btn btn-whatsapp-action" onclick="window.whatsappQuickMessage('${track.orderId}')">
         <i class="fa-brands fa-whatsapp"></i> Update via WhatsApp
       </button>
-      ${canCancel ? `<button class="btn btn-cancel" onclick="window.openCancelModal('${track.orderId}')"><i class="fa-solid fa-ban"></i> Cancel order</button>` : ''}
+      ${hasCancelWindow ? `<button class="btn btn-cancel" onclick="window.selfCancelOrder('${track.orderId}')"><i class="fa-solid fa-ban"></i> Self-Cancel Now</button>` : ''}
+      ${canCancel && !hasCancelWindow ? `<button class="btn btn-cancel" onclick="window.openCancelModal('${track.orderId}')"><i class="fa-solid fa-ban"></i> Request Cancellation</button>` : ''}
+      ${track.delivery_status === 'delivered' && track.returnWindowExpires ? `<button class="btn btn-primary" onclick="window.location.hash='returns=${track.orderId}'"><i class="fa-solid fa-rotate-left"></i> Request Return</button>` : ''}
     </div>
   `;
 
@@ -6079,6 +6594,7 @@ function openCancelModal(orderId) {
 
     confirmModal.querySelector('#cancel-confirm-yes-btn').addEventListener('click', async () => {
       confirmModal.remove();
+      trackEvent('cancel_requested', { orderId, reason: reasonLabel });
 
       try {
         await fetchWithAuth(`/orders/${orderId}/request-cancel`, {
@@ -6095,6 +6611,92 @@ function openCancelModal(orderId) {
 }
 
 window.openCancelModal = openCancelModal;
+
+/* ── Self-Cancel (Phase 5) ── */
+async function selfCancelOrder(orderId) {
+  const confirmModal = document.createElement('div');
+  confirmModal.className = 'modal-overlay open';
+  confirmModal.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10001;padding:18px;';
+  confirmModal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;text-align:center;">
+      <div style="margin-bottom:16px;font-size:2.5rem;">⚠️</div>
+      <h3 style="margin:0 0 8px;font-size:1.1rem;color:#d97706;">Self-Cancel Order</h3>
+      <p style="margin:0 0 6px;color:var(--text-mid);font-size:0.9rem;">
+        Are you sure you want to self-cancel Order <strong>#${orderId.substring(0, 8)}</strong>?
+      </p>
+      <p style="margin:0 0 6px;color:#6b7280;font-size:0.85rem;">
+        Your cancellation window is still open. This will initiate an automatic refund.
+      </p>
+      <p style="margin:0 0 18px;color:#ef4444;font-size:0.82rem;">
+        This cannot be undone.
+      </p>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        <button class="btn btn-secondary" id="self-cancel-keep-btn" type="button">Keep Order</button>
+        <button class="btn btn-cancel" id="self-cancel-confirm-btn" type="button">Yes, Self-Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(confirmModal);
+
+  const closeConfirm = () => confirmModal.remove();
+  confirmModal.querySelector('#self-cancel-keep-btn').addEventListener('click', closeConfirm);
+  confirmModal.addEventListener('click', (e) => { if (e.target === confirmModal) closeConfirm(); });
+
+  confirmModal.querySelector('#self-cancel-confirm-btn').addEventListener('click', async () => {
+    confirmModal.remove();
+    trackEvent('order.cancelled', { orderId, method: 'self_cancel' });
+    try {
+      await fetchWithAuth(`/orders/${orderId}/self-cancel`, { method: 'POST' });
+      showSuccessToast('✅ Order self-cancelled successfully. Refund initiated.');
+      await fetchOrders();
+    } catch (err) {
+      showErrorToast(getApiErrorMessage(err) || 'Unable to self-cancel at this time.');
+    }
+  });
+}
+window.selfCancelOrder = selfCancelOrder;
+
+/* ── Cancel / Return Window Timer Initialization (Phase 5) ── */
+function initWindowTimers() {
+  document.querySelectorAll('[id^="cancel-window-timer-"]').forEach(el => {
+    const expires = el.getAttribute('data-expires');
+    if (!expires) return;
+    function tick() {
+      const remaining = new Date(expires) - Date.now();
+      if (remaining <= 0) {
+        el.querySelector('.cancel-window-countdown').textContent = 'Expired';
+        const card = el.closest('.tracker-cancel-window-card');
+        if (card) card.style.display = 'none';
+        return;
+      }
+      const mins = Math.floor(remaining / 60000);
+      const secs = Math.floor((remaining % 60000) / 1000);
+      el.querySelector('.cancel-window-countdown').textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    tick();
+    setInterval(tick, 1000);
+  });
+
+  document.querySelectorAll('[id^="return-window-timer-"]').forEach(el => {
+    const expires = el.getAttribute('data-expires');
+    if (!expires) return;
+    function tick() {
+      const remaining = new Date(expires) - Date.now();
+      if (remaining <= 0) {
+        el.querySelector('.return-window-countdown').textContent = 'Expired';
+        const card = el.closest('.tracker-return-window-card');
+        if (card) card.className = card.className + ' tracker-return-window-expired';
+        return;
+      }
+      const days = Math.floor(remaining / 86400000);
+      const hours = Math.floor((remaining % 86400000) / 3600000);
+      const mins = Math.floor((remaining % 3600000) / 60000);
+      el.querySelector('.return-window-countdown').textContent = `${days}d ${hours}h ${mins}m`;
+    }
+    tick();
+    setInterval(tick, 60000);
+  });
+}
 
 async function viewInvoice(orderId) {
   const modal = document.getElementById('invoice-modal');
@@ -6274,7 +6876,7 @@ function renderInvoicePaper(inv) {
     </div>
   `;
 
-  const shareText = `Hello Sporekart, check my paid invoice ${inv.invoiceNumber} for ₹${inv.totals.total.toFixed(2)}. I'm tracking my spawn growth at http://localhost:3000/#track-${inv.invoiceNumber.split('-')[1].toLowerCase()}`;
+  const shareText = `Hello Sporekart, check my paid invoice ${inv.invoiceNumber} for ₹${inv.totals.total.toFixed(2)}. I'm tracking my spawn growth at ${window.location.origin}/#track-${inv.invoiceNumber.split('-')[1].toLowerCase()}`;
   const whatsappUrl = `https://wa.me/${inv.buyer.phone || '918049913822'}?text=${encodeURIComponent(shareText)}`;
 
   const waBtn = document.getElementById('btn-whatsapp-invoice');
@@ -6290,7 +6892,7 @@ function whatsappQuickMessage(orderId) {
     .map((i) => `${i.name} (x${i.quantity})`)
     .join(', ');
 
-  const text = `Hi, I am tracking my Sporekart Run ${orderNum} [${orderItemsStr}]. Mycelium incubator status is: ${order.delivery_status.toUpperCase()}. Live updates at: http://localhost:3000/#track-${order.id}`;
+  const text = `Hi, I am tracking my Sporekart Run ${orderNum} [${orderItemsStr}]. Mycelium incubator status is: ${order.delivery_status.toUpperCase()}. Live updates at: ${window.location.origin}/#track-${order.id}`;
 
   const userWhatsapp = state.user ? state.user.whatsappNumber : '';
   const finalWhatsappNumber = userWhatsapp || '918049913822';
@@ -6305,6 +6907,10 @@ function whatsappQuickMessage(orderId) {
 let _adminCategories = [];
 
 async function fetchCategories() {
+  const categoryNav = document.getElementById('category-nav');
+  if (categoryNav) {
+    categoryNav.innerHTML = Array(6).fill('<span class="skeleton skeleton-pill" style="margin-right:8px;margin-bottom:4px;"></span>').join('');
+  }
   try {
     const response = await fetch(`${API_BASE}/categories`);
     const data = await response.json();
@@ -7205,11 +7811,13 @@ async function renderBlogsGrid() {
   const pagination = document.getElementById('blogs-pagination');
   if (!list) return;
 
-  list.innerHTML = `
-    <div class="blogs-loading">
-      <i class="fa-solid fa-spinner fa-spin"></i> Loading blogs...
+  list.innerHTML = `<div class="skeleton-grid-3">${Array(3).fill(`
+    <div class="skeleton-card">
+      <div class="skeleton skeleton-image" style="aspect-ratio:16/9;"></div>
+      <div class="skeleton skeleton-text w-80"></div>
+      <div class="skeleton skeleton-text w-60"></div>
     </div>
-  `;
+  `).join('')}</div>`;
 
   try {
     // Fetch all blogs at once so we can reorder client-side with recently read on top
@@ -7387,4 +7995,166 @@ async function renderBlogDetail(slug) {
     console.error('Failed to fetch blog:', err);
   }
 }
+
+// ==========================================================================
+// PHASE 2 — Guest Checkout, Coupon, Pincode, Order Review
+// ==========================================================================
+
+async function checkPincode(pincode) {
+  try {
+    const resp = await fetch(`/api/pincode/${pincode}`)
+    return await resp.json()
+  } catch {
+    return { serviceable: false, codAvailable: false, estimatedDays: null }
+  }
+}
+
+async function renderPincodeCheck(container, productId) {
+  container.innerHTML = `
+    <div class="pincode-check-wrap">
+      <label for="pincode-check-input">📍 Check delivery to your pincode</label>
+      <div class="pincode-check-row">
+        <input type="text" id="pincode-check-input" maxlength="6" inputmode="numeric" placeholder="Enter pincode" class="pincode-check-input" />
+        <button class="btn btn-primary btn-sm" id="pincode-check-btn">Check</button>
+      </div>
+      <div class="pincode-check-result hidden" id="pincode-check-result"></div>
+    </div>
+  `
+
+  async function handlePincodeCheck() {
+    const input = document.getElementById('pincode-check-input')
+    const result = document.getElementById('pincode-check-result')
+    const pin = input?.value.trim()
+    if (!pin || pin.length !== 6) return
+    input.disabled = true
+    result.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking…'
+    result.classList.remove('hidden')
+
+    const data = await checkPincode(pin)
+    input.disabled = false
+
+    if (data.serviceable) {
+      const days = data.estimatedDays
+      const codBadge = data.codAvailable ? '<span class="pincode-cod-badge">COD Available</span>' : ''
+      result.innerHTML = `
+        <div class="pincode-success">
+          <i class="fa-solid fa-check-circle"></i> Available! Delivered in ${days?.min || 2}-${days?.max || 5} days
+          ${codBadge}
+        </div>
+      `
+    } else {
+      result.innerHTML = `
+        <div class="pincode-error">
+          <i class="fa-solid fa-circle-exclamation"></i> Currently not available at this pincode
+        </div>
+      `
+    }
+  }
+
+  document.getElementById('pincode-check-btn')?.addEventListener('click', handlePincodeCheck)
+  document.getElementById('pincode-check-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') handlePincodeCheck() })
+}
+
+// ==========================================================================
+// PHASE 3 — COD OTP, Payment Retry, Cart Abandonment
+// ==========================================================================
+
+async function trackCartAbandonment() {
+  try {
+    const userId = state.user?.id || null
+    const guestToken = window.__guestInfo?.token || localStorage.getItem('guestToken') || null
+    if (!userId && !guestToken) return
+    const cartData = {
+      items: state.cart.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),
+      total: state.cart.reduce((t, i) => t + i.price * i.quantity, 0),
+      email: state.user?.email || window.__guestInfo?.email || '',
+      phone: state.user?.whatsappNumber || state.user?.whatsapp_number || window.__guestInfo?.phone || '',
+    }
+    await fetch('/api/abandonment/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, guestToken, cartData }),
+    })
+  } catch (e) {
+    // Non-critical — silent fail
+  }
+}
+
+// Track abandonment on page leave
+window.addEventListener('beforeunload', () => {
+  if (state.cart.length > 0) trackCartAbandonment()
+})
+
+// ── Payment Retry Screen ──────────────────────────────────────────────────
+async function showPaymentRetryScreen(rzpDetails, method) {
+  // Find the checkout container
+  const container = document.querySelector('.checkout-form-panel') || document.querySelector('.checkout-container') || document.getElementById('checkout-container')
+  if (!container) return
+
+  const amt = rzpDetails.amount
+  const orderId = rzpDetails.orderId
+
+  const { renderPaymentRetryScreen } = await import('./components/PaymentRetry.js')
+  renderPaymentRetryScreen(container, {
+    orderId: rzpDetails.orderId,
+    amount: amt,
+    onRetry: async (selectedMethod) => {
+      try {
+        const resp = await fetch('/api/orders/retry-payment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+          },
+          body: JSON.stringify({ orderId: rzpDetails.orderId }),
+        })
+        const data = await resp.json()
+        if (!resp.ok) {
+          showErrorToast(data.error || 'Could not retry payment.')
+          return
+        }
+        // Open Razorpay with new order details
+        const newRzp = new Razorpay({
+          key: data.keyId,
+          amount: data.amount,
+          currency: 'INR',
+          name: 'Sporekart',
+          description: 'Sporekart Order',
+          order_id: data.orderId,
+          method: selectedMethod === 'same' || selectedMethod === 'upi' ? undefined : (selectedMethod === 'cod' ? undefined : selectedMethod),
+          async handler(response) {
+            await completeOrderPayment(
+              response.razorpay_order_id,
+              response.razorpay_payment_id,
+              response.razorpay_signature,
+            )
+          },
+          prefill: {
+            name: state.user?.fullName || '',
+            email: state.user?.email || '',
+            contact: state.user?.whatsappNumber || '',
+          },
+          theme: { color: '#38b17b' },
+        })
+        newRzp.on('payment.failed', () => {
+          showPaymentRetryScreen(rzpDetails, selectedMethod)
+        })
+        newRzp.open()
+      } catch (err) {
+        showErrorToast(err.message || 'Failed to retry payment.')
+      }
+    },
+    onSaveCart: () => {
+      showPopupModal({
+        title: '💾 Cart Saved!',
+        message: 'Your cart is saved. Come back anytime to complete your order.',
+        duration: 1500,
+        redirectHash: '#shop',
+      })
+    },
+  })
+}
+
+// Expose functions needed by components
+window.__appFns = { renderCheckoutLoginSection, renderCheckoutDeliveryForm }
 

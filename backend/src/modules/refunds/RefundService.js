@@ -21,7 +21,7 @@ async function cancelCarrierShipment(orderId, reason) {
       .single();
     if (!shipment || shipment.status === 'cancelled' || shipment.status === 'delivered') return;
 
-    const { getDefaultProvider } = require("../shipping/ProviderRegistry");
+    const { getDefaultProvider } = require("../../services/shipping/ProviderRegistry");
     const provider = await getDefaultProvider();
     if (provider && (shipment.provider_shipment_id || shipment.provider_response?.shipment_id)) {
       const carrierId = shipment.provider_shipment_id || shipment.provider_response?.shipment_id;
@@ -86,6 +86,15 @@ async function sendRefundNotification(order, actionType, metadata = {}) {
       break;
     case "REJECTED":
       message = `❌ *Cancellation Rejected* \n\nYour cancellation request for Order *#${orderIdShort}* was not approved. Your order is processing and will be shipped shortly. Reason: ${metadata.reason || "N/A"}`;
+      break;
+    case "SELF_CANCELLED":
+      message = `✅ *Self Cancellation Confirmed* \n\nOrder *#${orderIdShort}* has been self-cancelled. Refund of ${amountStr} will be processed shortly. For queries, contact support@sporekart.com.`;
+      break;
+    case "ADMIN_REJECTED":
+      message = `❌ *Order Rejected* \n\nOrder *#${orderIdShort}* could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for details.'} A refund will be processed if payment was made.`;
+      break;
+    case "RETURN_WINDOW":
+      message = `📦 *Return Window Open* \n\nOrder *#${orderIdShort}* delivered! You have 7 days from delivery to request a return. Log in to your Sporekart account to start a return.`;
       break;
     case "REFUND_INITIATED":
       message = `🔄 *Refund Initiated* \n\nRefund of ${amountStr} for Order *#${orderIdShort}* has been initiated manually by our team. Expected settlement: 5-7 business days. For queries, contact support@sporekart.com or +91 80 4991 3800.`;
@@ -325,6 +334,10 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
     throw new Error(`Order cancellation request must be in CANCEL_REQUESTED status. Current: ${order.status}`);
   }
 
+  if (!isValidTransition(order.status, OrderStates.CANCELLED)) {
+    throw new Error(`Invalid transition from ${order.status} to CANCELLED`);
+  }
+
   // Cancel carrier shipment if one exists (pre-shipment cancellation)
   await cancelCarrierShipment(orderId, order.cancel_reason || "cancellation approved");
 
@@ -395,6 +408,10 @@ async function rejectCancellation(orderId, reason = "", adminUser = null) {
 
   if (order.status !== OrderStates.CANCEL_REQUESTED) {
     throw new Error("Order must be in CANCEL_REQUESTED status to be rejected.");
+  }
+
+  if (!isValidTransition(order.status, OrderStates.CANCEL_REJECTED)) {
+    throw new Error(`Invalid transition from ${order.status} to CANCEL_REJECTED`);
   }
 
   // Return order back to paid status and processing delivery status
@@ -625,7 +642,8 @@ async function progressManualRefundStep(orderId, targetStep, adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  if (order.status !== 'cancelled') {
+  const cancelledStatuses = ['cancelled', 'self_cancelled', 'admin_rejected', 'CANCEL_APPROVED', 'CANCEL_REJECTED'];
+  if (!cancelledStatuses.includes(order.status)) {
     throw new Error(`Manual refund can only be processed on cancelled orders. Current status: ${order.status}`);
   }
 

@@ -54,7 +54,9 @@ async function runMigrations() {
 async function seedData() {
   console.log("🌱 Seeding additional data...");
   const bcrypt = require("bcryptjs");
-  const adminHash = bcrypt.hashSync(process.env.ADMIN_SEED_PASSWORD || "admin123", 10);
+  const adminSeedPw = process.env.ADMIN_SEED_PASSWORD;
+  if (!adminSeedPw) throw new Error('ADMIN_SEED_PASSWORD environment variable must be set');
+  const adminHash = bcrypt.hashSync(adminSeedPw, 10);
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -128,7 +130,7 @@ async function seedData() {
     await runMigrations();
     await seedData();
     console.log("\n🎉 Done! Your Supabase database is ready.");
-    console.log("   Admin: admin@sporekart.com / admin123");
+    console.log(`   Admin: admin@sporekart.com / ${process.env.ADMIN_SEED_PASSWORD ? '(env var ADMIN_SEED_PASSWORD)' : 'not set'}`);
     console.log("   Buyer OTP: buyer@sporekart.com");
     console.log("   Grower OTP: grower@sporekart.com\n");
   } catch (err) {

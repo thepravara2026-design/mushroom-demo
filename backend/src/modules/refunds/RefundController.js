@@ -1,6 +1,7 @@
 const express = require("express");
 const authMiddleware = require("../../middleware/auth");
 const { validateBody } = require("../../middleware/validate");
+const { validateManualRefundInitiate, validateManualRefundComplete } = require("../../middleware/orderValidation");
 const { success, error: respondError } = require("../../lib/response");
 const { sendSseEvent } = require("../../lib/sse");
 const service = require("./RefundService");
@@ -187,7 +188,7 @@ router.post(
 router.post(
   "/manual-refund/:id/initiate",
   requireAdmin,
-  validateBody(validator.manualRefundSchema),
+  validateManualRefundInitiate,
   async (req, res) => {
     try {
       const { paymentMode, paymentDetails, adminNote } = req.body;
@@ -218,7 +219,7 @@ router.post(
 router.post(
   "/manual-refund/:id/complete",
   requireAdmin,
-  validateBody(validator.manualRefundSchema),
+  validateManualRefundComplete,
   async (req, res) => {
     try {
       const { adminNote } = req.body;

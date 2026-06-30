@@ -1,88 +1,92 @@
-## Session Summary (Jun 26, 2026)
+## Session Summary (Jun 30, 2026) — Phase 1-6 Bug Fixes & Code Cleanup (Phase 9)
 
 ### What was built / refactored
 
-**1. Premium Product Modal (`premium-modal` in `app.js` + `style.css`)**
-- Full-screen frosted modal triggered from shop/section/landing cards
-- Left gallery (carousel with thumbnails), right info pane (name, price/MRP/discount, variant chips, buy buttons)
-- Keyboard (Escape) + click-outside dismiss
-- Premium animation classes (`.ppm-enter`, `.ppm-enter-active`) with staggered children
+**1. `OrderStateService.js` — Full v3 State Machine + New Methods**
+- `V3_STATE_MACHINE` constant with complete state transitions for all v3 statuses (`order_created` → `cancellation_window` → `self_cancelled`/`window_closed` → ... → `completed`)
+- Legacy states preserved with `legacy: true` and `mapsTo` for backward compatibility
+- `isValidTransition()` — uses v3 machine when `ENABLE_NEW_STATE_MACHINE` is ON, otherwise falls back to legacy/new transition maps
+- `selfCancel(orderId, userId)` — self-cancels within window, validates `canSelfCancel`, guards `isWithCarrier`, auto-refunds via `executeRefundProcess`
+- `adminReject(orderId, reason, adminUser)` — rejects orders in `admin_pending`/`cancel_requested`/`paid` states, auto-refunds paid orders, sends rejection notification
+- `adminApprove(orderId)` — approves orders in `admin_pending`/`cancel_requested`/`paid` states, sets `fulfillment_status: pending_fulfillment`
+- `startReturnWindow(orderId)` — sets `return_window_expires` to +7 days, transitions to `return_window`
+- `getCancelWindow(orderId)` — returns `{ cancellable, remainingMs, windowExpires }` based on `cancel_window_expires`
+- `closeExpiredWindows()` — batch-updates expired cancel windows to `window_closed`
+- `canSelfCancel(order)` — guard checking `cancel_window_expires`, `isWithCarrier`, etc.
+- All existing exports preserved: `OrderStates`, `restockOrderItems`, `resolveState`, `assertForwardOnly`, `assertCancellable`, `isWithCarrier`, `setCancelWindow`
 
-**2. Premium Modal CSS (added to `style.css`)**
-- `.ppm-overlay` — frosted glass backdrop
-- `.ppm-modal` — max-width 1000px, rounded corners, slide-down entrance
-- `.ppm-gallery` — flex gallery with rounded image, thumbnail strip, carousel nav
-- `.ppm-info` — multi-column price row with MRP/discount/badge, variant chips, quantity + add-to-cart
-- Animations: price flash, qty pop, chip ripple, staggered entrance
+**2. `orders.js` — Phase 5 Routes**
+- `POST /:id/self-cancel` — customer self-cancel (gated by `FF_SELF_CANCEL_WINDOW`)
+- `GET /:id/cancel-window` — check window status
+- `POST /admin/order-reject/:id` — admin reject with reason (v3 version)
+- `POST /admin/order-approve/:id` — admin approve (v3 version)
+- `POST /:id/return-window` — start return window for delivered orders
+- Track endpoint now returns `cancelWindowExpires`, `returnWindowExpires`
+- All new routes broadcast SSE events
 
-**3. Admin Edit/Add Form Redesign (in `app.js` admin section + `style.css`)**
-- Replaced dense table with premium card-based sections (`section-card`)
-- Mandatory MRP toggle: when toggled on, MRP fields appear; price must be <= MRP (server-enforced)
-- Image zone with drop-to-reorder (drag-and-drop), single/featured/double layout within a bordered zone
-- Better empty state: "No images yet — upload at least one image above"
-- Upload progress bar: linear gradient fill during uploads
-- Product images upload panel: bordered drop zone, circular remove buttons, drag-to-reorder functionality per product variant
+**3. `cancelWindowCleanup.js` — Cron Job**
+- `runCancelWindowCleanup()` — scans for expired `cancel_window_expires` orders, closes them to `window_closed`
+- Runs every 60 seconds when `FF_SELF_CANCEL_WINDOW` is ON
 
-**4. Admin Add/Edit CSS (added `style.css`)**
-- `.section-card` — gradient header, bordered content area
-- `.mrp-toggle`, `.img-zone`, `.img-upload-area` — custom toggle switch, drop zone, upload area
-- `.upload-progress-bar` — animated gradient fill
-- Grading card: single card with `card-header` + `card-collapse`
+**4. `RefundService.js` — Wired to v3 state machine**
+- `approveCancellation` — added `isValidTransition` check before status change
+- `rejectCancellation` — added `isValidTransition` check before status change
+- `sendRefundNotification` — added WhatsApp templates for `SELF_CANCELLED`, `ADMIN_REJECTED`, `RETURN_WINDOW`
 
-**5. Landing Page Product Card Compact (achieved via CSS overrides in `style.css`)**
-- Smaller badges, tighter spacing
-- Carousel: hidden description in thumbnails (when `.compact-thumb`), smaller gallery dimensions
-- Two-column grid (`--shop-grid-cols: 2`) for compact layout
-- Carousel aspect ratio fixed to square (1 / 1)
+**5. `notificationService.js` — New events added**
+- Added `SELF_CANCELLED`, `ADMIN_REJECTED`, `RETURN_WINDOW` to `EVENT_CHANNELS`, `EMAIL_SUBJECTS`, email/SMS/WhatsApp templates
 
-**6. Admin Inventory Table Compact Layout**
-- Category selector hidden unless editing product category
-- Price override with discount % badge, save/cancel inline buttons
-- Delete product button + confirm dialog
-- Draggable row reorder with `.inventory-drag-handle`
-- Weight input `type="number"` step `0.01` for decimal support
+**6. `app.js` — Frontend track page (cancel/return windows)**
+- Cancel window countdown card with live timer (`MM:SS` countdown)
+- Return window countdown card (`Xd Yh Zm` countdown) after delivery
+- Completed status display when return window expired
+- Self-cancel confirmation modal (POST to `/self-cancel`)
+- Updated `canCancel` logic to prefer self-cancel over legacy request-cancel
+- `getStatusBadgeHTML` — added 9 new v3 status badges (`cancellation_window`, `window_closed`, `self_cancelled`, `admin_pending`, `admin_rejected`, `return_window`, `order_created`, `payment_verified`, `approved`)
+- `displayStatus` mapping in sidebar and track page now includes v3 states
+- `initWindowTimers()` — live countdown for cancel and return windows (called after `fetchOrders`)
+- `selfCancelOrder(orderId)` — confirmation dialog → API call → toast + refresh
 
-**7. Variant chips wrapped into compact pill + dropdown (landing cards)**
-- HTML: replaced `.product-weight-selector` with `.product-variant-selector` containing a `.variant-pill` (inline compact pill with chevron) and `.variant-chips-dropdown` (absolutely positioned dropdown with chips arranged vertically)
-- CSS: pill styled as compact rounded chip with hover green accent; dropdown has subtle shadow, fade-in animation, and chips styled vertically with active green gradient state
-- JS: pill toggle opens/closes dropdown (closes others); chip click handler syncs pill text and closes dropdown; click-outside listener dismisses open dropdowns
+**7. `admin.js` — v3 status support**
+- `getAdminBadge` — added 9 new v3 status badge mappings
+- Badge rendering — v3 states get dedicated badges before delivery_status fallback
+- Order detail panel — `admin_pending` orders show Approve/Reject buttons with admin approval flow
+- Section filters — `new_orders` filter now includes `admin_pending` status
+- Section counts — includes `admin_pending` in new_orders count
 
-**8. Hero Section — Glassmorphism + 3D Animated Redesign**
-- **Background**: Deep green gradient (`#0a1f14 → #2a5222 → #3d3518`) replaces old image-only background; three.js particle canvas moved into hero section as full-bleed backdrop with `pointer-events: none`
-- **Glassmorphism Card** (`.hero-content`): Full-width card with mushroom image as CSS background (`url("/images/hero_mushroom.png") center 30% / cover`), overlaid with a dark-green gradient (`rgba(10,31,20,0.55)→rgba(42,82,34,0.20)`) for readability. Combined with `backdrop-filter: blur(18px) saturate(1.3)` to blur Three.js behind the card. The far-right "Farm to Doorstep" badge is positioned absolutely inside the card.
-- **3D Entrance**: staggered `fadeInUp` animation per child element (0.08s–0.48s delays) with cubic-bezier easing
-- **3D Hover Tilt**: `.hero-content` rotates 1.2deg on X/Y with `perspective: 1200px` on parent; buttons get `translateZ` lift + scale on hover
-- **Ambient Gradient Overlay** (`::before`): radial gradient mesh animates with `heroAmbient` keyframes (scale + rotate over 16s)
-- **Floating Blobs** (`.hero-blob-1/2/3`): three blurred radial-gradient circles (green, amber, light green) animate with independent `blobFloat` keyframes (22s/18s/20s) for organic motion
-- **Shimmer Text** (`.hero-highlight`): animated gradient `background-clip: text` with 4s shimmer cycle
-- **Glass Buttons**: `.btn-primary-hero` rounded-pill with green glow shadow, arrow translate on hover; `.btn-outline-hero` glass with `backdrop-filter`
-- **Trust Badges**: frosted icon circles with `backdrop-filter: blur(4px)`, white text
-- **Responsive**: `<768px` — reduced blur (14px), no hover tilt, blobs hidden for perf; `<480px` — further reduced blur (10px), tighter padding, stacked buttons
-
-**9. Mushroom-Themed Hero Enhancements (Premium Spore Ecosystem)**
-- **Three.js Spore Particles**: Replaced uniform green dots with three distinct particle clouds — (1) warm golden-amber bioluminescent spores in a flattened sphere, (2) soft forest-green background haze, (3) large bright golden-white spore clusters. All use `AdditiveBlending` for a glowing, ethereal look.
-- **Mushroom Nucleus**: Dual-layer icosahedron — outer wireframe (`#d4a84b` gold, 0.35 opacity) + inner solid glow core (`#f5d742`, 0.15 opacity). Both breathe gently with `sin()` oscillation.
-- **Organic Motion**: Rotation speeds halved for slower, more atmospheric drift; `sin()`-based Y-axis floating (0.06–0.12 frequency) gives a hovering spore feel; cluster particles pulse their opacity.
-- **Mycelium Glow Ring** (`.mycelium-glow`): A centered 600px radial gradient circle with golden-green tones that pulses `scale(1↔1.08)` over 4s, mimicking bioluminescent mycelium in forest soil.
-- **Spore Motes** (`.spore-mote` × 12): CSS-animated floating particles positioned along the bottom edge, each with unique drift speed (11s–22s), size (3–6px), and opacity. They rise vertically with a gentle X-offset and fade out near the top — mimicking airborne mushroom spores catching light.
-- **Growth Emergence Entrance**: Elements no longer just fade-up — they `scale(0.85→1.03→0.98→1)` with a slight overshoot, like mushrooms sprouting from the forest floor.
-- **Bioluminescent Border Pulse** (`.hero-content::after`): A subtle golden-green gradient border glow that fades `0→0.7→0` over 5s, giving the glass card a living, breathing edge.
-- **Mobile perf**: All motes, glow ring, and border pulse are disabled below 768px for smooth scrolling. Only the Three.js canvas + glass card remain active.
-
----
-
-## Session Summary (Jun 29, 2026) — Cancellation/Refund Pipeline Refactoring
-
-### What was fixed / refactored
-
-**1. `RefundService.js` — Guard gates, auto-refund, shared helpers**
-- **`requestCustomerCancellation`**: guard changed from legacy `delivery_status` checks to `isWithCarrier(order)`. Rejects with guidance to contact support for RTO if carrier has the package.
-- **`adminDirectCancellation`**: guard changed from legacy `["shipped","in_transit","delivered","cancelled"].includes(order.delivery_status)` to `isWithCarrier(order)`. Notification action changed from `"APPROVED"` to `"ADMIN_CANCELLED"` to distinguish admin-initiated from approved customer requests. Auto-refund via `executeRefundProcess` on paid orders instead of only creating pending refund record; falls back to creating pending record if auto-refund fails.
-- **`approveCancellation`**: auto-refund via `executeRefundProcess` instead of only creating pending refund record; falls back to pending record on failure. `cancelled_by` set to `"customer"` (not `"admin"`).
-- **`cancelCarrierShipment`** — new shared helper used by both `approveCancellation` and `adminDirectCancellation` before any state mutations.
-- **`executeRefundProcess`**: restock idempotency handled by `restockOrderItems` internal guard (`order.restocked` check).
-- **`retryFailedRefund`**: reuses `executeRefundProcess`; restock skipped automatically by `restocked` guard. No changes needed.
-- **Imports**: added `isWithCarrier` to destructured require from `OrderStateService`.
+**8. `style.css` — Timer/window indicator styles**
+- `.tracker-cancel-window-card`, `.tracker-return-window-card` — gradient cards with animations
+- `.cancel-window-countdown` — large amber countdown with text-shadow glow
+- `.return-window-countdown` — green timer for days/hours/minutes
+- `.tracker-return-window-expired` — red-tinted expired state
+- `.cancel-window-header`, `.return-window-header` — centered header with icon
 
 ### Files changed
-- `backend/src/modules/refunds/RefundService.js` — guard gates, auto gateway refund on cancellation approval, shared `cancelCarrierShipment` helper, notification distinction
+- `backend/src/modules/orders/OrderStateService.js` — full v3 state machine + all new methods
+- `backend/src/routes/orders.js` — 5 new routes + track endpoint enhanced
+- `backend/src/server.js` — wired `runCancelWindowCleanup` cron (60s)
+- `backend/src/jobs/cancelWindowCleanup.js` — new cron job
+- `backend/src/modules/refunds/RefundService.js` — `isValidTransition` checks + new WhatsApp templates
+- `backend/src/services/notificationService.js` — 3 new event types with templates
+- `frontend/src/app.js` — cancel/return window cards, self-cancel modal, timer init, v3 status badges, displayStatus mapping
+- `frontend/src/admin.js` — v3 badge mappings, admin_pending approve/reject buttons, section filters
+- `frontend/style.css` — timer/window card styles
+
+**9. `backend/src/modules/refunds/RefundService.js`** — Fixed broken require path (non-existent `"../shipping/ProviderRegistry"` → `"../../services/shipping/ProviderRegistry"`), was a runtime crash in `cancelCarrierShipment()`
+
+**10. `backend/scripts/migrate-and-seed.js`** — Removed `|| "admin123"` hardcoded password fallback, now throws if `ADMIN_SEED_PASSWORD` not set
+
+**11. `backend/scripts/setup-supabase.js`** — Removed `|| "admin123"` hardcoded password fallback, now throws if `ADMIN_SEED_PASSWORD` not set
+
+**12. `backend/src/routes/trainee.js`** — Fixed BUG-6 (info leakage: wrong role now returns generic "Invalid OTP or phone number." instead of "This account is not a trainee."); removed stale BUG-5/BUG-11 comments (already fixed)
+
+**13. `frontend/src/components/AuthModal.js`** — Removed stale BUG-4/BUG-9/BUG-10/BUG-12/BUG-13 comments (all already implemented)
+
+**14. `backend/src/modules/returns/index.js`** — Filled empty 4-line placeholder with proper module re-exports (`ReturnController`, `ReturnService`, `ReturnValidation`); updated `routes/returns.js` to import from module entry point
+
+**15. `backend/src/services/pushService.js`** — Downgraded "not yet implemented" log from `info` to `debug`
+
+### Tests
+- All **23 backend tests pass** with no regressions
+- Frontend `app.js`, `admin.js`, and `AuthModal.js` pass `node --check` syntax validation
+- Backend `RefundService.js` and `notificationService.js` pass `require()` validation

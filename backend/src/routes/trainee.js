@@ -176,11 +176,9 @@ router.post("/request-otp", validateBody(traineeOtpRequestSchema), async (req, r
     }
 
     if (user.role !== "trainee") {
-      return respondError(
-        res,
-        "This account is not registered as a trainee. Please use user login.",
-        403,
-      );
+      return success(res, {
+        message: "If this email is registered with us, you will receive an OTP shortly.",
+      });
     }
 
     const authService = require("../services/authService");
@@ -207,15 +205,12 @@ router.post("/request-phone-otp", validateBody(traineePhoneRequestSchema), async
   try {
     const { phone } = req.body;
 
-    // BUG-11: normalize consistently at route level (strip +91 prefix)
     const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
 
     // Look up user — do NOT reveal whether phone is registered
     const { data: user } = await userRepo.findByPhone(cleanPhone);
 
     if (!user || user.role !== "trainee") {
-      // BUG-5: return the same generic response for both "not found" and "wrong role"
-      // to prevent information leakage about whether a phone is registered
       return success(res, {
         message:
           "If this phone number is registered with us, you will receive an OTP shortly.",
@@ -265,11 +260,10 @@ router.post("/google-login", validateBody(traineeGoogleLoginSchema), async (req,
     }
 
     if (user.role !== "trainee") {
-      return respondError(
-        res,
-        "This account is not registered as a trainee.",
-        403,
-      );
+      return success(res, {
+        needsSignup: true,
+        message: "No account found. Please register as a trainee first.",
+      });
     }
 
     // Generate JWT token directly (no OTP needed for Google)
@@ -311,13 +305,8 @@ router.post("/verify-phone-otp", validateBody(traineeVerifyPhoneOtpSchema), asyn
     const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
     const { data: user } = await userRepo.findByPhone(cleanPhone);
 
-    if (!user) {
-      // BUG-6: use a generic message to avoid leaking whether the phone is registered
+    if (!user || user.role !== "trainee") {
       return respondError(res, "Invalid OTP or phone number.", 401);
-    }
-
-    if (user.role !== "trainee") {
-      return respondError(res, "This account is not a trainee.", 403);
     }
 
     const authService = require("../services/authService");
@@ -350,11 +339,7 @@ router.post("/verify-otp", validateBody(traineeVerifyOtpSchema), async (req, res
 
     // Double check the user is still a trainee
     if (authResult.user.role !== "trainee") {
-      return respondError(
-        res,
-        "This account is not a trainee. Please use user login.",
-        403,
-      );
+      return respondError(res, "Invalid OTP or email.", 403);
     }
 
     if (authResult.token) setAuthCookie(res, authResult.token);

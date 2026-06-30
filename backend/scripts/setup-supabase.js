@@ -52,7 +52,8 @@ async function runMigrations() {
 async function seedData() {
   console.log("🌱 Seeding data...");
 
-  const adminPassword = process.env.ADMIN_SEED_PASSWORD || "admin123";
+  const adminPassword = process.env.ADMIN_SEED_PASSWORD;
+  if (!adminPassword) throw new Error('ADMIN_SEED_PASSWORD environment variable must be set');
   const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
 
   // Check if data already exists
@@ -130,7 +131,7 @@ async function seedData() {
     await runMigrations();
     await seedData();
     console.log("\n🎉 Setup complete! Your Supabase database is ready.");
-    console.log("   Admin login: admin@sporekart.com / admin123");
+    console.log(`   Admin login: admin@sporekart.com / ${process.env.ADMIN_SEED_PASSWORD ? '(env var ADMIN_SEED_PASSWORD)' : 'not set'}`);
     console.log("   Buyer login: buyer@sporekart.com (OTP-based)");
     console.log("   Grower login: grower@sporekart.com (OTP-based)\n");
   } catch (err) {
