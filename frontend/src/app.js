@@ -55,6 +55,21 @@ window.__appState = state;
 let _statesCache = [];
 let _citiesCache = {};
 let _checkoutFormOriginalHTML = null;
+let _adminCategories = [];
+let orderEs = null;
+let _shopPagination = null;
+let _productRetryTimer = null;
+let _productRetryCount = 0;
+const MAX_PRODUCT_RETRIES = 5;
+let tgCurrentPage = 0;
+let tgAutoplayTimer = null;
+let carouselIndex = 0;
+let carouselTimer = null;
+let ssCarouselIndex = 0;
+let ssCarouselTimer = null;
+
+const WHATSAPP_COMMUNITY_LINK = 'https://whatsapp.com/channel/0029Vb8gZZH0gcfBoMFMsh3L';
+const WA_COMMUNITY_SESSION_KEY = 'wa_community_dismissed';
 
 async function _loadStates() {
   try {
@@ -221,6 +236,9 @@ function initApp() {
 
   // Routing — must be inside DOMContentLoaded so DOM is available
   window.addEventListener('hashchange', handleRouting);
+
+  // Non-intrusive WhatsApp community prompt for visitors
+  initVisitorCommunityPopup();
 }
 
 if (document.readyState === 'loading') {
@@ -251,7 +269,7 @@ try {
   // BroadcastChannel might not be supported; ignore
 }
 
-let orderEs = null;
+
 function initOrderSse() {
   try {
     if (!state || !state.token) return;
@@ -342,7 +360,8 @@ function renderCategoryGrid(categories) {
 }
 
 function handleRouting(opts = {}) {
-  const hash = window.location.hash || '#shop';
+  const rawHash = window.location.hash;
+  const hash = rawHash || '#shop';
   setTimeout(() => trackEvent('page_view', { hash }), 100);
   const navShop = document.getElementById('btn-nav-shop');
   const navTrack = document.getElementById('btn-nav-track');
@@ -370,6 +389,12 @@ function handleRouting(opts = {}) {
     navShop.classList.add('active');
     pageShop.classList.add('active');
     if (heroSection) heroSection.classList.remove('hidden');
+
+    // On initial page load (no hash), hide products below hero
+    const shopSection = document.getElementById('shop-section');
+    if (shopSection) {
+      shopSection.style.display = rawHash ? '' : 'none';
+    }
   } else if (hash === '#about') {
     if (pageAbout) pageAbout.classList.add('active');
     if (heroSection) heroSection.classList.add('hidden');
@@ -737,6 +762,14 @@ function initEventListeners() {
   if (heroShopBtn) {
     heroShopBtn.addEventListener('click', () => { window.location.hash = '#shop'; });
   }
+
+  // Visible "Shop Now" hero button — navigate to #shop to reveal products
+  document.querySelectorAll('.btn-primary-hero[href="#shop-section"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.hash = '#shop';
+    });
+  });
 
   // Listen for global auth changes from new modules
   window.addEventListener('auth:changed', () => {
@@ -1227,11 +1260,7 @@ function updateAuthHeaderUI() {
 // ==========================================================================
 // CATALOG CONTROLLERS & DATA FITTING
 // ==========================================================================
-let _shopPagination = null;
 
-let _productRetryTimer = null;
-let _productRetryCount = 0;
-const MAX_PRODUCT_RETRIES = 5;
 
 async function fetchProducts() {
   const grid = document.getElementById('product-grid');
@@ -3265,8 +3294,7 @@ function saveTgImages(imgs) {
   localStorage.setItem("spore_training_gallery_images", JSON.stringify(imgs));
 }
 
-let tgCurrentPage = 0;
-let tgAutoplayTimer = null;
+
 
 function getTgVisibleCount() {
   const w = window.innerWidth;
@@ -4029,11 +4057,10 @@ function renderCheckoutDeliveryForm() {
   const uState   = user.state || '';
   const uCity    = user.city || '';
 
-  /* For returning users, lock identity fields */
-  const lockAttr = isReturningUser ? 'readonly style="background:#f3f4f6;cursor:not-allowed;"' : '';
-  const lockNameAttr  = uName  && isReturningUser ? lockAttr : '';
-  const lockPhoneAttr = uPhone ? 'readonly style="background:#f3f4f6;cursor:not-allowed;"' : '';
-  const lockEmailAttr = uEmail && isReturningUser ? lockAttr : '';
+  /* Pre-fill identity fields but keep them editable — profile saves in handlePaymentContinue */
+  const lockNameAttr  = '';
+  const lockPhoneAttr = '';
+  const lockEmailAttr = uEmail && isReturningUser ? 'readonly style="background:#f3f4f6;cursor:not-allowed;"' : '';
 
   const stateOptions = _statesCache.length
     ? `<option value="">Select State</option>` + _statesCache.map(s => `<option value="${s}"${s === uState ? ' selected' : ''}>${s}</option>`).join('')
@@ -4081,7 +4108,7 @@ function renderCheckoutDeliveryForm() {
 
     <div class="input-group">
       <label for="checkout-delivery-email">Email Address <span class="co-optional">(optional)</span></label>
-      <input type="email" id="checkout-delivery-email" placeholder="For order updates"
+      <input type="text" id="checkout-delivery-email" placeholder="For order updates"
         value="${uEmail}" ${lockEmailAttr} />
       <span class="input-error-msg" id="error-checkout-delivery-email"></span>
     </div>
@@ -4119,14 +4146,14 @@ function renderCheckoutDeliveryForm() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
       <div class="input-group">
         <label for="checkout-state">State <span style="color:var(--color-danger)">*</span></label>
-        <select id="checkout-state" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;background:#fff;color:var(--color-text-dark);">
+        <select id="checkout-state" class="co-select">
           ${stateOptions}
         </select>
         <span class="input-error-msg" id="error-checkout-state"></span>
       </div>
       <div class="input-group">
         <label for="checkout-city">City <span style="color:var(--color-danger)">*</span></label>
-        <select id="checkout-city" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:10px;outline:none;background:#fff;color:var(--color-text-dark);">
+        <select id="checkout-city" class="co-select">
           <option value="">Select State first</option>
         </select>
         <span class="input-error-msg" id="error-checkout-city"></span>
@@ -4435,6 +4462,34 @@ async function handlePaymentContinue() {
   if (formPanel) {
     const { renderOrderReviewPage } = await import('./components/OrderReviewPage.js');
     renderOrderReviewPage(formPanel, deliveryFormData, state);
+
+    window.__goBackToCheckoutForm = () => {
+      window.__appFns.renderCheckoutDeliveryForm();
+    };
+
+    window.__proceedToPayment = async () => {
+      const payBtn = document.getElementById('orev-pay-btn');
+      const origHtml = payBtn ? payBtn.innerHTML : '';
+      if (payBtn) {
+        payBtn.disabled = true;
+        payBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing…';
+      }
+      try {
+        const data = await fetchWithAuth('/orders/checkout', {
+          method: 'POST',
+          body: JSON.stringify(window.__orderReviewData),
+        });
+        toggleCartDrawer(false);
+        renderInlinePaymentScreen(data.razorpay, data.order);
+      } catch (err) {
+        showErrorToast(getApiErrorMessage(err));
+        if (payBtn) {
+          payBtn.disabled = false;
+          payBtn.innerHTML = origHtml;
+        }
+      }
+    };
+
     return;
   }
 
@@ -5912,6 +5967,11 @@ async function completeOrderPayment(orderId, paymentId, signature) {
         duration: 1000,
         redirectHash: isAdminOrGrower ? `#track-${data.order.id}` : '#shop',
       });
+
+      // Show WhatsApp community prompt after thanks popup
+      setTimeout(() => {
+        showOrderCommunityPrompt(data.order);
+      }, 1500);
     } else {
       showErrorToast(data.error || 'Payment verification failed.');
     }
@@ -5923,6 +5983,148 @@ async function completeOrderPayment(orderId, paymentId, signature) {
   }
 }
 
+// ── WhatsApp Community Prompts ──
+function showOrderCommunityPrompt(order) {
+  const existing = document.getElementById('wa-community-order');
+  if (existing) existing.remove();
+
+  const container = document.createElement('div');
+  container.id = 'wa-community-order';
+  container.className = 'wa-community-order-prompt';
+
+  container.innerHTML = `
+    <div class="wa-community-icon"><span class="wa-spore-particle">🍄</span>🌱</div>
+    <p class="wa-community-title">You're now part of the mushroom movement!</p>
+    <p class="wa-community-desc">
+      Join <strong>500+ growers</strong> in our WhatsApp Community for exclusive growing tips,
+      seasonal offers, harvest updates &amp; early access to new spawn.
+    </p>
+    <div class="wa-community-actions">
+      <button class="wa-join-btn" id="wa-order-join"><i class="fa-brands fa-whatsapp"></i> Join Community</button>
+      <button class="wa-later-btn" id="wa-order-later">Maybe later</button>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+
+  requestAnimationFrame(() => container.classList.add('show'));
+
+  document.getElementById('wa-order-join').addEventListener('click', () => {
+    window.open(WHATSAPP_COMMUNITY_LINK, '_blank');
+    container.classList.remove('show');
+    setTimeout(() => container.remove(), 400);
+  });
+  document.getElementById('wa-order-later').addEventListener('click', () => {
+    container.classList.remove('show');
+    setTimeout(() => container.remove(), 400);
+  });
+
+  setTimeout(() => {
+    if (container && container.parentNode) {
+      container.classList.remove('show');
+      setTimeout(() => container.remove(), 400);
+    }
+  }, 20000);
+}
+
+function initVisitorCommunityPopup() {
+  if (state.token) return;
+  try {
+    if (sessionStorage.getItem(WA_COMMUNITY_SESSION_KEY)) return;
+  } catch (e) { /* ignore */ }
+
+  const existing = document.getElementById('wa-visitor-popup');
+  if (existing) return;
+
+  let shown = false;
+  let scrollTimer = null;
+  let idleTimer = null;
+
+  const maybeShow = () => {
+    if (shown) return;
+    if (state.token) { cleanup(); return; }
+
+    shown = true;
+    const container = document.createElement('div');
+    container.id = 'wa-visitor-popup';
+    container.className = 'wa-visitor-popup';
+    container.innerHTML = `
+      <button class="wa-visitor-close" id="wa-visitor-close" aria-label="Dismiss">&times;</button>
+      <div class="wa-visitor-content">
+        <div class="wa-visitor-icon"><span class="wa-spore-particle">🍄</span></div>
+        <div class="wa-visitor-text">
+          <p>Grow with us! Join our WhatsApp mushroom community for tips, deals &amp; more.</p>
+          <button class="wa-visitor-join" id="wa-visitor-join"><i class="fa-brands fa-whatsapp"></i> Join Free</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(container);
+
+    requestAnimationFrame(() => container.classList.add('show'));
+
+    document.getElementById('wa-visitor-join').addEventListener('click', () => {
+      window.open(WHATSAPP_COMMUNITY_LINK, '_blank');
+      dismissPopup(container);
+    });
+    document.getElementById('wa-visitor-close').addEventListener('click', () => {
+      dismissPopup(container);
+    });
+    container.addEventListener('click', (e) => {
+      if (e.target === container) dismissPopup(container);
+    });
+
+    cleanup();
+  };
+
+  const dismissPopup = (container) => {
+    container.classList.remove('show');
+    setTimeout(() => container.remove(), 400);
+    try { sessionStorage.setItem(WA_COMMUNITY_SESSION_KEY, '1'); } catch (e) { /* ignore */ }
+  };
+
+  const cleanup = () => {
+    if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('mousemove', onIdle);
+    window.removeEventListener('touchstart', onIdle);
+    document.removeEventListener('visibilitychange', onVisibility);
+  };
+
+  const onScroll = () => {
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      if (!shown && window.scrollY > 300) maybeShow();
+    }, 600);
+  };
+
+  const onIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (!shown) maybeShow();
+    }, 12000);
+  };
+
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible' && !shown) {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (!shown) maybeShow();
+      }, 8000);
+    }
+  };
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('mousemove', onIdle, { passive: true });
+  window.addEventListener('touchstart', onIdle, { passive: true });
+  document.addEventListener('visibilitychange', onVisibility);
+
+  // Also try showing after 15 seconds if nothing else triggered it
+  idleTimer = setTimeout(() => {
+    if (!shown) maybeShow();
+  }, 15000);
+}
+
 // ==========================================================================
 // CULTIVATION ORDER TRACKER & INVOICES
 // ==========================================================================
@@ -5932,6 +6134,31 @@ function getStatusBadgeHTML(status) {
   let label = status;
 
   switch (status) {
+    case "pending_fulfillment":
+      bg = "rgba(100,116,139,0.12)";
+      color = "#94a3b8";
+      label = "Pending";
+      break;
+    case "packing_required":
+      bg = "rgba(59,130,246,0.12)";
+      color = "#3b82f6";
+      label = "Packing";
+      break;
+    case "packed":
+      bg = "rgba(139,92,246,0.12)";
+      color = "#8b5cf6";
+      label = "Packed";
+      break;
+    case "ready_to_ship":
+      bg = "rgba(16,185,129,0.12)";
+      color = "#10b981";
+      label = "Ready to Ship";
+      break;
+    case "with_carrier":
+      bg = "rgba(139,92,246,0.12)";
+      color = "#8b5cf6";
+      label = "With Carrier";
+      break;
     case "placed":
       bg = "rgba(56,187,123,0.12)";
       color = "#38b17b";
@@ -6126,8 +6353,18 @@ function renderOrdersSidebar() {
       const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
       const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved"];
       // Handle new manual refund flow via refundStatus field
+      const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,ready_to_ship:3,with_carrier:4,delivered:5};
+      const deliveryToFulfillment = {
+        placed:'pending_fulfillment', processing:'packing_required', inoculating:'packing_required',
+        pending:'pending_fulfillment', pickup_scheduled:'packed', picked_up:'ready_to_ship',
+        shipped:'with_carrier', in_transit:'with_carrier', out_for_delivery:'with_carrier',
+        delivered:'delivered', cancelled:null, returned:null
+      };
+      const effectiveFulfillment = order.fulfillment_status && fulfillmentOrder[order.fulfillment_status] !== undefined
+        ? order.fulfillment_status
+        : (deliveryToFulfillment[order.delivery_status] || 'pending_fulfillment');
       const hasRefundStatus = order.status === 'cancelled' && order.refund_status && order.refund_status !== 'none';
-      const displayStatus = hasRefundStatus ? `REFUND_${order.refund_status.toUpperCase()}` : (refundStates.includes(order.status) ? order.status : (v3States.includes(order.status) ? order.status : order.delivery_status));
+      const displayStatus = hasRefundStatus ? `REFUND_${order.refund_status.toUpperCase()}` : (refundStates.includes(order.status) ? order.status : (v3States.includes(order.status) ? order.status : (fulfillmentOrder[effectiveFulfillment] !== undefined ? effectiveFulfillment : order.delivery_status)));
       const badgeHTML = getStatusBadgeHTML(displayStatus);
 
       const cancelOrRefundReason = (refundStates.includes(order.status) || hasRefundStatus) && order.cancel_reason ? order.cancel_reason : "";
@@ -6232,14 +6469,26 @@ function renderTrackingDetails(track) {
 
   const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
   const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved"];
-  // Handle new manual refund flow via refundStatus field
   const hasRefundStatus = track.paymentStatus === 'cancelled' && track.refundStatus && track.refundStatus !== 'none';
-  const displayStatus = hasRefundStatus ? `REFUND_${track.refundStatus.toUpperCase()}` : (refundStates.includes(track.paymentStatus) ? track.paymentStatus : (v3States.includes(track.paymentStatus) ? track.paymentStatus : track.deliveryStatus));
+
+  const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,ready_to_ship:3,with_carrier:4,delivered:5};
+  const deliveryToFulfillment = {
+    placed:'pending_fulfillment', processing:'packing_required', inoculating:'packing_required',
+    pending:'pending_fulfillment', pickup_scheduled:'packed', picked_up:'ready_to_ship',
+    shipped:'with_carrier', in_transit:'with_carrier', out_for_delivery:'with_carrier',
+    delivered:'delivered', cancelled:null, returned:null
+  };
+  const effectiveFulfillment = track.fulfillmentStatus && fulfillmentOrder[track.fulfillmentStatus] !== undefined
+    ? track.fulfillmentStatus
+    : (deliveryToFulfillment[track.deliveryStatus] || 'pending_fulfillment');
+
+  const displayStatus = hasRefundStatus ? `REFUND_${track.refundStatus.toUpperCase()}` : (refundStates.includes(track.paymentStatus) ? track.paymentStatus : (v3States.includes(track.paymentStatus) ? track.paymentStatus : (fulfillmentOrder[effectiveFulfillment] !== undefined ? effectiveFulfillment : track.deliveryStatus)));
   const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-  const shippedStatuses = ["shipped", "in_transit", "delivered"];
-  const canCancel = ["placed", "processing", "inoculating"].includes(track.deliveryStatus) && !shippedStatuses.includes(track.deliveryStatus) && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus) && !["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED", "SELF_CANCELLED", "ADMIN_REJECTED"].includes(track.paymentStatus);
-  const hasCancelWindow = track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !shippedStatuses.includes(track.deliveryStatus) && !["cancelled", "self_cancelled", "window_closed", "SELF_CANCELLED", "ADMIN_REJECTED", "CANCEL_REQUESTED", "CANCEL_APPROVED"].includes(track.paymentStatus);
+  const nonCancellableStatuses = ["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED", "SELF_CANCELLED", "ADMIN_REJECTED"];
+  const nonCancellableFulfillment = ["with_carrier", "delivered"];
+  const canCancel = fulfillmentOrder[effectiveFulfillment] < fulfillmentOrder.ready_to_ship && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus) && !nonCancellableStatuses.includes(track.paymentStatus);
+  const hasCancelWindow = track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !nonCancellableFulfillment.includes(effectiveFulfillment) && !["cancelled", "self_cancelled", "window_closed", "SELF_CANCELLED", "ADMIN_REJECTED", "CANCEL_REQUESTED", "CANCEL_APPROVED"].includes(track.paymentStatus);
   const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `
@@ -6279,22 +6528,19 @@ function renderTrackingDetails(track) {
       </div>
     </div>
 
-    ${track.fulfillmentStatus ? `
     <div class="fulfillment-strip">
       <div class="fulfillment-strip-header"><i class="fa-solid fa-boxes-stacked"></i> Fulfillment Pipeline</div>
       <div class="fulfillment-strip-steps">
-        ${['pending_fulfillment','packing_required','packed','ready_to_ship','with_carrier','delivered'].map((step, i) => {
+        ${['pending_fulfillment','packing_required','packed','ready_to_ship','with_carrier','delivered'].map((step) => {
           const stepLabels = {'pending_fulfillment':'Pending','packing_required':'Packing','packed':'Packed','ready_to_ship':'Ready','with_carrier':'Shipped','delivered':'Delivered'};
-          const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,ready_to_ship:3,with_carrier:4,delivered:5};
-          const current = fulfillmentOrder[track.fulfillmentStatus] ?? -1;
-          const idx = fulfillmentOrder[step] ?? -1;
-          const done = idx < current;
-          const active = idx === current;
+          const currentIdx = fulfillmentOrder[effectiveFulfillment] ?? 0;
+          const idx = fulfillmentOrder[step] ?? 0;
+          const done = idx < currentIdx;
+          const active = idx === currentIdx;
           return `<div class="fulfillment-step ${done?'fstep-done':''} ${active?'fstep-active':''}"><div class="fstep-dot"></div><span class="fstep-label">${stepLabels[step]||step}</span></div>`;
         }).join('<div class="fstep-connector"></div>')}
       </div>
     </div>
-    ` : ''}
 
     <div class="tracker-status-box">
       <h4>Inoculation Stage Notes</h4>
@@ -6306,7 +6552,7 @@ function renderTrackingDetails(track) {
     </div>
 
     <!-- Cancel Window Countdown -->
-    ${track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !shippedStatuses.includes(track.deliveryStatus) && !["cancelled","self_cancelled","window_closed","CANCEL_REQUESTED","CANCEL_APPROVED","CANCEL_REJECTED","REFUND_PENDING","REFUND_INITIATED","REFUND_PROCESSING","REFUND_COMPLETED","REFUND_FAILED"].includes(track.paymentStatus) ? `
+    ${track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !nonCancellableFulfillment.includes(effectiveFulfillment) && !["cancelled","self_cancelled","window_closed","CANCEL_REQUESTED","CANCEL_APPROVED","CANCEL_REJECTED","REFUND_PENDING","REFUND_INITIATED","REFUND_PROCESSING","REFUND_COMPLETED","REFUND_FAILED"].includes(track.paymentStatus) ? `
       <div class="tracker-cancel-window-card" id="cancel-window-card-${track.orderId}">
         <div class="cancel-window-header">
           <i class="fa-solid fa-clock"></i> <strong>Cancellation Window</strong>
@@ -6904,7 +7150,6 @@ function whatsappQuickMessage(orderId) {
 // ==========================================================================
 // CATEGORY MANAGEMENT (FETCH + MOBILE NAV)
 // ==========================================================================
-let _adminCategories = [];
 
 async function fetchCategories() {
   const categoryNav = document.getElementById('category-nav');
@@ -7361,8 +7606,7 @@ window.copyInvoiceLink = copyInvoiceLink;
 // ==========================================================================
 // HOMEPAGE MUSHROOM CAROUSEL
 // ==========================================================================
-let carouselIndex = 0;
-let carouselTimer = null;
+
 
 function initCarousel() {
   const track = document.getElementById('carousel-track');
@@ -7414,7 +7658,7 @@ function updateCarousel() {
 
 function startCarouselAutoplay() {
   stopCarouselAutoplay();
-  carouselTimer = setInterval(() => carouselGo(1), 1000);
+  carouselTimer = setInterval(() => carouselGo(1), 5000);
 }
 
 function stopCarouselAutoplay() {
@@ -7594,8 +7838,7 @@ function renderSuccessStoryCard(story, target) {
   target.appendChild(card);
 }
 
-let ssCarouselIndex = 0;
-let ssCarouselTimer = null;
+
 
 function renderSuccessCarousel() {
   const track = document.getElementById('success-carousel-track');
