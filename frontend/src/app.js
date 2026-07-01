@@ -550,6 +550,16 @@ function handleRouting(opts = {}) {
   try {
     const regSection = document.getElementById('training-register');
     const coursesSection = document.getElementById('training-courses');
+    if (hash.startsWith('#training-batch/')) {
+      const batchId = hash.split('/')[1];
+      if (regSection) regSection.style.display = 'none';
+      if (coursesSection) coursesSection.style.display = 'none';
+      if (shopSection) shopSection.style.display = 'block';
+      if (productsSection) productsSection.style.display = 'block';
+      if (heroSection) heroSection.classList.add('hidden');
+      renderBatchDetail(batchId);
+      return;
+    }
     if (hash === '#training-register') {
       if (regSection) regSection.style.display = 'block';
       if (coursesSection) coursesSection.style.display = 'none';
@@ -3075,6 +3085,10 @@ async function renderTrainingCourses() {
         document.querySelectorAll('.tr-tab-content').forEach(c => c.classList.remove('active'));
         const target = document.getElementById(`tr-content-${tab.dataset.tab}`);
         if (target) target.classList.add('active');
+        // Load v2 enrollments when My Enrollments tab is clicked
+        if (tab.dataset.tab === 'enrollments-v2') {
+          renderMyTrainingsV2();
+        }
       });
     });
   }
@@ -3258,6 +3272,247 @@ function wireEnrollButtons(grid) {
     });
   });
 }
+
+// ── Grower Training v2 — Batch Detail View ──
+async function renderBatchDetail(batchId) {
+  const coursesSection = document.getElementById('training-courses');
+  if (coursesSection) coursesSection.style.display = 'none';
+
+  // Create or reuse batch detail container
+  let container = document.getElementById('training-batch-detail');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'training-batch-detail';
+    container.style.cssText = 'max-width:800px;margin:40px auto;padding:24px;';
+    const shopSection = document.getElementById('shop-section');
+    if (shopSection) shopSection.insertAdjacentElement('afterend', container);
+  }
+  container.style.display = 'block';
+  container.innerHTML = '<div class="tr-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+
+  try {
+    const batch = await trainingApi.getBatch(batchId);
+    if (!batch || batch.error) {
+      container.innerHTML = '<div class="tr-loading" style="color:#e74c3c;">Batch not found.</div>';
+      return;
+    }
+
+    const now = new Date();
+    const startDate = new Date(batch.start_date);
+    const cutoffMs = (batch.cancellation_cutoff_days || 3) * 24 * 60 * 60 * 1000;
+    const cancelDeadline = new Date(startDate.getTime() - cutoffMs);
+    const canCancel = now <= cancelDeadline;
+
+    container.innerHTML = `
+      <div style="margin-bottom:20px;">
+        <a href="#training-courses" style="color:#2d6a4f;text-decoration:none;font-size:0.95rem;">
+          <i class="fa-solid fa-arrow-left"></i> Back to Courses
+        </a>
+      </div>
+      <div class="tr-course-card" style="padding:24px;">
+        <h2 style="margin:0 0 8px;font-size:1.6rem;">${batch.title}</h2>
+        <span class="tr-course-category ${(batch.status === 'upcoming' ? 'beginner' : 'farmer')}">${batch.status}</span>
+        <div style="margin:16px 0;display:flex;flex-wrap:wrap;gap:12px;font-size:0.9rem;color:#555;">
+          <span><i class="fa-solid fa-calendar-day"></i> ${new Date(batch.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          <span><i class="fa-solid fa-clock"></i> ${new Date(batch.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          ${batch.instructor ? `<span><i class="fa-solid fa-chalkboard-user"></i> ${batch.instructor}</span>` : ''}
+          ${batch.location ? `<span><i class="fa-solid fa-location-dot"></i> ${batch.location}</span>` : ''}
+        </div>
+        ${batch.meeting_link ? `<div style="margin:12px 0;"><a href="${batch.meeting_link}" target="_blank" style="color:#2d6a4f;"><i class="fa-solid fa-video"></i> Join Online</a></div>` : ''}
+        <div style="display:flex;gap:20px;align-items:center;margin:20px 0;flex-wrap:wrap;">
+          <div style="font-size:1.5rem;font-weight:700;color:#2d6a4f;">
+            ₹${Number(batch.price_actual).toLocaleString()}
+            ${batch.price_strikeout ? `<span style="font-size:1rem;color:#999;text-decoration:line-through;margin-left:8px;">₹${Number(batch.price_strikeout).toLocaleString()}</span>` : ''}
+          </div>
+          <div style="font-size:0.9rem;color:#666;">
+            <i class="fa-solid fa-users"></i> ${batch.seats_left} seat${batch.seats_left !== 1 ? 's' : ''} left
+            ${batch.cancellation_cutoff_days ? `<span style="margin-left:12px;"><i class="fa-solid fa-ban"></i> Cancel up to ${batch.cancellation_cutoff_days} days before</span>` : ''}
+          </div>
+        </div>
+        ${batch.seats_left < 5 && batch.seats_left > 0 ? `<div style="background:#fff3cd;color:#856404;padding:8px 16px;border-radius:8px;margin:12px 0;font-size:0.9rem;"><i class="fa-solid fa-exclamation-triangle"></i> Only ${batch.seats_left} seat${batch.seats_left !== 1 ? 's' : ''} remaining!</div>` : ''}
+        ${batch.seats_left <= 0 ? `<div style="background:#f8d7da;color:#721c24;padding:8px 16px;border-radius:8px;margin:12px 0;font-size:0.9rem;"><i class="fa-solid fa-ban"></i> This batch is full</div>` : ''}
+        <div style="margin-top:24px;">
+          ${batch.seats_left > 0
+            ? `<button id="btn-batch-register" class="tr-enroll-btn" style="padding:12px 36px;font-size:1.1rem;">
+                <i class="fa-solid fa-credit-card"></i> Register Now — ₹${Number(batch.price_actual).toLocaleString()}
+              </button>`
+            : '<button disabled style="padding:12px 36px;font-size:1.1rem;background:#ccc;border:none;border-radius:8px;color:#666;">Full</button>'}
+        </div>
+        <div id="batch-register-status" style="margin-top:12px;"></div>
+      </div>
+    `;
+
+    // Wire register button
+    const regBtn = document.getElementById('btn-batch-register');
+    if (regBtn) {
+      regBtn.addEventListener('click', async () => {
+        if (!state.user) {
+          showErrorToast('Please log in first');
+          return;
+        }
+        regBtn.disabled = true;
+        regBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing…';
+        const statusEl = document.getElementById('batch-register-status');
+
+        try {
+          const result = await trainingApi.registerForBatch(batchId, { role: state.user.role || 'grower' });
+          if (result.error) {
+            statusEl.innerHTML = `<div style="color:#e74c3c;">${result.error}</div>`;
+            regBtn.disabled = false;
+            regBtn.innerHTML = '<i class="fa-solid fa-credit-card"></i> Register Now';
+            return;
+          }
+
+          // Open Razorpay checkout
+          const options = {
+            key: result.key_id,
+            amount: result.amount * 100,
+            currency: 'INR',
+            name: 'Sporekart',
+            description: batch.title,
+            order_id: result.razorpay_order_id,
+            handler: async function (response) {
+              try {
+                const verifyResult = await trainingApi.verifyPayment({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  enrollment_id: result.enrollment_id,
+                });
+                if (verifyResult.error) {
+                  statusEl.innerHTML = `<div style="color:#e74c3c;">Payment verification failed: ${verifyResult.error}</div>`;
+                } else {
+                  statusEl.innerHTML = `<div style="color:#2d6a4f;font-weight:600;"><i class="fa-solid fa-check-circle"></i> Registration confirmed! You can view your enrollments in the Training section.</div>`;
+                  regBtn.outerHTML = `<span class="tr-enrolled-badge" style="font-size:1rem;padding:12px 24px;"><i class="fa-solid fa-check"></i> Registered</span>`;
+                }
+              } catch (err) {
+                statusEl.innerHTML = `<div style="color:#e74c3c;">Payment verification failed. Please contact support.</div>`;
+              }
+            },
+            modal: {
+              ondismiss: function () {
+                regBtn.disabled = false;
+                regBtn.innerHTML = '<i class="fa-solid fa-credit-card"></i> Register Now';
+              },
+            },
+          };
+
+          if (window.Razorpay) {
+            const rzp = new window.Razorpay(options);
+            rzp.open();
+          } else {
+            // Load Razorpay SDK dynamically
+            const script = document.createElement('script');
+            script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+            script.onload = () => {
+              const rzp = new window.Razorpay(options);
+              rzp.open();
+            };
+            document.head.appendChild(script);
+          }
+        } catch (err) {
+          statusEl.innerHTML = `<div style="color:#e74c3c;">Registration failed: ${err.message}</div>`;
+          regBtn.disabled = false;
+          regBtn.innerHTML = '<i class="fa-solid fa-credit-card"></i> Register Now';
+        }
+      });
+    }
+  } catch (err) {
+    container.innerHTML = `<div class="tr-loading" style="color:#e74c3c;">Failed to load batch: ${err.message}</div>`;
+  }
+}
+
+// ── Grower Training v2 — My Trainings Dashboard (cancel enrollment UI) ──
+async function renderMyTrainingsV2() {
+  const container = document.getElementById('tr-my-enrollments-v2');
+  if (!container) return;
+
+  container.innerHTML = '<div class="tr-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+
+  try {
+    const enrollmentsData = await trainingApi.getMyEnrollments();
+    const enrollments = enrollmentsData?.v2 || [];
+    if (enrollments.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:40px;color:#666;"><i class="fa-solid fa-graduation-cap" style="font-size:2rem;margin-bottom:12px;"></i><p>You are not enrolled in any training batches yet.</p></div>';
+      return;
+    }
+
+    container.innerHTML = enrollments.map(e => {
+      const batch = e.batch || {};
+      const now = new Date();
+      const startDate = new Date(batch.start_date || now);
+      const cutoffDays = batch.cancellation_cutoff_days || 3;
+      const cancelDeadline = new Date(startDate.getTime() - cutoffDays * 24 * 60 * 60 * 1000);
+      const canCancel = e.status === 'confirmed' && now <= cancelDeadline;
+      const cancelClosed = e.status === 'confirmed' && now > cancelDeadline;
+      const isPast = startDate < now;
+
+      let badge;
+      if (e.status === 'confirmed') badge = '<span class="tr-enrolled-badge"><i class="fa-solid fa-check"></i> Confirmed</span>';
+      else if (e.status === 'pending_payment') badge = '<span style="background:#fff3cd;color:#856404;padding:4px 12px;border-radius:20px;font-size:0.85rem;"><i class="fa-solid fa-clock"></i> Pending Payment</span>';
+      else if (e.status === 'cancelled') badge = '<span style="background:#f8d7da;color:#721c24;padding:4px 12px;border-radius:20px;font-size:0.85rem;"><i class="fa-solid fa-ban"></i> Cancelled</span>';
+      else if (e.status === 'refunded') badge = '<span style="background:#d4edda;color:#155724;padding:4px 12px;border-radius:20px;font-size:0.85rem;"><i class="fa-solid fa-rotate-left"></i> Refunded</span>';
+      else badge = `<span style="background:#eee;padding:4px 12px;border-radius:20px;font-size:0.85rem;">${e.status}</span>`;
+
+      let cancelHtml = '';
+      if (canCancel) {
+        cancelHtml = `<button class="tr-enroll-btn btn-cancel-v2" data-enrollment-id="${e.id}" style="background:#dc3545;font-size:0.85rem;padding:6px 16px;"><i class="fa-solid fa-ban"></i> Cancel Registration</button>`;
+      } else if (cancelClosed && !isPast) {
+        cancelHtml = `<span style="color:#999;font-size:0.85rem;"><i class="fa-solid fa-lock"></i> Cancellation closed</span>`;
+      }
+
+      return `
+        <div class="tr-course-card" style="padding:16px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:8px;">
+            <div>
+              <h4 style="margin:0 0 4px;">${batch.title || 'Training'}</h4>
+              <div style="font-size:0.85rem;color:#666;">
+                ${batch.start_date ? `<span><i class="fa-solid fa-calendar-day"></i> ${new Date(batch.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>` : ''}
+                ${batch.instructor ? `<span style="margin-left:12px;"><i class="fa-solid fa-chalkboard-user"></i> ${batch.instructor}</span>` : ''}
+              </div>
+              <div style="margin-top:8px;">${badge}</div>
+            </div>
+            <div style="text-align:right;">
+              ${batch.price_actual ? `<div style="font-weight:600;color:#2d6a4f;">₹${Number(batch.price_actual).toLocaleString()}</div>` : ''}
+              ${cancelHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Wire cancel buttons
+    container.querySelectorAll('.btn-cancel-v2').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const enrollmentId = btn.dataset.enrollmentId;
+        if (!confirm('Are you sure you want to cancel this registration? A full refund will be processed.')) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cancelling…';
+        try {
+          const result = await trainingApi.cancelEnrollment(enrollmentId, { reason: 'Self-cancellation via portal' });
+          if (result.error) {
+            showErrorToast(result.error);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-ban"></i> Cancel Registration';
+          } else {
+            showSuccessToast('Registration cancelled. Refund will be processed shortly.');
+            renderMyTrainingsV2();
+          }
+        } catch (err) {
+          showErrorToast('Failed to cancel: ' + err.message);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-ban"></i> Cancel Registration';
+        }
+      });
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="tr-loading" style="color:#e74c3c;">Failed to load enrollments: ${err.message}</div>`;
+  }
+}
+
+// Expose v2 functions globally for admin menu integration
+window.renderBatchDetail = renderBatchDetail;
+window.renderMyTrainingsV2 = renderMyTrainingsV2;
 
 window.changeQty = changeQuantity;
 window.removeCartItem = removeFromCart;

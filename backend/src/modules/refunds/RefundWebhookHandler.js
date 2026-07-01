@@ -3,7 +3,80 @@ const { OrderStates, restockOrderItems } = require("../orders/OrderStateService"
 const { verifyWebhookSignature } = require("../payments/PaymentService");
 const { logRefundAction } = require("./RefundAuditService");
 const { sendRefundNotification } = require("./RefundService");
+const db = require("../../config/db");
+const { sendSseEvent } = require("../../lib/sse");
 const logger = require("../../utils/logger");
+
+/**
+ * Reconcile a training refund after receiving a webhook update from Razorpay.
+ * Attempts to find a matching training_refund by razorpay_refund_id and updates
+ * the training_payment and training_enrollment statuses accordingly.
+ */
+async function reconcileTrainingRefund(rzpRefundId, newStatus, failureDesc) {
+  try {
+    const rows = await db
+      .from("training_refunds")
+      .select("*")
+      .eq("razorpay_refund_id", rzpRefundId)
+      .then(r => r.data || r);
+    if (!rows || rows.length === 0) return;
+
+    const trainingRefund = rows[0];
+    if (newStatus === "processed" && trainingRefund.status === "processed") {
+      logger.info(`[RefundWebhookHandler] Training refund ${trainingRefund.id} already processed.`);
+      return;
+    }
+    if (newStatus === "failed" && trainingRefund.status === "failed") {
+      logger.info(`[RefundWebhookHandler] Training refund ${trainingRefund.id} already marked as failed.`);
+      return;
+    }
+
+    // Update training_refund record
+    const updates = { status: newStatus };
+    if (newStatus === "processed") updates.processed_at = new Date().toISOString();
+    if (newStatus === "failed" && failureDesc) updates.reason = failureDesc;
+
+    await db
+      .from("training_refunds")
+      .eq("id", trainingRefund.id)
+      .update(updates)
+      .then(r => r.data || r);
+
+    // Find associated payment
+    const paymentRows = await db
+      .from("training_payments")
+      .select("*")
+      .eq("id", trainingRefund.payment_id)
+      .then(r => r.data || r);
+    if (paymentRows && paymentRows.length > 0) {
+      const payment = paymentRows[0];
+      const paymentStatus = newStatus === "processed" ? "refunded" : "failed";
+      await db
+        .from("training_payments")
+        .eq("id", payment.id)
+        .update({ status: paymentStatus })
+        .then(r => r.data || r);
+
+      // Update enrollment status
+      const enrollmentStatus = newStatus === "processed" ? "refunded" : "confirmed";
+      await db
+        .from("training_enrollments")
+        .eq("id", payment.enrollment_id)
+        .update({ status: enrollmentStatus })
+        .then(r => r.data || r);
+
+      sendSseEvent("training_enrollment:updated", {
+        enrollment_id: payment.enrollment_id,
+        status: enrollmentStatus,
+        refund_status: newStatus,
+      });
+    }
+
+    logger.info(`[RefundWebhookHandler] Training refund ${trainingRefund.id} reconciled as ${newStatus}`);
+  } catch (err) {
+    logger.error(`[RefundWebhookHandler] Failed to reconcile training refund: ${err.message}`);
+  }
+}
 
 /**
  * Handle incoming verified Razorpay webhook events
@@ -39,13 +112,18 @@ async function handleWebhookEvent(event) {
       // Fetch order
       const order = await repo.findOrderById(refund.order_id);
       if (order) {
-        const totalRefunded = Number(order.total_refunded_amount || 0);
+        // Calculate total refunded from all processed refunds to avoid staleness
+        const allRefunds = await repo.findRefundsByOrderId(order.id);
+        const totalProcessed = (allRefunds || [])
+          .filter(r => r.status === "processed" || r.id === refund.id)
+          .reduce((sum, r) => sum + Number(r.amount || r.refund_amount || 0), 0);
         const orderTotal = Number(order.total);
-        const isFullRefund = totalRefunded >= orderTotal;
+        const isFullRefund = totalProcessed >= orderTotal;
 
         const orderUpdates = {
           status: isFullRefund ? OrderStates.REFUND_COMPLETED : OrderStates.REFUND_PROCESSING,
-          refund_status: isFullRefund ? "processed" : "partial"
+          refund_status: isFullRefund ? "processed" : "partial",
+          total_refunded_amount: totalProcessed
         };
 
         const updatedOrder = await repo.updateOrder(order.id, orderUpdates);
@@ -62,6 +140,9 @@ async function handleWebhookEvent(event) {
         // Notify user
         await sendRefundNotification(updatedOrder, "REFUND_COMPLETED", { rzpRefundId, amount: refund.amount || refund.refund_amount });
       }
+
+      // Also reconcile training refunds if this is a training enrollment refund
+      await reconcileTrainingRefund(rzpRefundId, "processed");
       break;
     }
 
@@ -105,6 +186,9 @@ async function handleWebhookEvent(event) {
         // Notify user
         await sendRefundNotification(updatedOrder, "REFUND_FAILED", { amount: refund.amount || refund.refund_amount });
       }
+
+      // Also reconcile training refunds if this is a training enrollment refund
+      await reconcileTrainingRefund(rzpRefundId, "failed", entity.error_description);
       break;
     }
 
@@ -123,6 +207,13 @@ async function handleWebhookEvent(event) {
       const order = (orders || []).find(o => o.razorpay_order_id === rzpOrderId);
 
       if (order && order.status === "pending") {
+        // Re-read order from DB to avoid race with auto-refund sweep
+        const freshOrder = await repo.findOrderById(order.id);
+        if (!freshOrder || freshOrder.status !== "pending") {
+          logger.info(`[RefundWebhookHandler] Order ${order.id} already processed by sweep, skipping.`);
+          return;
+        }
+
         logger.warn(`[RefundWebhookHandler] ORPHAN DETECTED via Webhook: Order ${order.id} is paid on Razorpay but pending in DB!`);
 
         // Execute recovery: cancel order & trigger refund

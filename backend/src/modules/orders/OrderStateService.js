@@ -3,6 +3,8 @@ const logger = require("../../utils/logger");
 const FEATURE_FLAGS = require("../../config/featureFlags");
 const { OrderStatus } = require("../../constants");
 const inventoryService = require("../../services/inventoryService");
+const { withTransaction, withRowLock, optimisticUpdate, withRowLocks } = require("../../services/TransactionManager");
+const { send, QUEUES } = require("../../services/QueueService");
 
 // Alias OrderStates from shared constants for backward compatibility
 const OrderStates = {
@@ -185,12 +187,58 @@ function isValidTransition(currentStatus, nextStatus) {
   return allowed.includes(nextStatus);
 }
 
+// ── Atomic State Transition (optimistic locking + optional transaction) ────
+
+async function atomicStateTransition(orderId, expectedVersion, updates) {
+  if (!FEATURE_FLAGS.ENABLE_TRANSACTIONS && !FEATURE_FLAGS.ENABLE_OPTIMISTIC_LOCKING) {
+    const { error } = await db.from("orders").update(updates).eq("id", orderId);
+    if (error) throw new Error(`Failed to update order: ${error.message}`);
+    return;
+  }
+
+  if (FEATURE_FLAGS.ENABLE_QUEUE) {
+    await send(QUEUES.ORDER_PROCESSING, {
+      action: "update_status",
+      orderId,
+      payload: { updates, expectedVersion },
+    });
+    return;
+  }
+
+  await withTransaction(async (client) => {
+    const order = await withRowLock(client, "orders", orderId);
+    if (!order) throw new Error("Order not found");
+    if (expectedVersion !== undefined && order.version !== expectedVersion) {
+      const err = new Error(`Concurrent modification detected for order ${orderId}`);
+      err.code = "OPTIMISTIC_LOCK_CONFLICT";
+      throw err;
+    }
+    await optimisticUpdate(client, "orders", orderId, updates, order.version);
+  });
+}
+
+async function atomicOrderFetch(orderId) {
+  if (!FEATURE_FLAGS.ENABLE_OPTIMISTIC_LOCKING && !FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
+    const { data } = await db.from("orders").select("*").eq("id", orderId).single();
+    return data;
+  }
+
+  if (FEATURE_FLAGS.ENABLE_QUEUE) {
+    const { data } = await db.from("orders").select("*").eq("id", orderId).single();
+    return data;
+  }
+
+  return withTransaction(async (client) => {
+    return withRowLock(client, "orders", orderId);
+  });
+}
+
 // ── Phase 5: New State Machine Methods ────────────────────────────────────
 
 async function selfCancel(orderId, userId) {
   if (!FEATURE_FLAGS.SELF_CANCEL_WINDOW) throw new Error("Self-cancellation window is disabled");
 
-  const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+  const order = await atomicOrderFetch(orderId);
   if (!order) throw new Error("Order not found");
 
   if (order.user_id !== userId && userId !== 'system') {
@@ -209,7 +257,7 @@ async function selfCancel(orderId, userId) {
     throw new Error("Order has been handed to carrier and cannot be self-cancelled");
   }
 
-  const { error } = await db.from("orders").update({
+  await atomicStateTransition(orderId, order.version, {
     status: OrderStatus.SELF_CANCELLED,
     delivery_status: "cancelled",
     fulfillment_status: null,
@@ -217,24 +265,28 @@ async function selfCancel(orderId, userId) {
     cancelled_by: "customer",
     cancelled_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }).eq("id", orderId);
-  if (error) throw new Error(`Failed to cancel order: ${error.message}`);
+  });
 
-  // Auto-initiate refund
+  let refundFailed = false;
   try {
     const { executeRefundProcess } = require("../refunds/RefundService");
     await executeRefundProcess(order, order.total, "customer", "Self-cancellation within window");
   } catch (refundErr) {
+    refundFailed = true;
     logger.warn(`[OrderStateService] Auto-refund failed for self-cancelled order ${orderId}: ${refundErr.message}`);
   }
 
-  return { success: true, message: "Order self-cancelled successfully" };
+  if (refundFailed) {
+    return { success: true, message: "Order self-cancelled. Auto-refund failed — an admin will review and process the refund manually.", refundFailed: true };
+  }
+
+  return { success: true, message: "Order self-cancelled and refund initiated successfully" };
 }
 
 async function adminReject(orderId, reason, adminUser = null) {
   if (!reason || reason.trim().length === 0) throw new Error("Rejection reason is required");
 
-  const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+  const order = await atomicOrderFetch(orderId);
   if (!order) throw new Error("Order not found");
 
   if (order.status !== OrderStatus.ADMIN_PENDING && order.status !== OrderStates.CANCEL_REQUESTED && order.status !== "paid") {
@@ -245,27 +297,28 @@ async function adminReject(orderId, reason, adminUser = null) {
     throw new Error("Order has been handed to carrier and cannot be rejected");
   }
 
-  const { error } = await db.from("orders").update({
+  await atomicStateTransition(orderId, order.version, {
     status: OrderStatus.ADMIN_REJECTED,
     delivery_status: "rejected",
     rejection_reason: reason.trim(),
     cancelled_by: "admin",
     cancelled_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }).eq("id", orderId);
-  if (error) throw new Error(`Failed to reject order: ${error.message}`);
+  });
 
-  // Auto-refund
+  let refundFailed = false;
   try {
     const { executeRefundProcess } = require("../refunds/RefundService");
     if (order.razorpay_payment_id) {
       await executeRefundProcess(order, order.total, "admin", reason.trim(), "", adminUser);
+    } else {
+      await restockOrderItems(order);
     }
   } catch (refundErr) {
+    refundFailed = true;
     logger.warn(`[OrderStateService] Auto-refund failed for rejected order ${orderId}: ${refundErr.message}`);
   }
 
-  // Notify customer
   try {
     const { sendRefundNotification } = require("../refunds/RefundService");
     await sendRefundNotification(order, "REJECTED", { reason: reason.trim() });
@@ -273,40 +326,41 @@ async function adminReject(orderId, reason, adminUser = null) {
     logger.warn(`[OrderStateService] Rejection notification failed for order ${orderId}: ${notifErr.message}`);
   }
 
-  return { success: true, message: "Order rejected" };
+  if (refundFailed) {
+    return { success: true, message: "Order rejected. Auto-refund failed — an admin should process the refund manually.", refundFailed: true };
+  }
+  return { success: true, message: "Order rejected and refund initiated" };
 }
 
 async function adminApprove(orderId) {
-  const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+  const order = await atomicOrderFetch(orderId);
   if (!order) throw new Error("Order not found");
 
   if (order.status !== OrderStatus.ADMIN_PENDING && order.status !== OrderStates.CANCEL_REQUESTED && order.status !== "paid") {
     throw new Error(`Order cannot be approved in status: ${order.status}`);
   }
 
-  const { error } = await db.from("orders").update({
+  await atomicStateTransition(orderId, order.version, {
     status: OrderStatus.APPROVED,
     fulfillment_status: "pending_fulfillment",
     admin_approval_status: "approved",
     updated_at: new Date().toISOString(),
-  }).eq("id", orderId);
-  if (error) throw new Error(`Failed to approve order: ${error.message}`);
+  });
 
   return { success: true, message: "Order approved", order: { ...order, status: OrderStatus.APPROVED } };
 }
 
 async function startReturnWindow(orderId) {
-  const { data: order } = await db.from("orders").select("id, status, return_window_expires").eq("id", orderId).single();
+  const order = await atomicOrderFetch(orderId);
   if (!order) throw new Error("Order not found");
   if (order.return_window_expires) return { success: true, message: "Return window already set" };
 
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  const { error } = await db.from("orders").update({
+  await atomicStateTransition(orderId, order.version, {
     return_window_expires: expires,
     status: OrderStatus.RETURN_WINDOW,
     updated_at: new Date().toISOString(),
-  }).eq("id", orderId);
-  if (error) throw new Error(`Failed to start return window: ${error.message}`);
+  });
   return { success: true, returnWindowExpires: expires };
 }
 
@@ -342,10 +396,22 @@ async function closeExpiredWindows() {
   if (!expired || expired.length === 0) return { closed: 0 };
 
   const ids = expired.map(o => o.id);
-  await db.from("orders").update({
-    status: OrderStatus.WINDOW_CLOSED,
-    updated_at: new Date().toISOString(),
-  }).in("id", ids);
+
+  if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
+    await withTransaction(async (client) => {
+      const locked = await withRowLocks(client, "orders", ids);
+      if (locked.length === 0) return;
+      await client.query(
+        `UPDATE orders SET status = $1, updated_at = $2 WHERE id = ANY($3::text[])`,
+        [OrderStatus.WINDOW_CLOSED, new Date().toISOString(), ids]
+      );
+    });
+  } else {
+    await db.from("orders").update({
+      status: OrderStatus.WINDOW_CLOSED,
+      updated_at: new Date().toISOString(),
+    }).in("id", ids);
+  }
 
   logger.info(`[OrderStateService] Closed ${ids.length} expired cancellation windows`);
   return { closed: ids.length };
@@ -365,11 +431,47 @@ async function restockOrderItems(order) {
   if (!order || !Array.isArray(order.items)) return;
 
   if (order.restocked) {
-    logger.info(`[OrderStateService] Order ${order.id} already restocked — skipping.`);
+    logger.info(`[OrderStateService] Order ${order.id} already restocked (in-memory) — skipping.`);
     return;
   }
+  try {
+    const { data: current } = await db.from("orders").select("restocked").eq("id", order.id).single();
+    if (current?.restocked) {
+      logger.info(`[OrderStateService] Order ${order.id} already restocked (DB) — skipping.`);
+      return;
+    }
+  } catch (_) { }
 
   logger.info(`[OrderStateService] Restocking items for order ${order.id}`);
+
+  if (FEATURE_FLAGS.ENABLE_TRANSACTIONS && !FEATURE_FLAGS.INVENTORY_SERVICE) {
+    await withTransaction(async (client) => {
+      const productIds = order.items.filter(i => i.productId).map(i => i.productId);
+      const products = await withRowLocks(client, "products", productIds, "UPDATE");
+
+      const productMap = {};
+      for (const p of products) productMap[p.id] = p;
+
+      for (const item of order.items) {
+        if (!item.productId) continue;
+        const qty = parseInt(item.quantity, 10) || 0;
+        if (qty <= 0) continue;
+        const product = productMap[item.productId];
+        if (!product) {
+          logger.warn(`[OrderStateService] Product ${item.productId} not found during restocking.`);
+          continue;
+        }
+        const newStock = (product.stock || 0) + qty;
+        await optimisticUpdate(client, "products", item.productId, { stock: newStock }, product.version);
+      }
+
+      await optimisticUpdate(client, "orders", order.id,
+        { restocked: true, updated_at: new Date().toISOString() },
+        order.version !== undefined ? order.version : undefined
+      );
+    });
+    return;
+  }
 
   if (FEATURE_FLAGS.INVENTORY_SERVICE) {
     for (const item of order.items) {
@@ -378,7 +480,6 @@ async function restockOrderItems(order) {
         const qty = parseInt(item.quantity, 10) || 0;
         if (qty <= 0) continue;
         await inventoryService.restockStock(item.productId, qty, 'cancellation', order.id);
-        logger.info(`[OrderStateService] Restocked product ${item.productId} x${qty} via inventory service`);
       } catch (err) {
         logger.error(`[OrderStateService] Failed to restock product ${item.productId}: ${err.message}`);
       }
@@ -392,7 +493,6 @@ async function restockOrderItems(order) {
         const currentStock = product.stock || 0;
         const updatedStock = currentStock + (parseInt(item.quantity, 10) || 0);
         await db.from("products").update({ stock: updatedStock }).eq("id", item.productId);
-        logger.info(`[OrderStateService] Restocked product ${item.productId}: ${currentStock} -> ${updatedStock}`);
       } catch (err) {
         logger.error(`[OrderStateService] Failed to restock product ${item.productId}: ${err.message}`);
       }
@@ -508,4 +608,6 @@ module.exports = {
   startReturnWindow,
   getCancelWindow,
   closeExpiredWindows,
+  atomicStateTransition,
+  atomicOrderFetch,
 };

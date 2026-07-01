@@ -157,6 +157,17 @@ router.post('/webhooks/:providerKey', async (req, res) => {
         changed_at: new Date().toISOString(),
       }).catch(() => {});
 
+      // Start return window on webhook-delivered
+      if (newStatus === 'delivered') {
+        try {
+          const { startReturnWindow } = require('../modules/orders/OrderStateService');
+          await startReturnWindow(shipment.order_id);
+          logger.info(`[shipping-webhook] Return window started for order ${shipment.order_id}`);
+        } catch (rwErr) {
+          logger.warn(`[shipping-webhook] Failed to start return window for ${shipment.order_id}: ${rwErr.message}`);
+        }
+      }
+
       // Auto-cancel + refund on RTO/return
       if (newStatus === 'returned' || newStatus === 'cancelled') {
         try {

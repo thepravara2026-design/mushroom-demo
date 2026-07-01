@@ -128,7 +128,7 @@ describe('Refund Management System', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.order.status).toBe(OrderStates.CANCELLED);
-      expect(res.body.data.refund.status).toBe('initiated');
+      expect(res.body.data.refund.status).toBe('pending');
 
       // Check stock was restocked
       const { data: product } = await db.from('products').select('stock').eq('id', testProductId).single();

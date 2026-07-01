@@ -1,7 +1,6 @@
 const express = require("express");
 
 const router = express.Router();
-const db = require("../config/db");
 const { success, error: respondError } = require("../lib/response");
 
 // GET /api/search?q=query
@@ -15,9 +14,9 @@ router.get("/", async (req, res) => {
 
     const [productsResult, categoriesResult, trainingsResult] =
       await Promise.all([
-        db.from("products").select("*").then((r) => r),
-        db.from("categories").select("*").then((r) => r),
-        db.from("trainings").select("*").then((r) => r),
+        req.db.from("products").select("*").then((r) => r),
+        req.db.from("categories").select("*").then((r) => r),
+        req.db.from("trainings").select("*").then((r) => r),
       ]);
 
     const allProducts = productsResult.data || productsResult;

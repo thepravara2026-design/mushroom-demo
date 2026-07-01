@@ -7,6 +7,9 @@ const { sendWhatsAppMessage } = require("../../services/notificationService");
 const razorpay = require("../../config/razorpay");
 const db = require("../../config/db");
 const logger = require("../../utils/logger");
+const FEATURE_FLAGS = require("../../config/featureFlags");
+const { withTransaction, withRowLock, optimisticUpdate } = require("../../services/TransactionManager");
+const { send, QUEUES } = require("../../services/QueueService");
 
 /**
  * Cancel carrier shipment if one exists for the order.
@@ -177,29 +180,178 @@ async function requestCustomerCancellation(orderId, userId, reason) {
 
 /**
  * Helper to process refund gateway calls and update order/refund records
+ * Uses transactions + row-level locks + optimistic concurrency control
  */
 async function executeRefundProcess(order, refundAmount, initiatedBy, reason, adminNote = "", adminUser = null) {
   if (!order.razorpay_payment_id) {
     throw new Error("Order has no transaction/payment ID to refund");
   }
 
-  // Get number of refund records for this order to use as attempt count
   const existingRefunds = await repo.findRefundsByOrderId(order.id);
   const attemptCount = (existingRefunds || []).length;
-
-  // Generate deterministic idempotency key
   const idempotencyKey = generateRefundIdempotencyKey(order.id, order.razorpay_payment_id, refundAmount, attemptCount);
+  const auditPerformer = adminUser || (initiatedBy === "admin" ? "ADMIN" : "SYSTEM");
+  const usesQueue = FEATURE_FLAGS.ENABLE_QUEUE;
+  const usesTransactions = FEATURE_FLAGS.ENABLE_TRANSACTIONS;
 
-  // Transition to REFUND_PENDING
+  // Phase 1: Atomic status transition to REFUND_PENDING (with row lock + version check)
+  if (usesQueue) {
+    await send(QUEUES.REFUND_PROCESSING, {
+      action: "execute_refund",
+      orderId: order.id,
+      payload: { amount: refundAmount, initiatedBy, reason, adminNote, adminUser: auditPerformer }
+    });
+    return { success: true, queued: true, message: "Refund queued for processing" };
+  }
+
+  if (usesTransactions) {
+    return executeRefundWithTransaction(order, refundAmount, initiatedBy, reason, adminNote, auditPerformer, idempotencyKey);
+  }
+
+  // Fallback: original compensating-transaction pattern (no DB-level locking)
+  return executeRefundWithCompensatingTransaction(order, refundAmount, initiatedBy, reason, adminNote, auditPerformer, idempotencyKey);
+}
+
+async function executeRefundWithTransaction(order, refundAmount, initiatedBy, reason, adminNote, auditPerformer, idempotencyKey) {
+  let rzpRefund = null;
+  let refundRecord = null;
+  let orderVersion;
+
+  // Phase 1: Create refund record + transition order in a transaction with row lock
+  await withTransaction(async (client) => {
+    const lockedOrder = await withRowLock(client, "orders", order.id);
+    if (!lockedOrder) throw new Error("Order not found or locked");
+    orderVersion = lockedOrder.version;
+
+    refundRecord = await repo.createRefund({
+      order_id: order.id,
+      user_id: order.user_id,
+      razorpay_payment_id: order.razorpay_payment_id,
+      razorpay_refund_id: null,
+      amount: refundAmount,
+      refund_reason: reason,
+      status: "pending",
+      cancelled_by: initiatedBy,
+      admin_note: adminNote,
+    });
+
+    const orderUpdate = {
+      status: OrderStates.REFUND_PENDING,
+      refund_status: "pending",
+    };
+    const r = await client.query(
+      `UPDATE orders SET status = $1, refund_status = $2, version = version + 1, updated_at = $3 WHERE id = $4 AND version = $5`,
+      [orderUpdate.status, orderUpdate.refund_status, new Date().toISOString(), order.id, lockedOrder.version]
+    );
+    if (r.rowCount === 0) {
+      throw new Error(`Optimistic lock conflict on order ${order.id} during refund initiation`);
+    }
+  });
+
+  await logRefundAction({
+    orderId: order.id,
+    action: "REFUND_PENDING",
+    performedBy: auditPerformer,
+    metadata: { refundAmount, reason }
+  });
+
+  try {
+    const amountInPaise = Math.round(refundAmount * 100);
+    rzpRefund = await initiateRazorpayRefund(order.razorpay_payment_id, amountInPaise, idempotencyKey, {
+      orderId: order.id,
+      reason,
+      initiatedBy
+    });
+
+    // Phase 2: Update refund + order in transaction with row lock
+    await withTransaction(async (client) => {
+      const lockedOrder = await withRowLock(client, "orders", order.id);
+      if (!lockedOrder) throw new Error("Order not found");
+
+      const r1 = await client.query(
+        `UPDATE refunds SET razorpay_refund_id = $1, status = $2, version = version + 1, updated_at = $3 WHERE id = $4 AND version = $5`,
+        [rzpRefund.id, "initiated", new Date().toISOString(), refundRecord.id, 1]
+      );
+      if (r1.rowCount === 0) {
+        logger.warn(`[RefundService] Refund record ${refundRecord.id} version mismatch — proceeding`);
+      }
+
+      const totalRefunded = Number(order.total_refunded_amount || 0) + Number(refundAmount);
+      const r2 = await client.query(
+        `UPDATE orders SET status = $1, refund_status = $2, refund_id = $3, total_refunded_amount = $4, version = version + 1, updated_at = $5 WHERE id = $6 AND version >= $7`,
+        [OrderStates.REFUND_INITIATED, "initiated", refundRecord.id, totalRefunded, new Date().toISOString(), order.id, lockedOrder.version]
+      );
+      if (r2.rowCount === 0) {
+        throw new Error(`Optimistic lock conflict on order ${order.id} after gateway refund`);
+      }
+    });
+
+    refundRecord.razorpay_refund_id = rzpRefund.id;
+    refundRecord.status = "initiated";
+
+    await restockOrderItems(order);
+
+    await logRefundAction({
+      refundId: refundRecord.id,
+      orderId: order.id,
+      action: "REFUND_INITIATED",
+      performedBy: auditPerformer,
+      metadata: { razorpayRefundId: rzpRefund.id, amount: refundAmount }
+    });
+
+    const updatedOrder = await repo.findOrderById(order.id);
+    await sendRefundNotification(updatedOrder, "REFUND_INITIATED", { refundId: rzpRefund.id, amount: refundAmount });
+
+    return { success: true, order: updatedOrder, refund: refundRecord };
+  } catch (err) {
+    logger.error(`[RefundService] Refund execution failed for order ${order.id}: ${err.message}`);
+
+    try {
+      await withTransaction(async (client) => {
+        const lockedOrder = await withRowLock(client, "orders", order.id);
+        if (refundRecord) {
+          await client.query(
+            `UPDATE refunds SET razorpay_refund_id = $1, status = $2, failure_reason = $3, version = version + 1, updated_at = $4 WHERE id = $5`,
+            [rzpRefund ? rzpRefund.id : `FAILED_${Date.now()}`, "failed", err.message, new Date().toISOString(), refundRecord.id]
+          );
+        }
+        await client.query(
+          `UPDATE orders SET status = $1, refund_status = $2, refund_id = $3, version = version + 1, updated_at = $4 WHERE id = $5`,
+          [OrderStates.REFUND_FAILED, "failed", refundRecord?.id || null, new Date().toISOString(), order.id]
+        );
+      });
+    } catch (txErr) {
+      logger.error(`[RefundService] Failed to record refund failure in transaction: ${txErr.message}`);
+    }
+
+    await restockOrderItems(order);
+
+    await logRefundAction({
+      refundId: refundRecord?.id,
+      orderId: order.id,
+      action: "REFUND_FAILED",
+      performedBy: auditPerformer,
+      metadata: { error: err.message, partialRefundCreated: !!rzpRefund }
+    });
+
+    if (rzpRefund) {
+      logger.error(`[RefundService] CRITICAL: Razorpay refund ${rzpRefund.id} was created but DB state is failed. Order ${order.id}. Webhook should reconcile.`);
+    }
+
+    const failedOrder = await repo.findOrderById(order.id);
+    await sendRefundNotification(failedOrder, "REFUND_FAILED", { amount: refundAmount });
+
+    throw new Error(`Refund initiation failed: ${err.message}`);
+  }
+}
+
+// Original compensating-transaction pattern preserved as fallback
+async function executeRefundWithCompensatingTransaction(order, refundAmount, initiatedBy, reason, adminNote, auditPerformer, idempotencyKey) {
   await repo.updateOrder(order.id, {
     status: OrderStates.REFUND_PENDING,
     refund_status: "pending"
   });
 
-  // Resolve the performer identity for audit logs
-  const auditPerformer = adminUser || (initiatedBy === "admin" ? "ADMIN" : "SYSTEM");
-
-  // Log audit
   await logRefundAction({
     orderId: order.id,
     action: "REFUND_PENDING",
@@ -211,37 +363,30 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
   let refundRecord = null;
 
   try {
-    // ── Create refund record BEFORE gateway call (compensating transaction) ──
-    // This ensures we always have a DB record even if the Razorpay call fails
-    // or if the DB update after a successful Razorpay call fails.
     refundRecord = await repo.createRefund({
       order_id: order.id,
       user_id: order.user_id,
       razorpay_payment_id: order.razorpay_payment_id,
-      razorpay_refund_id: null, // Will be set after successful gateway call
+      razorpay_refund_id: null,
       amount: refundAmount,
       refund_reason: reason,
-      status: "pending", // Start as pending; updated to initiated or failed
+      status: "pending",
       cancelled_by: initiatedBy,
       admin_note: adminNote
     });
 
     const amountInPaise = Math.round(refundAmount * 100);
-    
-    // Call Razorpay API
     rzpRefund = await initiateRazorpayRefund(order.razorpay_payment_id, amountInPaise, idempotencyKey, {
       orderId: order.id,
-      reason: reason,
-      initiatedBy: initiatedBy
+      reason,
+      initiatedBy
     });
 
-    // ── Gateway call succeeded — update refund record ──
     refundRecord = await repo.updateRefund(refundRecord.id, {
       razorpay_refund_id: rzpRefund.id,
       status: "initiated"
     });
 
-    // Update order
     const orderUpdates = {
       status: OrderStates.REFUND_INITIATED,
       refund_status: "initiated",
@@ -250,10 +395,8 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
     };
     const updatedOrder = await repo.updateOrder(order.id, orderUpdates);
 
-    // Restock items
     await restockOrderItems(order);
 
-    // Audit logs
     await logRefundAction({
       refundId: refundRecord.id,
       orderId: order.id,
@@ -262,7 +405,6 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       metadata: { razorpayRefundId: rzpRefund.id, amount: refundAmount }
     });
 
-    // Notify user
     await sendRefundNotification(updatedOrder, "REFUND_INITIATED", { refundId: rzpRefund.id, amount: refundAmount });
 
     return { success: true, order: updatedOrder, refund: refundRecord };
@@ -270,14 +412,12 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
     logger.error(`[RefundService] Refund execution failed for order ${order.id}: ${err.message}`);
 
     if (refundRecord) {
-      // We already have a refund record — update it to failed
       await repo.updateRefund(refundRecord.id, {
         razorpay_refund_id: rzpRefund ? rzpRefund.id : `FAILED_${Date.now()}`,
         status: "failed",
         failure_reason: err.message
       });
     } else {
-      // Refund record creation itself failed (rare) — create a failed record
       refundRecord = await repo.createRefund({
         order_id: order.id,
         user_id: order.user_id,
@@ -292,17 +432,14 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       });
     }
 
-    // Update order to REFUND_FAILED status
     const updatedOrder = await repo.updateOrder(order.id, {
       status: OrderStates.REFUND_FAILED,
       refund_status: "failed",
       refund_id: refundRecord.id
     });
 
-    // Restock anyway since order cancellation is approved/processed
     await restockOrderItems(order);
 
-    // Log failure audit
     await logRefundAction({
       refundId: refundRecord.id,
       orderId: order.id,
@@ -311,12 +448,10 @@ async function executeRefundProcess(order, refundAmount, initiatedBy, reason, ad
       metadata: { error: err.message, partialRefundCreated: !!rzpRefund }
     });
 
-    // If Razorpay refund was created but DB update failed, log a critical warning
     if (rzpRefund) {
       logger.error(`[RefundService] CRITICAL: Razorpay refund ${rzpRefund.id} was created but DB state is failed. Order ${order.id}. Webhook should reconcile.`);
     }
 
-    // Notify user
     await sendRefundNotification(updatedOrder, "REFUND_FAILED", { amount: refundAmount });
 
     throw new Error(`Refund initiation failed: ${err.message}`);
@@ -338,41 +473,43 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
     throw new Error(`Invalid transition from ${order.status} to CANCELLED`);
   }
 
-  // Cancel carrier shipment if one exists (pre-shipment cancellation)
   await cancelCarrierShipment(orderId, order.cancel_reason || "cancellation approved");
 
-  // Update status to CANCELLED
-  await repo.updateOrder(orderId, {
-    status: OrderStates.CANCELLED,
-    delivery_status: "cancelled",
-    fulfillment_status: null,
-    refund_status: "pending",
-    cancelled_by: "customer",
-    cancelled_at: new Date().toISOString()
-  });
-
   const auditPerformer = adminUser || "ADMIN";
-
-  await logRefundAction({
-    orderId,
-    action: "CANCEL_APPROVED",
-    performedBy: auditPerformer,
-    metadata: { adminNote, refundType: "auto" }
-  });
-
-  // Notify cancellation approval
-  await sendRefundNotification(order, "APPROVED", { amount: order.total });
-
-  const cancelledOrder = await repo.findOrderById(orderId);
-
-  // Auto-initiate gateway refund (executeRefundProcess handles restock internally)
   let refundRecord = null;
-  try {
-    const refundResult = await executeRefundProcess(order, order.total, "customer", order.cancel_reason || "approved cancellation request", adminNote, auditPerformer);
-    refundRecord = refundResult.refund;
-  } catch (refundErr) {
-    logger.error(`[RefundService] Auto-refund failed on approveCancellation for order ${order.id}: ${refundErr.message}`);
-    // Fall back to pending refund record so admin can retry manually
+
+  if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
+    await withTransaction(async (client) => {
+      const lockedOrder = await withRowLock(client, "orders", orderId);
+      if (!lockedOrder) throw new Error("Order not found");
+
+      await client.query(
+        `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, refund_status = $4, cancelled_by = $5, cancelled_at = $6, version = version + 1, updated_at = $7 WHERE id = $8 AND version = $9`,
+        [OrderStates.CANCELLED, "cancelled", null, "pending", "customer", new Date().toISOString(), new Date().toISOString(), orderId, lockedOrder.version]
+      );
+
+      refundRecord = await repo.createRefund({
+        order_id: order.id,
+        user_id: order.user_id,
+        razorpay_payment_id: order.razorpay_payment_id || null,
+        razorpay_refund_id: null,
+        amount: order.total,
+        refund_reason: order.cancel_reason || "approved cancellation request",
+        status: "pending",
+        cancelled_by: "customer",
+        admin_note: adminNote
+      });
+    });
+  } else {
+    await repo.updateOrder(orderId, {
+      status: OrderStates.CANCELLED,
+      delivery_status: "cancelled",
+      fulfillment_status: null,
+      refund_status: "pending",
+      cancelled_by: "customer",
+      cancelled_at: new Date().toISOString()
+    });
+
     try {
       refundRecord = await repo.createRefund({
         order_id: order.id,
@@ -385,16 +522,22 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
         cancelled_by: "customer",
         admin_note: adminNote
       });
-      await logRefundAction({
-        orderId: order.id,
-        action: "MANUAL_REFUND_PENDING",
-        performedBy: auditPerformer,
-        metadata: { refundRecordId: refundRecord.id, reason: "admin approved cancellation (auto-refund failed)", amount: order.total }
-      });
     } catch (createErr) {
-      logger.warn(`[RefundService] Failed to create fallback refunds table row for order ${order.id}: ${createErr.message}`);
+      logger.warn(`[RefundService] Failed to create refunds table row for order ${order.id}: ${createErr.message}`);
     }
   }
+
+  await restockOrderItems(order);
+
+  await logRefundAction({
+    orderId,
+    action: "CANCEL_APPROVED",
+    performedBy: auditPerformer,
+    metadata: { adminNote, refundType: "manual", refundRecordId: refundRecord?.id }
+  });
+
+  const cancelledOrder = await repo.findOrderById(orderId);
+  await sendRefundNotification(cancelledOrder, "APPROVED", { amount: order.total });
 
   return { success: true, order: cancelledOrder, refund: refundRecord };
 }
@@ -441,7 +584,6 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  // Block cancel after handover to carrier
   if (isWithCarrier(order)) {
     throw new Error("Order cannot be cancelled after it has been handed to the carrier. Use RTO flow instead.");
   }
@@ -449,19 +591,31 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
   const isPaid = order.status === "paid" && order.razorpay_payment_id;
   const auditPerformer = adminUser || "ADMIN";
 
-  // Cancel carrier shipment if one exists (pre-shipment cancellation)
   await cancelCarrierShipment(orderId, reason);
 
-  // Direct cancellation sets status to CANCELLED
-  const cancelledOrder = await repo.updateOrder(orderId, {
-    status: OrderStates.CANCELLED,
-    delivery_status: "cancelled",
-    fulfillment_status: null,
-    cancel_reason: reason,
-    cancelled_by: "admin",
-    cancelled_at: new Date().toISOString(),
-    refund_status: isPaid ? "pending" : "none"
-  });
+  if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
+    await withTransaction(async (client) => {
+      const lockedOrder = await withRowLock(client, "orders", orderId);
+      if (!lockedOrder) throw new Error("Order not found");
+
+      await client.query(
+        `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, cancel_reason = $4, cancelled_by = $5, cancelled_at = $6, refund_status = $7, version = version + 1, updated_at = $8 WHERE id = $9 AND version = $10`,
+        [OrderStates.CANCELLED, "cancelled", null, reason, "admin", new Date().toISOString(), isPaid ? "pending" : "none", new Date().toISOString(), orderId, lockedOrder.version]
+      );
+    });
+  } else {
+    await repo.updateOrder(orderId, {
+      status: OrderStates.CANCELLED,
+      delivery_status: "cancelled",
+      fulfillment_status: null,
+      cancel_reason: reason,
+      cancelled_by: "admin",
+      cancelled_at: new Date().toISOString(),
+      refund_status: isPaid ? "pending" : "none"
+    });
+  }
+
+  const cancelledOrder = await repo.findOrderById(orderId);
 
   await logRefundAction({
     orderId,
@@ -470,10 +624,8 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
     metadata: { reason, adminNote, refundType: "manual" }
   });
 
-  // Notify cancellation (distinct from customer-requested approval)
   await sendRefundNotification(cancelledOrder, "ADMIN_CANCELLED", { amount: order.total });
 
-  // Auto-initiate gateway refund if paid (executeRefundProcess handles restock internally)
   let refundRecord = null;
   if (isPaid) {
     try {
@@ -481,7 +633,6 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
       refundRecord = refundResult.refund;
     } catch (refundErr) {
       logger.error(`[RefundService] Auto-refund failed for admin-cancelled order ${order.id}: ${refundErr.message}`);
-      // Fall back to pending refund record so admin can retry manually
       refundRecord = await repo.createRefund({
         order_id: order.id,
         user_id: order.user_id,
@@ -499,6 +650,12 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
         performedBy: auditPerformer,
         metadata: { refundRecordId: refundRecord.id, reason, amount: order.total }
       });
+    }
+  } else if (order.items && order.items.length > 0) {
+    try {
+      await restockOrderItems(order);
+    } catch (restockErr) {
+      logger.warn(`[RefundService] Restock failed for cancelled order ${order.id}: ${restockErr.message}`);
     }
   }
 
@@ -584,6 +741,13 @@ async function runAutoRefundSweep() {
         }
 
         if (isPaidOnGateway) {
+          // Re-read order from DB to avoid race with concurrent sweep/webhook
+          const freshOrder = await repo.findOrderById(order.id);
+          if (!freshOrder || freshOrder.status !== "pending") {
+            logger.info(`[AutoRefundEngine] Order ${order.id} already processed by another path, skipping.`);
+            continue;
+          }
+
           logger.warn(`[AutoRefundEngine] ORPHAN DETECTED: Order ${order.id} is paid on Razorpay but pending in DB!`);
 
           // Execute automatic recovery refund
@@ -642,7 +806,7 @@ async function progressManualRefundStep(orderId, targetStep, adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
 
-  const cancelledStatuses = ['cancelled', 'self_cancelled', 'admin_rejected', 'CANCEL_APPROVED', 'CANCEL_REJECTED'];
+  const cancelledStatuses = ['cancelled', 'self_cancelled', 'admin_rejected', 'REFUND_FAILED', 'CANCEL_APPROVED', 'CANCEL_REJECTED', 'REFUND_PENDING', 'REFUND_INITIATED', 'REFUND_PROCESSING'];
   if (!cancelledStatuses.includes(order.status)) {
     throw new Error(`Manual refund can only be processed on cancelled orders. Current status: ${order.status}`);
   }

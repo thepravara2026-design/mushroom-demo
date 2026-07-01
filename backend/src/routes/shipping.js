@@ -20,15 +20,16 @@ router.get('/all', authMiddleware, async (req, res) => {
 
     if (!shipments) return success(res, []);
 
-    // Enrich with customer name from orders
-    const enriched = await Promise.all(shipments.map(async (s) => {
+    // Enrich with customer name from orders (bounded concurrency to avoid pool exhaustion)
+    const enriched = [];
+    for (const s of shipments) {
       const { data: order } = await db
         .from('orders')
         .select('customer_name, delivery_phone')
         .eq('id', s.order_id)
         .single();
-      return { ...s, customer_name: order?.customer_name || '', delivery_phone: order?.delivery_phone || '' };
-    }));
+      enriched.push({ ...s, customer_name: order?.customer_name || '', delivery_phone: order?.delivery_phone || '' });
+    }
 
     return success(res, enriched);
   } catch (error) {
@@ -78,7 +79,7 @@ router.post('/create', authMiddleware, async (req, res) => {
     const { orderId, weight, cod } = req.body;
     if (!orderId) return respondError(res, 'orderId is required', 400);
 
-    const { data: order } = await db
+    const { data: order } = await req.db
       .from('orders')
       .select('*, user_id')
       .eq('id', orderId)
@@ -95,7 +96,7 @@ router.post('/create', authMiddleware, async (req, res) => {
     const provider = await getDefaultProvider();
     if (!provider) return respondError(res, 'No active shipping provider configured', 503);
 
-    const { data: providerRecord } = await db
+    const { data: providerRecord } = await req.db
       .from('shipping_providers')
       .select('id')
       .eq('provider_key', provider.provider.provider_key)
@@ -148,7 +149,7 @@ router.post('/create', authMiddleware, async (req, res) => {
 
     const providerShipmentId = shipmentResult.shipment_id ? String(shipmentResult.shipment_id) : null;
 
-    const { data: shipment } = await db
+    const { data: shipment } = await req.db
       .from('shipments')
       .insert({
         order_id: order.id,
@@ -176,7 +177,7 @@ router.post('/create', authMiddleware, async (req, res) => {
 
     // Link shipment to order
     if (shipment) {
-      await db.from('orders').update({
+      await req.db.from('orders').update({
         shipment_id: shipment.id,
         shipment_awb: awbResult?.awb_code || null,
         shipment_courier: awbResult?.courier_name || null,
@@ -202,7 +203,7 @@ router.get('/track/:orderId', authMiddleware, async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const { data: order } = await db
+    const { data: order } = await req.db
       .from('orders')
       .select('*')
       .eq('id', orderId)
@@ -216,7 +217,9 @@ router.get('/track/:orderId', authMiddleware, async (req, res) => {
       return respondError(res, 'Access denied', 403);
     }
 
-    const { data: shipment } = await db
+    const trackDb = isAdmin ? db : req.db;
+
+    const { data: shipment } = await trackDb
       .from('shipments')
       .select('*, shipping_provider_id')
       .eq('order_id', orderId)
@@ -229,7 +232,7 @@ router.get('/track/:orderId', authMiddleware, async (req, res) => {
     let trackingEvents = [];
     let awbTracking = null;
 
-    const { data: events } = await db
+    const { data: events } = await trackDb
       .from('shipment_tracking_events')
       .select('*')
       .eq('shipment_id', shipment.id)
@@ -377,13 +380,14 @@ router.get('/ndr-shipments', authMiddleware, async (req, res) => {
 
     if (!shipments || shipments.length === 0) return success(res, []);
 
-    const enriched = await Promise.all(shipments.map(async (s) => {
+    const enriched = [];
+    for (const s of shipments) {
       const { data: order } = await db
         .from('orders')
         .select('customer_name, delivery_phone, delivery_address, id, total, status, delivery_status, fulfillment_status')
         .eq('id', s.order_id)
         .single();
-      return {
+      enriched.push({
         ...s,
         customer_name: order?.customer_name || '',
         delivery_phone: order?.delivery_phone || '',
@@ -392,8 +396,8 @@ router.get('/ndr-shipments', authMiddleware, async (req, res) => {
         order_status: order?.status || '',
         order_delivery_status: order?.delivery_status || '',
         order_fulfillment_status: order?.fulfillment_status || '',
-      };
-    }));
+      });
+    }
 
     return success(res, enriched);
   } catch (error) {

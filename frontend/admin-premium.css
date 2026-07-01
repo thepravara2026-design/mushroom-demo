@@ -2186,6 +2186,28 @@
   color: #9ca3af;
 }
 
+/* ── Categories capsule (inside Products tab) ──────────────── */
+.admin-categories-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.admin-categories-layout .admin-cat-form-wrap {
+  background: var(--color-bg-secondary, #1a2332);
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 12px;
+  padding: 20px;
+}
+.admin-categories-layout .admin-categories-list-col {
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .admin-categories-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Admin Categories list/blogs list ─────────────────────── */
 .admin-categories-wrap,
 .admin-blogs-wrap {

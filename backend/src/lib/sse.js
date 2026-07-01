@@ -12,18 +12,32 @@ function addSseSubscriber(req, res, user = null) {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
-
   });
   res.write("\n");
 
   // Keep connection alive
   const pingInterval = setInterval(() => {
-    res.write(":\n\n");
+    try {
+      if (res.destroyed || res.writableEnded) {
+        clearInterval(pingInterval);
+        return;
+      }
+      res.write(":\n\n");
+    } catch (err) {
+      logger.warn(`[SSE] Ping failed for subscriber ${resId}: ${err.message}`);
+      clearInterval(pingInterval);
+    }
   }, 30000);
 
   const unsubscribe = () => {
     clearInterval(pingInterval);
-    res.end();
+    try {
+      if (!res.writableEnded && !res.destroyed) {
+        res.end();
+      }
+    } catch (e) {
+      // ignore
+    }
     if (subscribers.has(resId)) {
       subscribers.delete(resId);
     }
@@ -39,7 +53,16 @@ function addSseSubscriber(req, res, user = null) {
 
   logger.info(`[SSE] New subscriber ${resId} added${user ? ` for user ${user.userId}` : " (anonymous)"}`);
 
-  // Don't send any initial data unless explicitly needed
+  res.on("error", (err) => {
+    logger.warn(`[SSE] Response stream error for subscriber ${resId}: ${err.message}`);
+    unsubscribe();
+  });
+
+  req.on("error", (err) => {
+    logger.warn(`[SSE] Request stream error for subscriber ${resId}: ${err.message}`);
+    unsubscribe();
+  });
+
   req.on("close", () => {
     unsubscribe();
   });

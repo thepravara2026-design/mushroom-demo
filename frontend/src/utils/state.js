@@ -24,6 +24,7 @@ export const state = {
   shippingCharge: 0,
   activeTrackingId: null,
   activeCategory: 'all',
+  cartTotal: 0,
 };
 
 export function saveAuth(token, user) {

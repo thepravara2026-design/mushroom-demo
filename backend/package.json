@@ -22,6 +22,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^9.0.1",
     "pg": "^8.21.0",
+    "pg-boss": "^12.24.1",
     "razorpay": "^2.9.2",
     "twilio": "^6.0.2",
     "winston": "^3.19.0",
@@ -37,6 +38,8 @@
     "roots": [
       "<rootDir>/tests"
     ],
-    "setupFiles": ["<rootDir>/jest.setup.js"]
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ]
   }
 }

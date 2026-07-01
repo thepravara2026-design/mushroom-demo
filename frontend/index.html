@@ -246,7 +246,7 @@
       <div class="topbar-search" id="topbar-search-wrap">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input type="text" id="shop-search" placeholder="Search for mushrooms, spawn seeds..." autocomplete="off" />
-        <button class="search-btn">
+        <button class="search-btn" aria-label="Search products">
           <i class="fa-solid fa-magnifying-glass"></i>
         </button>
         <div id="search-suggestions-dropdown" class="search-suggestions-dropdown hidden"></div>
@@ -566,6 +566,9 @@
           <button class="tr-tab" data-tab="completed">
             <i class="fa-solid fa-check-circle"></i> Completed Training
           </button>
+          <button class="tr-tab" data-tab="enrollments-v2">
+            <i class="fa-solid fa-user-graduate"></i> My Enrollments
+          </button>
         </div>
 
         <div class="tr-tab-content active" id="tr-content-future">
@@ -607,6 +610,21 @@
                 <i class="fa-solid fa-check-double"></i>
                 <h4>No completed training yet</h4>
                 <p>Your completed courses will appear here once you finish them.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tr-tab-content" id="tr-content-enrollments-v2">
+          <div class="tr-content-inner">
+            <div class="tr-section-header">
+              <h3><i class="fa-solid fa-user-graduate"></i> My Enrollments (v2)</h3>
+            </div>
+            <div id="tr-my-enrollments-v2">
+              <div class="tr-empty-state">
+                <i class="fa-solid fa-graduation-cap"></i>
+                <h4>No enrollments yet</h4>
+                <p>Register for a batch to see your enrollments here.</p>
               </div>
             </div>
           </div>
@@ -747,7 +765,7 @@
       <div class="training-inner">
         <!-- Left: Video/Image -->
         <div class="training-media">
-          <img src="/images/mushroom.png" alt="Mushroom Cultivation Training" id="training-farm-img" />
+          <img src="/images/training_farm.png" alt="Mushroom Cultivation Training" id="training-farm-img" />
           <video id="training-farm-video" controls
             style="display:none;width:100%;height:100%;border-radius:12px;background:#000;aspect-ratio:1/1;object-fit:cover;"
             preload="metadata"></video>
@@ -1204,6 +1222,55 @@
     </div>
 
     <!-- ============================================================
+       HOMEPAGE MUSHROOM CAROUSEL
+   ============================================================ -->
+    <section class="carousel-section section-wrap" id="mushroom-carousel-section">
+      <div class="section-header-center">
+        <div class="section-label">
+          <i class="fa-solid fa-seedling"></i> Our Mushroom Varieties
+        </div>
+        <h2 class="section-title">Explore Our Range</h2>
+      </div>
+      <div class="carousel-container">
+        <div class="carousel-viewport">
+          <div class="carousel-track" id="carousel-track">
+            <div class="carousel-slide active">
+              <img src="/images/hero_mushroom.png" alt="Fresh Oyster Mushrooms" loading="lazy" />
+              <div class="carousel-caption">
+                <span class="carousel-caption-tag">Fresh Mushrooms</span>
+                <h3>Oyster Mushrooms</h3>
+                <p>Premium quality fresh oyster mushrooms, handpicked and packed with care.</p>
+              </div>
+            </div>
+            <div class="carousel-slide">
+              <img src="/images/product_dry.png" alt="Dried Mushrooms" loading="lazy" />
+              <div class="carousel-caption">
+                <span class="carousel-caption-tag">Dried Mushrooms</span>
+                <h3>Natural Dried Mushrooms</h3>
+                <p>100% natural sun-dried mushrooms, rich in flavor and nutrition.</p>
+              </div>
+            </div>
+            <div class="carousel-slide">
+              <img src="/images/product_spawn.png" alt="Mushroom Spawn Seeds" loading="lazy" />
+              <div class="carousel-caption">
+                <span class="carousel-caption-tag">Spawn Seeds</span>
+                <h3>Quality Spawn Seeds</h3>
+                <p>Lab-tested spawn seeds for high-yield mushroom cultivation.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="carousel-arrow carousel-arrow-left" id="carousel-prev" aria-label="Previous slide">
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <button class="carousel-arrow carousel-arrow-right" id="carousel-next" aria-label="Next slide">
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+        <div class="carousel-dots" id="carousel-dots"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================
        SUCCESS STORIES SECTION
    ============================================================ -->
     <section class="success-section" id="success-section">
@@ -1386,33 +1453,35 @@
   </div>
   <!-- END SHOP PAGE -->
 
-  <!-- ============================================================
-       TRACKER PAGE WRAPPER (Dynamic SPA Page Section)
-  ============================================================ -->
-  <div id="tracker-page" class="page-section container"
-    style="max-width: var(--max-w); margin: 40px auto; padding: 40px 24px">
-    <h2 style="
-          font-family: var(--font-head);
-          margin-bottom: 24px;
-          color: var(--text-dark);
-        ">
-      <i class="fa-solid fa-seedling" style="color: var(--green-mid)"></i>
-      Mycelium Incubator Log
-    </h2>
-    <div class="tracker-layout">
-      <div id="orders-list"></div>
-      <div id="tracking-details-panel">
-        <div class="tracker-empty-state">
-          <i class="fa-solid fa-cubes-stacked"></i>
-          <p>
-            Select a cultivation run from the sidebar to inspect mycelium
-            colonization status.
-          </p>
+  <div id="tracker-page" class="page-section"
+    style="background: linear-gradient(160deg, #0a1410 0%, #0d1f17 50%, #0a1210 100%); min-height: 100vh; padding: 32px 24px 60px;">
+    <div style="max-width: var(--max-w); margin: 0 auto;">
+      <!-- Tracker header -->
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:24px; padding-bottom:18px; border-bottom:1px solid rgba(56,177,123,0.12);">
+        <div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#1a7a52,#38b17b);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;box-shadow:0 6px 18px rgba(56,177,123,0.3);">
+          <i class="fa-solid fa-seedling"></i>
         </div>
-        <div class="tracker-active-state hidden" id="tracker-active-view"></div>
+        <div>
+          <div style="font-size:0.65rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(94,216,160,0.7);margin-bottom:2px;">Order Management</div>
+          <h2 style="margin:0;font-family:var(--font-head);font-size:1.4rem;color:#e8f5ee;line-height:1.1;">Mycelium Incubator Log</h2>
+        </div>
+      </div>
+      <div class="tracker-layout">
+        <div id="orders-list"></div>
+        <div id="tracking-details-panel">
+          <div class="tracker-empty-state">
+            <i class="fa-solid fa-cubes-stacked"></i>
+            <p style="color:rgba(180,210,190,0.5);font-size:0.9rem;margin-top:12px;">
+              Select a cultivation run from the sidebar to inspect mycelium
+              colonization status.
+            </p>
+          </div>
+          <div class="tracker-active-state hidden" id="tracker-active-view"></div>
+        </div>
       </div>
     </div>
   </div>
+
   <!-- ============================================================
       about section
   ============================================================ -->
@@ -1990,43 +2059,11 @@
       </button>
       <div class="auth-container">
 
-        <!-- VIEW 1: Trainee Login — Method Selection -->
+        <!-- VIEW 1: Trainee Login — Phone Input + Google Auth -->
         <div id="trainee-login-view" class="auth-form-panel">
           <div class="auth-logo"><i class="fa-solid fa-graduation-cap"></i></div>
           <h3>Trainee Access</h3>
-          <p class="auth-subtitle">Choose how you'd like to login</p>
-          <div class="auth-methods-list">
-            <!-- Phone OTP -->
-            <button class="auth-method-btn" id="btn-trainee-phone">
-              <i class="fa-solid fa-mobile-screen" style="color:#25d366"></i>
-              <div>
-                <strong>Phone OTP</strong>
-                <span>Verify with your mobile number</span>
-              </div>
-              <i class="fa-solid fa-chevron-right auth-method-arrow"></i>
-            </button>
-            <!-- Email OTP -->
-            <button class="auth-method-btn" id="btn-trainee-email">
-              <i class="fa-solid fa-envelope" style="color:#38b17b"></i>
-              <div>
-                <strong>Email OTP</strong>
-                <span>Get a code to your email</span>
-              </div>
-              <i class="fa-solid fa-chevron-right auth-method-arrow"></i>
-            </button>
-          </div>
-          <div class="auth-error-msg hidden" id="trainee-login-error"></div>
-          <p class="auth-toggle-link">
-            Not registered yet?
-            <a href="#" id="link-trainee-to-signup">Register as Trainee →</a>
-          </p>
-        </div>
-
-        <!-- VIEW 1b: Trainee Phone OTP -->
-        <div id="trainee-phone-view" class="auth-form-panel hidden">
-          <div class="auth-logo"><i class="fa-solid fa-mobile-screen"></i></div>
-          <h3>Phone Login</h3>
-          <p class="auth-subtitle">We'll send a 6-digit OTP to your number</p>
+          <p class="auth-subtitle">Enter your mobile number to continue</p>
           <form id="trainee-phone-form">
             <div class="input-field">
               <label><i class="fa-solid fa-phone"></i> Mobile Number</label>
@@ -2042,28 +2079,16 @@
               </div>
             </div>
             <div class="auth-error-msg hidden" id="trainee-phone-error"></div>
-            <button type="submit" class="btn btn-primary btn-block">Send OTP</button>
+            <button type="submit" class="btn btn-primary btn-block">Continue</button>
           </form>
+          <div class="auth-divider"><span>or</span></div>
+          <button class="btn btn-outline btn-block" id="btn-trainee-google">
+            <i class="fa-brands fa-google" style="color:#4285F4"></i> Sign in with Google
+          </button>
+          <div class="auth-error-msg hidden" id="trainee-login-error"></div>
           <p class="auth-toggle-link">
-            <a href="#" id="link-trainee-back-phone">← Back to login options</a>
-          </p>
-        </div>
-
-        <!-- VIEW 1c: Trainee Email OTP request -->
-        <div id="trainee-email-request-view" class="auth-form-panel hidden">
-          <div class="auth-logo"><i class="fa-solid fa-envelope"></i></div>
-          <h3>Email Login</h3>
-          <p class="auth-subtitle">We'll send a secure code to your inbox</p>
-          <form id="trainee-email-form">
-            <div class="input-field">
-              <label><i class="fa-solid fa-envelope"></i> Email Address</label>
-              <input type="email" id="trainee-email-input" required placeholder="you@example.com" />
-            </div>
-            <div class="auth-error-msg hidden" id="trainee-email-error"></div>
-            <button type="submit" class="btn btn-primary btn-block">Get Access Code</button>
-          </form>
-          <p class="auth-toggle-link">
-            <a href="#" id="link-trainee-back-email">← Back to login options</a>
+            Not registered yet?
+            <a href="#" id="link-trainee-to-signup">Register as Trainee →</a>
           </p>
         </div>
 
@@ -2329,7 +2354,7 @@
 
         <div class="input-group">
           <label for="checkout-delivery-email">Email Address</label>
-          <input type="email" id="checkout-delivery-email" placeholder="Enter your email address" />
+          <input type="text" id="checkout-delivery-email" placeholder="Enter your email address" />
           <span class="input-error-msg" id="error-checkout-delivery-email"></span>
         </div>
 
@@ -2359,15 +2384,13 @@
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
           <div class="input-group">
-            <label for="checkout-state">State <span style="color:var(--color-danger)">*</span></label>
-            <select id="checkout-state"
-              style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+            <label for="checkout-state">State <span style="color:#ef4444">*</span></label>
+            <select id="checkout-state" class="co-select"></select>
             <span class="input-error-msg" id="error-checkout-state"></span>
           </div>
           <div class="input-group">
-            <label for="checkout-city">City <span style="color:var(--color-danger)">*</span></label>
-            <select id="checkout-city"
-              style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; background: #fff; color: var(--color-text-dark);"></select>
+            <label for="checkout-city">City <span style="color:#ef4444">*</span></label>
+            <select id="checkout-city" class="co-select"></select>
             <span class="input-error-msg" id="error-checkout-city"></span>
           </div>
         </div>

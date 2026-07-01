@@ -712,7 +712,176 @@ CREATE POLICY "Anyone can view active shipping providers"
   USING (is_active = true);
 
 -- ============================================================
--- 7. SET ADMIN ROLE IN SUPABASE AUTH (run once per admin user)
+-- 7. GROWER TRAINING V2 TABLES
+-- ============================================================
+
+-- Training Batches (scheduled cohorts linked to a course)
+CREATE TABLE IF NOT EXISTS training_batches (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  training_id TEXT NOT NULL REFERENCES trainings(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  start_date TIMESTAMPTZ NOT NULL,
+  end_date TIMESTAMPTZ NOT NULL,
+  capacity INTEGER NOT NULL CHECK (capacity > 0),
+  seats_taken INTEGER DEFAULT 0 CHECK (seats_taken >= 0),
+  price_actual NUMERIC(10,2) NOT NULL,
+  price_strikeout NUMERIC(10,2),
+  instructor TEXT,
+  location TEXT,
+  meeting_link TEXT,
+  cancellation_cutoff_days INTEGER DEFAULT 3 CHECK (cancellation_cutoff_days >= 0),
+  status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming', 'active', 'completed', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Training Enrollments (tracks grower registrations per batch)
+CREATE TABLE IF NOT EXISTS training_enrollments (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  batch_id TEXT NOT NULL REFERENCES training_batches(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'pending_payment' CHECK (status IN ('pending_payment', 'confirmed', 'cancelled', 'refunded')),
+  role TEXT,
+  attendance TEXT CHECK (attendance IN ('present', 'no_show')),
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  UNIQUE(batch_id, user_id)
+);
+
+-- Training Payments (links Razorpay orders to enrollments)
+CREATE TABLE IF NOT EXISTS training_payments (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  enrollment_id TEXT NOT NULL REFERENCES training_enrollments(id) ON DELETE CASCADE,
+  razorpay_order_id TEXT,
+  razorpay_payment_id TEXT,
+  amount NUMERIC(10,2) NOT NULL,
+  status TEXT DEFAULT 'created' CHECK (status IN ('created', 'paid', 'refunded', 'failed')),
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Training Refunds (tracks automated Razorpay refunds)
+CREATE TABLE IF NOT EXISTS training_refunds (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  payment_id TEXT NOT NULL REFERENCES training_payments(id) ON DELETE CASCADE,
+  razorpay_refund_id TEXT,
+  amount NUMERIC(10,2) NOT NULL,
+  status TEXT DEFAULT 'initiated' CHECK (status IN ('initiated', 'processed', 'failed')),
+  reason TEXT,
+  initiated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  processed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Training Offers (coupons scoped to training / batch)
+CREATE TABLE IF NOT EXISTS training_offers (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  training_id TEXT REFERENCES trainings(id) ON DELETE CASCADE,
+  batch_id TEXT REFERENCES training_batches(id) ON DELETE CASCADE,
+  coupon_code TEXT NOT NULL,
+  discount_type TEXT NOT NULL CHECK (discount_type IN ('percentage', 'fixed')),
+  discount_value NUMERIC(10,2) NOT NULL,
+  max_uses INTEGER DEFAULT 0,
+  current_uses INTEGER DEFAULT 0,
+  valid_from TIMESTAMPTZ,
+  valid_until TIMESTAMPTZ,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Admin Action Logs (audit trail for admin overrides)
+CREATE TABLE IF NOT EXISTS admin_action_logs (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  admin_id TEXT NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT,
+  reason TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- RLS for training tables
+ALTER TABLE training_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE training_enrollments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE training_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE training_refunds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE training_offers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_action_logs ENABLE ROW LEVEL SECURITY;
+
+-- Public can read upcoming/active batches
+DROP POLICY IF EXISTS "Public can view active training batches" ON training_batches;
+CREATE POLICY "Public can view active training batches"
+  ON training_batches FOR SELECT
+  USING (status IN ('upcoming', 'active'));
+
+-- Users view own enrollments
+DROP POLICY IF EXISTS "Users view own training enrollments" ON training_enrollments;
+CREATE POLICY "Users view own training enrollments"
+  ON training_enrollments FOR SELECT
+  USING (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Users create own training enrollments" ON training_enrollments;
+CREATE POLICY "Users create own training enrollments"
+  ON training_enrollments FOR INSERT
+  WITH CHECK (auth.uid()::text = user_id);
+
+-- Users view own payments
+DROP POLICY IF EXISTS "Users view own training payments" ON training_payments;
+CREATE POLICY "Users view own training payments"
+  ON training_payments FOR SELECT
+  USING (auth.uid()::text IN (SELECT te.user_id FROM training_enrollments te WHERE te.id = enrollment_id));
+
+-- Users view own refunds
+DROP POLICY IF EXISTS "Users view own training refunds" ON training_refunds;
+CREATE POLICY "Users view own training refunds"
+  ON training_refunds FOR SELECT
+  USING (auth.uid()::text IN (SELECT te.user_id FROM training_payments tp JOIN training_enrollments te ON te.id = tp.enrollment_id WHERE tp.id = payment_id));
+
+-- Admins manage all training tables
+DROP POLICY IF EXISTS "Admins manage training batches" ON training_batches;
+CREATE POLICY "Admins manage training batches"
+  ON training_batches FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Admins manage training enrollments" ON training_enrollments;
+CREATE POLICY "Admins manage training enrollments"
+  ON training_enrollments FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Admins manage training payments" ON training_payments;
+CREATE POLICY "Admins manage training payments"
+  ON training_payments FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Admins manage training refunds" ON training_refunds;
+CREATE POLICY "Admins manage training refunds"
+  ON training_refunds FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Admins manage training offers" ON training_offers;
+CREATE POLICY "Admins manage training offers"
+  ON training_offers FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+DROP POLICY IF EXISTS "Admins manage action logs" ON admin_action_logs;
+CREATE POLICY "Admins manage action logs"
+  ON admin_action_logs FOR ALL
+  USING (auth.jwt() ->> 'role' = 'admin');
+
+-- Indexes for training tables
+CREATE INDEX IF NOT EXISTS idx_training_batches_training ON training_batches(training_id);
+CREATE INDEX IF NOT EXISTS idx_training_batches_status ON training_batches(status);
+CREATE INDEX IF NOT EXISTS idx_training_batches_start ON training_batches(start_date);
+CREATE INDEX IF NOT EXISTS idx_training_enrollments_batch ON training_enrollments(batch_id);
+CREATE INDEX IF NOT EXISTS idx_training_enrollments_user ON training_enrollments(user_id);
+CREATE INDEX IF NOT EXISTS idx_training_enrollments_status ON training_enrollments(status);
+CREATE INDEX IF NOT EXISTS idx_training_payments_enrollment ON training_payments(enrollment_id);
+CREATE INDEX IF NOT EXISTS idx_training_refunds_payment ON training_refunds(payment_id);
+CREATE INDEX IF NOT EXISTS idx_admin_action_logs_target ON admin_action_logs(target_type, target_id);
+
+-- ============================================================
+-- 8. SET ADMIN ROLE IN SUPABASE AUTH (run once per admin user)
 -- Replace the email below with your actual admin email.
 -- ============================================================
 -- UPDATE auth.users

@@ -27,6 +27,11 @@ const EVENT_CHANNELS = {
   REFUND_COMPLETED:        { email: true, sms: true,  whatsapp: true,  in_app: true },
   MANUAL_REFUND_INITIATED: { email: true, sms: false, whatsapp: false, in_app: true },
   MANUAL_REFUND_COMPLETED: { email: true, sms: true,  whatsapp: true,  in_app: true },
+  // ── Grower Training v2 ──
+  TRAINING_CONFIRMED:  { email: true, sms: true,  whatsapp: true,  in_app: true },
+  TRAINING_CANCELLED:  { email: true, sms: true,  whatsapp: false, in_app: true },
+  TRAINING_REFUNDED:   { email: true, sms: true,  whatsapp: true,  in_app: true },
+  TRAINING_REMINDER:   { email: true, sms: false, whatsapp: false, in_app: true },
 };
 
 // ── Subject Lines ──
@@ -51,6 +56,11 @@ const EMAIL_SUBJECTS = {
   REFUND_COMPLETED:        'Refund Completed — Sporekart',
   MANUAL_REFUND_INITIATED: 'Manual Refund Initiated — Sporekart',
   MANUAL_REFUND_COMPLETED: 'Manual Refund Completed — Sporekart',
+  // ── Grower Training v2 ──
+  TRAINING_CONFIRMED:  'Training Registration Confirmed — Sporekart',
+  TRAINING_CANCELLED:  'Training Cancellation Confirmed — Sporekart',
+  TRAINING_REFUNDED:   'Training Refund Completed — Sporekart',
+  TRAINING_REMINDER:   'Training Reminder — Sporekart',
 };
 
 // ── Transport (lazy singleton) ──
@@ -101,6 +111,11 @@ function buildEmailHtml(eventType, order, metadata) {
     REFUND_COMPLETED:        `Your refund of ₹${Number(total).toFixed(2)} has been completed.`,
     MANUAL_REFUND_INITIATED: 'A manual refund has been initiated for your order. We will notify you once it is completed.',
     MANUAL_REFUND_COMPLETED: `Your manual refund of ₹${Number(total).toFixed(2)} has been completed.`,
+    // ── Grower Training v2 ──
+    TRAINING_CONFIRMED:  `Your training "${metadata.batchTitle || ''}" has been confirmed! ${metadata.location ? `Location: ${metadata.location}` : ''} ${metadata.meetingLink ? `Join: ${metadata.meetingLink}` : ''}`,
+    TRAINING_CANCELLED:  `Your training "${metadata.batchTitle || ''}" has been cancelled. A refund will be processed shortly.`,
+    TRAINING_REFUNDED:   `Your refund of ₹${Number(total).toFixed(2)} for training "${metadata.batchTitle || ''}" has been completed. Refund ID: ${metadata.refundId || ''}`,
+    TRAINING_REMINDER:   `Reminder: Your training "${metadata.batchTitle || ''}" starts ${metadata.startDate ? `on ${metadata.startDate}` : 'soon'}! ${metadata.location ? `Location: ${metadata.location}` : ''} ${metadata.meetingLink ? `Join: ${metadata.meetingLink}` : ''}`,
   };
 
   const message = statusMessages[eventType] || 'Your order has been updated.';
@@ -173,6 +188,11 @@ function buildSmsMessage(eventType, order, metadata) {
     REFUND_FAILED:           `Refund for Order #${orderId} encountered an issue. We'll contact you shortly. — Sporekart`,
     REFUND_COMPLETED:        `Refund of ₹${Number(total).toFixed(2)} for Order #${orderId} has been completed! — Sporekart`,
     MANUAL_REFUND_COMPLETED: `Manual refund of ₹${Number(total).toFixed(2)} for Order #${orderId} has been completed! — Sporekart`,
+    // ── Grower Training v2 ──
+    TRAINING_CONFIRMED:  `Training "${metadata.batchTitle || ''}" confirmed! ${metadata.location ? `Venue: ${metadata.location}` : ''} — Sporekart`,
+    TRAINING_CANCELLED:  `Training "${metadata.batchTitle || ''}" cancelled. Refund will be processed shortly. — Sporekart`,
+    TRAINING_REFUNDED:   `Refund of ₹${Number(total).toFixed(2)} for training "${metadata.batchTitle || ''}" completed! — Sporekart`,
+    TRAINING_REMINDER:   `Reminder: "${metadata.batchTitle || ''}" starts ${metadata.startDate || 'soon'}! — Sporekart`,
   };
 
   return messages[eventType] || `Order #${orderId} has been updated. Check Sporekart for details.`;
@@ -198,6 +218,11 @@ function buildWhatsAppMessage(eventType, order, metadata) {
     REFUND_INITIATED:  `🔄 *Refund Initiated*\n\nRefund of ${amountStr} for Order #${shortId} has been initiated. 3-7 business days to reflect.`,
     REFUND_COMPLETED:  `💰 *Refund Completed*\n\nRefund of ${amountStr} for Order #${shortId} has been completed!`,
     MANUAL_REFUND_COMPLETED: `💰 *Manual Refund Completed*\n\nManual refund of ${amountStr} for Order #${shortId} has been completed!`,
+    // ── Grower Training v2 ──
+    TRAINING_CONFIRMED:  `✅ *Training Confirmed*\n\n"${metadata.batchTitle || ''}" is confirmed! ${metadata.location ? `\n📍 ${metadata.location}` : ''}${metadata.meetingLink ? `\n🔗 ${metadata.meetingLink}` : ''}`,
+    TRAINING_CANCELLED:  `❌ *Training Cancelled*\n\n"${metadata.batchTitle || ''}" has been cancelled. Refund will be processed shortly.`,
+    TRAINING_REFUNDED:   `💰 *Training Refund Completed*\n\nRefund of ${amountStr} for "${metadata.batchTitle || ''}" has been completed. Ref ID: ${metadata.refundId || ''}`,
+    TRAINING_REMINDER:   `📅 *Training Reminder*\n\n"${metadata.batchTitle || ''}" starts ${metadata.startDate ? `on ${metadata.startDate}` : 'soon'}! ${metadata.location ? `📍 ${metadata.location}` : ''}${metadata.meetingLink ? `\n🔗 ${metadata.meetingLink}` : ''}`,
   };
 
   return messages[eventType] || `Order #${shortId} updated. Check Sporekart app for details.`;

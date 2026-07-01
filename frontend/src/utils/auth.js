@@ -33,8 +33,11 @@ export function createEventSourceWithAuth(url, token) {
   let abortController = new AbortController();
   let reconnectTimeout = null;
   let reader = null;
+  let isClosed = false;
 
   async function connect() {
+    if (isClosed) return;
+    let shouldReconnect = false;
     try {
       const response = await fetch(url, {
         headers: {
@@ -45,6 +48,7 @@ export function createEventSourceWithAuth(url, token) {
       });
       if (!response.ok) {
         eventTarget.dispatchEvent(new CustomEvent('error', { detail: { status: response.status } }));
+        shouldReconnect = true;
         return;
       }
       reader = response.body.getReader();
@@ -71,8 +75,14 @@ export function createEventSourceWithAuth(url, token) {
           }
         }
       }
+      // Stream ended normally (e.g. server restarted and closed connection)
+      shouldReconnect = true;
     } catch (err) {
       if (err.name !== 'AbortError') {
+        shouldReconnect = true;
+      }
+    } finally {
+      if (shouldReconnect && !isClosed) {
         reconnectTimeout = setTimeout(connect, 3000);
       }
     }
@@ -83,6 +93,7 @@ export function createEventSourceWithAuth(url, token) {
   eventTarget.addEventListener = eventTarget.addEventListener.bind(eventTarget);
   eventTarget.removeEventListener = eventTarget.removeEventListener.bind(eventTarget);
   eventTarget.close = () => {
+    isClosed = true;
     if (reconnectTimeout) clearTimeout(reconnectTimeout);
     abortController.abort();
     abortController = new AbortController();

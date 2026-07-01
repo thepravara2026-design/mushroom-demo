@@ -142,6 +142,23 @@ function initAdminSse() {
         console.warn(e);
       }
     });
+    adminEs.addEventListener('return:updated', (ev) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        if (state.user?.role === 'admin') {
+          const returnsPanel = document.getElementById('ship-panel-returns');
+          if (returnsPanel?.classList.contains('active')) {
+            loadReturnsDashboard();
+          }
+          const ret = payload.return;
+          if (ret) {
+            showSuccessToast(`\u{1F504} Return ${ret.status || 'updated'} for order ${(ret.order_id || '').substring(0, 8).toUpperCase()}`);
+          }
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    });
     adminEs.addEventListener('error', () => {
       // noop; BroadcastChannel remains as fallback
     });
@@ -151,9 +168,13 @@ function initAdminSse() {
         const payload = JSON.parse(ev.data || '{}');
         if (state.user?.role === 'admin') {
           fetchAdminOrders();
-          const refundsContent = document.getElementById('admin-content-refunds');
-          if (refundsContent?.classList.contains('active')) {
+          const refundsPanel = document.getElementById('ship-panel-refunds');
+          if (refundsPanel?.classList.contains('active')) {
             loadRefundsDashboard();
+          }
+          const returnsPanel = document.getElementById('ship-panel-returns');
+          if (returnsPanel?.classList.contains('active')) {
+            loadReturnsDashboard();
           }
           const refund = payload.refund;
           if (refund) {
@@ -205,7 +226,9 @@ function showDashboard() {
     initAdminSse();
 
     if (pendingCategoryEditId) {
-      activateAdminTab('categories');
+      activateAdminTab('products');
+      _activeCapsule = 'categories';
+      renderAdminInventory();
       adminEditCategory(pendingCategoryEditId);
       pendingCategoryEditId = null;
     }
@@ -609,10 +632,14 @@ function renderAdminInventory() {
 
   const afBar = document.querySelector('#admin-content-products .af-bar');
   const capsuleForm = document.getElementById('admin-capsule-add-form');
+  const capsuleCategories = document.getElementById('admin-capsule-categories');
+  const capsuleInventory = document.getElementById('admin-capsule-inventory');
 
   // ── Add Product capsule ────────────────────────
   if (_activeCapsule === 'add-product') {
     if (afBar) afBar.style.display = 'none';
+    if (capsuleCategories) capsuleCategories.style.display = 'none';
+    if (capsuleInventory) capsuleInventory.style.display = 'none';
     if (capsuleForm) {
       capsuleForm.style.display = 'block';
       populateCapsuleCategorySelect();
@@ -621,9 +648,31 @@ function renderAdminInventory() {
     return;
   }
 
-  // ── Show grid + filter bar, hide inline form ───
+  // ── Categories capsule ─────────────────────────
+  if (_activeCapsule === 'categories') {
+    if (afBar) afBar.style.display = 'none';
+    if (capsuleForm) capsuleForm.style.display = 'none';
+    if (capsuleInventory) capsuleInventory.style.display = 'none';
+    if (capsuleCategories) capsuleCategories.style.display = 'block';
+    grid.innerHTML = '';
+    return;
+  }
+
+  // ── Inventory capsule ──────────────────────────
+  if (_activeCapsule === 'inventory') {
+    if (afBar) afBar.style.display = 'none';
+    if (capsuleForm) capsuleForm.style.display = 'none';
+    if (capsuleCategories) capsuleCategories.style.display = 'none';
+    if (capsuleInventory) capsuleInventory.style.display = 'block';
+    grid.innerHTML = '';
+    return;
+  }
+
+  // ── Show grid + filter bar, hide inline forms ──
   if (afBar) afBar.style.display = '';
   if (capsuleForm) capsuleForm.style.display = 'none';
+  if (capsuleCategories) capsuleCategories.style.display = 'none';
+  if (capsuleInventory) capsuleInventory.style.display = 'none';
 
   const query = (
     document.getElementById('admin-search-prod')?.value || ''
@@ -1475,6 +1524,17 @@ function renderAdminOrders(orders) {
            </span>`;
       }
 
+      const stageLabel = getFulfillmentStageLabel(o);
+      const stagePills = {
+        pending:     { label: 'Pending',     icon: 'fa-solid fa-box-open',        bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
+        packing:     { label: 'Packing',     icon: 'fa-solid fa-boxes-packing',   bg: 'rgba(59,130,246,0.12)', color: '#3b82f6' },
+        packed:      { label: 'Packed',      icon: 'fa-solid fa-box-check',       bg: 'rgba(139,92,246,0.12)', color: '#8b5cf6' },
+        shipping:    { label: 'Shipping',    icon: 'fa-solid fa-truck-fast',      bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
+        delivered:   { label: 'Delivered',   icon: 'fa-solid fa-circle-check',    bg: 'rgba(16,185,129,0.12)', color: '#059669' },
+      };
+      const sp = stagePills[stageLabel];
+      const stageBadge = sp ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:0.68rem;font-weight:600;background:${sp.bg};color:${sp.color};border:1px solid ${sp.color}18;white-space:nowrap;letter-spacing:0.2px;"><i class="${sp.icon}" style="font-size:0.6rem;"></i> ${sp.label}</span>` : '';
+
       const itemCount = Array.isArray(o.items) ? o.items.length : 0;
       return `
       <div class="aoc-card ${o.delivery_status === 'cancelled' || isRefundState ? 'aoc-card--cancelled' : ''}" data-id="${o.id}">
@@ -1485,6 +1545,7 @@ function renderAdminOrders(orders) {
             ${date} · ${itemCount} item${itemCount > 1 ? 's' : ''} · ₹${Number(o.total || 0).toFixed(2)}
           </span>
           ${badgeHtml}
+          ${stageBadge}
           <span class="aoc-chev">${'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'}</span>
         </div>
 
@@ -1726,14 +1787,38 @@ function renderAdminOrders(orders) {
 /* ── 12-Section Switching ── */
 let currentSection = 'all';
 
+function getFulfillmentStageLabel(o) {
+  const fs = o.fulfillment_status || '';
+  const ds = o.delivery_status || '';
+  if (o.status === 'CANCEL_REQUESTED' || ds === 'CANCEL_REQUESTED') return 'cancel_requests';
+  if (ds === 'cancelled' || ds === 'rejected') return 'cancelled';
+  if (ds === 'delivered' || fs === 'delivered') return 'delivered';
+  if (fs === 'packing_required') return 'packing';
+  if (fs === 'packed') return 'packed';
+  if (fs === 'ready_to_ship' || fs === 'with_carrier' || ['shipped','in_transit'].includes(ds)) return 'shipping';
+  if (fs === 'pending_fulfillment' || ds === 'placed' || ds === 'admin_pending') return 'pending';
+  return null;
+}
+
+function isFreshOrder(o) {
+  const fs = o.fulfillment_status || '';
+  const ds = o.delivery_status || '';
+  const refundExclude = ['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
+  if (refundExclude.includes(o.status)) return false;
+  if (['cancelled','rejected'].includes(ds)) return false;
+  if (o.status === 'CANCEL_REQUESTED') return false;
+  return (fs === '' || fs === 'pending_fulfillment') && (ds === 'placed' || ds === '' || ds === 'admin_pending');
+}
+
 function updateSectionCounts(orders) {
   const allOrders = orders || adminOrdersCache;
   const refundExclude = ['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
   const countMap = {
-    all: allOrders.filter(o => o.delivery_status === 'placed' && !refundExclude.includes(o.status)).length,
-    placed: allOrders.filter(o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundExclude.includes(o.status)).length,
-    processing: allOrders.filter(o => ['processing', 'inoculating'].includes(o.delivery_status) && !['cancelled'].includes(o.delivery_status) && !refundExclude.includes(o.status)).length,
-    shipping: allOrders.filter(o => ['shipped','in_transit'].includes(o.delivery_status)).length,
+    all: allOrders.filter(o => isFreshOrder(o)).length,
+    pending: allOrders.filter(o => getFulfillmentStageLabel(o) === 'pending' && !refundExclude.includes(o.status)).length,
+    packing: allOrders.filter(o => getFulfillmentStageLabel(o) === 'packing').length,
+    packed: allOrders.filter(o => getFulfillmentStageLabel(o) === 'packed').length,
+    shipping: allOrders.filter(o => getFulfillmentStageLabel(o) === 'shipping').length,
     delivered: allOrders.filter(o => o.delivery_status === 'delivered').length,
     cancel_requests: allOrders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED').length,
     cancelled: allOrders.filter(o => ['cancelled', 'rejected'].includes(o.delivery_status)).length,
@@ -1751,21 +1836,18 @@ function renderCurrentSection() {
   const orders = adminOrdersCache || [];
   updateSectionCounts(orders);
 
-  const refundStatuses = ['REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
-  const shippingStatuses = ['shipped','in_transit'];
-
   const sectionFilters = {
-    all: o => ['placed', 'admin_pending'].includes(o.delivery_status) && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','cancelled'].includes(o.status),
-    placed: o => o.delivery_status === 'placed' && o.status === 'paid' && o.admin_approval_status === 'approved' && !refundStatuses.includes(o.status) && o.status !== 'CANCEL_REQUESTED',
-    processing: o => ['processing', 'inoculating'].includes(o.delivery_status) && !refundStatuses.includes(o.status) && !['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED'].includes(o.status),
-    shipping: o => shippingStatuses.includes(o.delivery_status),
+    all: o => isFreshOrder(o),
+    pending: o => getFulfillmentStageLabel(o) === 'pending',
+    packing: o => getFulfillmentStageLabel(o) === 'packing',
+    packed: o => getFulfillmentStageLabel(o) === 'packed',
+    shipping: o => getFulfillmentStageLabel(o) === 'shipping',
     delivered: o => o.delivery_status === 'delivered',
     cancel_requests: o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED',
     cancelled: o => ['cancelled', 'rejected'].includes(o.delivery_status),
   };
 
   const filterFn = sectionFilters[currentSection];
-
   const filtered = orders.filter(filterFn);
 
   if (currentSection === 'cancel_requests') {
@@ -2908,7 +2990,9 @@ function populateAdminCategorySelect(categories) {
 }
 
 function adminEditCategory(catId) {
-  activateAdminTab('categories');
+  activateAdminTab('products');
+  _activeCapsule = 'categories';
+  renderAdminInventory();
   const category = _adminCategories.find((c) => c.id === catId);
   if (!category) return;
 
@@ -4373,21 +4457,29 @@ function activateAdminTab(tabName) {
       content.id === `admin-content-${tabName}`,
     );
   });
-  // Load refund dashboard data when tab is activated
+  // Route returns tab to Orders & Shipping with Returns sub-tab active
   if (tabName === 'returns') {
+    document.querySelectorAll('.admin-tab').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === 'orders');
+    });
+    document.querySelectorAll('.admin-tab-content').forEach((content) => {
+      content.classList.toggle('active', content.id === 'admin-content-orders');
+    });
+    // Activate returns sub-tab
+    document.querySelectorAll('.ship-tab').forEach((t) => t.classList.remove('active'));
+    const returnsTab = document.querySelector('.ship-tab[data-ship-tab="returns"]');
+    if (returnsTab) returnsTab.classList.add('active');
+    document.querySelectorAll('.ship-panel').forEach((p) => p.classList.remove('active'));
+    const panel = document.getElementById('ship-panel-returns');
+    if (panel) panel.classList.add('active');
     loadReturnsDashboard();
-  }
-  if (tabName === 'refunds') {
-    loadRefundsDashboard();
-  }
-  if (tabName === 'shipments') {
-    loadShipmentsTab();
-  }
-  if (tabName === 'inventory') {
-    loadInventoryTab();
+    return;
   }
   if (tabName === 'analytics') {
     loadAnalyticsTab();
+  }
+  if (tabName === 'training-ops') {
+    loadTrainingOpsTab();
   }
 }
 
@@ -4807,6 +4899,12 @@ function setupAdminEventHandlers() {
       if (_activeCapsule === 'add-product') {
         resetCapsuleAddForm();
       }
+      if (_activeCapsule === 'categories') {
+        fetchAdminCategories();
+      }
+      if (_activeCapsule === 'inventory') {
+        loadInventoryTab();
+      }
       _adminInventoryPage = 1;
       renderAdminInventory();
     });
@@ -5002,6 +5100,9 @@ function setupAdminEventHandlers() {
       document.querySelectorAll('.ship-panel').forEach((p) => p.classList.remove('active'));
       const panel = document.getElementById(`ship-panel-${target}`);
       if (panel) panel.classList.add('active');
+      if (target === 'shipments') loadShipmentsTab();
+      if (target === 'refunds') loadRefundsDashboard();
+      if (target === 'returns') loadReturnsDashboard();
     });
   });
 
@@ -5245,6 +5346,193 @@ function setupAdminEventHandlers() {
   // Transform static weight selects into pill widgets
   wpwTransformStatic();
 }
+
+/* ── Training Ops Tab ── */
+
+async function loadTrainingOpsTab() {
+  const container = document.getElementById('training-ops-container');
+  if (!container) return;
+
+  container.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Training Ops…</div>';
+
+  try {
+    const [dashboard, allBatches, allEnrollments, actionLogs] = await Promise.all([
+      trainingApi.getAdminDashboard(),
+      trainingApi.getTrainings().then(trainings => {
+        const batchPromises = (trainings || []).map(t =>
+          // We already have batches nested from the API
+          t.batches || []
+        );
+        return batchPromises.flat();
+      }),
+      fetchWithAuth('/trainings/my-enrollments').then(r => r?.v2 || []),
+      trainingApi.getActionLogs(),
+    ]);
+
+    const stats = dashboard || {};
+    const batches = Array.isArray(allBatches) ? allBatches : [];
+    const enrollments = Array.isArray(allEnrollments) ? allEnrollments : [];
+    const logs = Array.isArray(actionLogs) ? actionLogs : [];
+
+    container.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">
+        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
+          <span style="font-size:1.6rem;font-weight:700;color:#2d6a4f;">${stats.upcoming_batches || 0}</span>
+          <span style="font-size:0.8rem;color:#666;">Upcoming Batches</span>
+        </div>
+        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
+          <span style="font-size:1.6rem;font-weight:700;color:#2d6a4f;">${stats.active_enrollments || 0}</span>
+          <span style="font-size:0.8rem;color:#666;">Active Enrollments</span>
+        </div>
+        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
+          <span style="font-size:1.6rem;font-weight:700;color:#2d6a4f;">₹${Number(stats.total_revenue || 0).toLocaleString()}</span>
+          <span style="font-size:0.8rem;color:#666;">Total Revenue</span>
+        </div>
+        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
+          <span style="font-size:1.6rem;font-weight:700;color:${stats.pending_refunds > 0 ? '#dc3545' : '#2d6a4f'};">${stats.pending_refunds || 0}</span>
+          <span style="font-size:0.8rem;color:#666;">Pending Refunds</span>
+        </div>
+      </div>
+
+      <div class="admin-section-header"><h3><i class="fa-solid fa-layer-group"></i> Batches</h3></div>
+      <div style="margin-bottom:20px;">
+        <div id="training-ops-batches">
+          ${batches.length === 0 ? '<div class="admin-loading">No batches found.</div>' : batches.map(b => `
+            <div class="admin-card" style="padding:14px;margin-bottom:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                <div>
+                  <strong>${b.title || 'Untitled'}</strong>
+                  <span class="admin-badge" style="background:${b.status === 'upcoming' ? '#d4edda' : b.status === 'active' ? '#cce5ff' : '#f8d7da'};color:${b.status === 'upcoming' ? '#155724' : b.status === 'active' ? '#004085' : '#721c24'};margin-left:8px;padding:2px 10px;border-radius:12px;font-size:0.75rem;">${b.status}</span>
+                  <div style="font-size:0.8rem;color:#666;margin-top:4px;">
+                    ${b.start_date ? new Date(b.start_date).toLocaleDateString('en-IN') : '—'} &middot;
+                    ${b.seats_taken || 0}/${b.capacity || 0} seats &middot;
+                    ₹${Number(b.price_actual || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button class="btn btn-secondary btn-ops-clone" data-id="${b.id}" style="font-size:0.75rem;padding:4px 12px;"><i class="fa-solid fa-copy"></i> Clone</button>
+                  <button class="btn btn-secondary btn-ops-force-cancel" data-id="${b.id}" style="font-size:0.75rem;padding:4px 12px;color:#dc3545;"><i class="fa-solid fa-ban"></i> Force Cancel</button>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="admin-section-header"><h3><i class="fa-solid fa-users"></i> Enrollments / Roster</h3></div>
+      <div style="margin-bottom:20px;" id="training-ops-roster">
+        ${enrollments.length === 0 ? '<div class="admin-loading">No enrollments.</div>' : enrollments.map(e => `
+          <div class="admin-card" style="padding:10px;margin-bottom:4px;font-size:0.85rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+              <span>${e.batch?.title || '—'} <span class="admin-badge" style="background:${e.status === 'confirmed' ? '#d4edda' : '#f8d7da'};color:${e.status === 'confirmed' ? '#155724' : '#721c24'};padding:1px 8px;border-radius:10px;font-size:0.7rem;">${e.status}</span></span>
+              <div style="display:flex;gap:6px;">
+                ${e.status === 'confirmed' ? `
+                  <select class="btn-ops-attendance" data-id="${e.id}" style="font-size:0.75rem;padding:2px 6px;">
+                    <option value="">—</option>
+                    <option value="present" ${e.attendance === 'present' ? 'selected' : ''}>Present</option>
+                    <option value="no_show" ${e.attendance === 'no_show' ? 'selected' : ''}>No Show</option>
+                  </select>
+                  <button class="btn btn-secondary btn-ops-manual-refund" data-id="${e.id}" style="font-size:0.75rem;padding:2px 10px;color:#dc3545;">Refund</button>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="admin-section-header"><h3><i class="fa-solid fa-clock-rotate-left"></i> Audit Logs</h3></div>
+      <div style="max-height:300px;overflow-y:auto;margin-bottom:20px;">
+        ${logs.length === 0 ? '<div class="admin-loading">No action logs.</div>' : logs.map(l => `
+          <div style="font-size:0.8rem;padding:6px 0;border-bottom:1px solid #eee;display:flex;gap:12px;">
+            <span style="color:#999;white-space:nowrap;">${l.created_at ? new Date(l.created_at).toLocaleString() : '—'}</span>
+            <span class="admin-badge" style="background:#e0e7ff;color:#3730a3;padding:1px 8px;border-radius:10px;">${l.action || ''}</span>
+            <span style="color:#666;">${l.target_type || ''} ${l.target_id || ''}</span>
+            <span style="color:#999;">${l.reason || ''}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    // Wire clone buttons
+    container.querySelectorAll('.btn-ops-clone').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        try {
+          await trainingApi.cloneBatch(id, { shift_days: 30 });
+          showSuccessToast('Batch cloned!');
+          loadTrainingOpsTab();
+        } catch (err) {
+          showErrorToast(err.message);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-copy"></i> Clone';
+        }
+      });
+    });
+
+    // Wire force cancel buttons
+    container.querySelectorAll('.btn-ops-force-cancel').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        if (!confirm('Force-cancel this batch? This will refund all confirmed registrations. This cannot be undone.')) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        try {
+          const result = await trainingApi.forceCancelBatch(id, { reason: 'Admin force-cancel via console' });
+          showSuccessToast(`Batch cancelled. ${result.enrollments_affected || 0} enrollments affected.`);
+          loadTrainingOpsTab();
+        } catch (err) {
+          showErrorToast(err.message);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-ban"></i> Force Cancel';
+        }
+      });
+    });
+
+    // Wire attendance selects
+    container.querySelectorAll('.btn-ops-attendance').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        if (!sel.value) return;
+        try {
+          await trainingApi.markAttendance(sel.dataset.id, { attendance: sel.value });
+          showSuccessToast('Attendance marked!');
+        } catch (err) {
+          showErrorToast(err.message);
+        }
+      });
+    });
+
+    // Wire manual refund buttons
+    container.querySelectorAll('.btn-ops-manual-refund').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const reason = prompt('Reason for manual refund (required, min 10 chars):');
+        if (!reason || reason.length < 10) {
+          showErrorToast('Please provide a reason (min 10 characters).');
+          return;
+        }
+        if (!confirm(`Issue manual refund for enrollment ${id}?`)) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        try {
+          await trainingApi.manualRefund(id, { reason });
+          showSuccessToast('Manual refund processed!');
+          loadTrainingOpsTab();
+        } catch (err) {
+          showErrorToast(err.message);
+          btn.disabled = false;
+          btn.innerHTML = 'Refund';
+        }
+      });
+    });
+
+  } catch (err) {
+    container.innerHTML = `<div class="admin-loading" style="color:#e74c3c;">Failed to load Training Ops: ${err.message}</div>`;
+  }
+}
+
+globalThis.loadTrainingOpsTab = loadTrainingOpsTab;
 
 async function initAdminPage() {
   setupAdminEventHandlers();

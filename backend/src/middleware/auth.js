@@ -93,7 +93,7 @@ const authMiddleware = async (req, res, next) => {
       error: supaError,
     } = await supabaseAdmin.auth.getUser(token);
 
-    if (supaUser && !supaError) {
+      if (supaUser && !supaError) {
       // Look up the full user profile from our custom users table
       // This gives us: role, full_name, whatsapp_number, etc.
       const { data: dbUser } = await db
@@ -118,6 +118,11 @@ const authMiddleware = async (req, res, next) => {
         }).single().catch(() => {});
       }
 
+      // ── Create per-request authenticated DB client for RLS-enforced queries ──
+      // Anon key + user's JWT → PostgreSQL enforces RLS policies (auth.uid() etc.)
+      const { createUserDb } = require("../config/db");
+      req.authDb = createUserDb(token) || db;
+
       req.user = {
         userId: effectiveUserId,
         email: supaUser.email,
@@ -126,7 +131,6 @@ const authMiddleware = async (req, res, next) => {
           ? dbUser.full_name
           : supaUser.user_metadata?.name || "",
         whatsapp_number: dbUser ? dbUser.whatsapp_number : "",
-        // Expose the raw Supabase user for any code that needs it
         supaUser,
       };
       return next();

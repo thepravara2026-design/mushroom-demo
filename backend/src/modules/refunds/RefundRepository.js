@@ -1,5 +1,6 @@
 const db = require("../../config/db");
 const logger = require("../../utils/logger");
+const FEATURE_FLAGS = require("../../config/featureFlags");
 
 /**
  * Find order by ID
@@ -19,23 +20,28 @@ async function findOrderById(orderId) {
 
 /**
  * Update order fields.
+ * Optimistic concurrency: checks version column when ENABLE_OPTIMISTIC_LOCKING is active.
  * Resilient: if Supabase rejects the update because a refund/payment column is not yet
  * in the schema cache (migration pending), falls back to updating only the core
  * columns (status, delivery_status, updated_at) so orders are never left in a
  * broken state while the schema is being migrated.
  */
 async function updateOrder(orderId, updates) {
-  const { data, error } = await db
-    .from("orders")
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", orderId)
-    .single();
+  const version = updates.version;
+  const useOptimisticLock = FEATURE_FLAGS.ENABLE_OPTIMISTIC_LOCKING && version !== undefined;
+
+  let query = db.from("orders").update({
+    ...updates,
+    updated_at: new Date().toISOString()
+  }).eq("id", orderId);
+
+  if (useOptimisticLock) {
+    query = query.eq("version", version);
+  }
+
+  const { data, error } = await query.single();
 
   if (error) {
-    // Detect schema-cache errors for refund/payment columns not yet migrated
     const isSchemaMiss = error.message && (
       error.message.includes("refund_status") ||
       error.message.includes("refund_id") ||
@@ -48,7 +54,6 @@ async function updateOrder(orderId, updates) {
     if (isSchemaMiss) {
       logger.warn(`[RefundRepository] Schema cache miss for updateOrder on ${orderId} — retrying with core fields only. Error: ${error.message}`);
 
-      // Retry with only the columns guaranteed to exist in the schema
       const safeFields = ["status", "delivery_status", "cancel_reason", "cancelled_by", "cancelled_at",
         "razorpay_order_id", "razorpay_payment_id", "payment_method", "transaction_id",
         "whatsapp_sent", "rating", "review_text", "expected_delivery_date", "delivery_days_text"];
@@ -71,6 +76,12 @@ async function updateOrder(orderId, updates) {
 
       logger.warn(`[RefundRepository] updateOrder completed with core fields only for ${orderId}. Run DB migration to persist refund columns.`);
       return fallbackData;
+    }
+
+    if (useOptimisticLock && error.message && error.message.includes("version")) {
+      const conflict = new Error(`Optimistic lock conflict on order ${orderId}: version mismatch`);
+      conflict.code = "OPTIMISTIC_LOCK_CONFLICT";
+      throw conflict;
     }
 
     logger.error(`[RefundRepository] updateOrder error for ${orderId}: ${error.message}`);

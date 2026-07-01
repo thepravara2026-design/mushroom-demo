@@ -24,11 +24,10 @@ class TraineeAuthModal {
         this.bindEvents();
         this.currentView = null;
         this.onSuccessCallback = null;
-        this._activeMethod = 'email'; // 'email' | 'phone'
-        this._pendingEmail = null;
         this._pendingPhone = null;
-        this._registeredEmail = null;
-        this._registeredPhone = null;
+        this._pendingEmail = null;
+        this._pendingFullName = null;
+        this._isSignupFlow = false;
         this._initStateCity();
     }
 
@@ -60,87 +59,20 @@ class TraineeAuthModal {
         }
     }
 
-    /** Redirect to signup, pre-filling any known fields */
-    _redirectToSignup(email, phone) {
-        if (email) {
-            const el = document.getElementById('trainee-signup-email');
-            if (el) el.value = email;
-        }
-        if (phone) {
-            const el = document.getElementById('trainee-signup-phone');
-            if (el) el.value = phone.replace(/^\+91/, '').replace(/\D/g, '');
-        }
-        showSuccessToast('You need to register first! Fill in your details to continue.');
-        this.showSignup();
-    }
-
-    /** Check backend response for needsSignup. Returns true if redirected to signup. */
-    _checkNeedsSignup(data, email, phone) {
-        if (data && data.needsSignup === true) {
-            this._redirectToSignup(email, phone);
-            return true;
-        }
-        return false;
-    }
-
-    _addRealtimeValidation() {
-        const emailInput = document.getElementById('trainee-email-input');
-        const emailError = document.getElementById('trainee-email-error');
-        if (emailInput && emailError) {
-            emailInput.addEventListener('blur', () => {
-                const err = getFieldError('email', emailInput.value);
-                emailError.textContent = err;
-                emailError.classList.toggle('hidden', !err);
-            });
-            emailInput.addEventListener('input', () => {
-                if (!emailError.classList.contains('hidden')) {
-                    const err = getFieldError('email', emailInput.value);
-                    if (!err) emailError.classList.add('hidden');
-                }
-            });
-        }
-
-        const otpInput = document.getElementById('trainee-otp');
-        const otpError = document.getElementById('trainee-verify-error');
-        if (otpInput && otpError) {
-            otpInput.addEventListener('blur', () => {
-                const err = getFieldError('otp', otpInput.value);
-                otpError.textContent = err;
-                otpError.classList.toggle('hidden', !err);
-            });
-            otpInput.addEventListener('input', () => {
-                if (!otpError.classList.contains('hidden')) {
-                    const err = getFieldError('otp', otpInput.value);
-                    if (!err) otpError.classList.add('hidden');
-                }
-            });
-        }
-    }
-
     bindEvents() {
         document.getElementById('btn-close-trainee-auth')
             ?.addEventListener('click', () => this.close());
 
-        document.getElementById('btn-trainee-phone')
-            ?.addEventListener('click', () => this.showPhoneView());
-        document.getElementById('btn-trainee-email')
-            ?.addEventListener('click', () => this.showEmailView());
-
-        document.getElementById('link-trainee-back-phone')
-            ?.addEventListener('click', (e) => { e.preventDefault(); this.showLogin(); });
-        document.getElementById('link-trainee-back-email')
-            ?.addEventListener('click', (e) => { e.preventDefault(); this.showLogin(); });
-
         document.getElementById('trainee-phone-form')
             ?.addEventListener('submit', (e) => {
                 e.preventDefault();
-                this.handlePhoneOtpRequest();
+                this.handlePhoneSubmit();
             });
 
-        document.getElementById('trainee-email-form')
-            ?.addEventListener('submit', (e) => {
+        document.getElementById('btn-trainee-google')
+            ?.addEventListener('click', (e) => {
                 e.preventDefault();
-                this.handleEmailOtpRequest();
+                this.handleGoogleLogin();
             });
 
         document.getElementById('trainee-signup-form')
@@ -178,8 +110,6 @@ class TraineeAuthModal {
                 e.preventDefault();
                 this.showLogin();
             });
-
-        this._addRealtimeValidation();
     }
 
     open(onSuccess = null) {
@@ -200,41 +130,17 @@ class TraineeAuthModal {
         this.modal.classList.remove('open');
         this.clearErrors();
         this.clearForms();
+        this._pendingPhone = null;
+        this._pendingEmail = null;
+        this._pendingFullName = null;
+        this._isSignupFlow = false;
     }
 
     showLogin() {
-        this._activeMethod = null;
         this._hideAllViews();
         document.getElementById('trainee-login-view').classList.remove('hidden');
         this.currentView = 'login';
-
-        // Pre-fill registered email or phone if returning from signup success
-        if (this._registeredEmail) {
-            const emailInput = document.getElementById('trainee-email-input');
-            if (emailInput) emailInput.value = this._registeredEmail;
-        }
-        if (this._registeredPhone) {
-            const phoneInput = document.getElementById('trainee-phone');
-            if (phoneInput) phoneInput.value = this._registeredPhone;
-        }
-        this._registeredEmail = null;
-        this._registeredPhone = null;
-    }
-
-    showPhoneView() {
-        this._activeMethod = 'phone';
-        this._hideAllViews();
-        document.getElementById('trainee-phone-view').classList.remove('hidden');
-        this.currentView = 'phone';
         document.getElementById('trainee-phone')?.focus();
-    }
-
-    showEmailView() {
-        this._activeMethod = 'email';
-        this._hideAllViews();
-        document.getElementById('trainee-email-request-view').classList.remove('hidden');
-        this.currentView = 'email';
-        document.getElementById('trainee-email-input')?.focus();
     }
 
     showSignup() {
@@ -274,33 +180,31 @@ class TraineeAuthModal {
     }
 
     _hideAllViews() {
-        ['trainee-login-view', 'trainee-signup-view', 'trainee-verify-view', 'trainee-success-view',
-            'trainee-phone-view', 'trainee-email-request-view'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('hidden');
-            });
+        ['trainee-login-view', 'trainee-signup-view', 'trainee-verify-view', 'trainee-success-view'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
     }
 
     clearErrors() {
         ['trainee-login-error', 'trainee-signup-error', 'trainee-verify-error',
-            'trainee-phone-error', 'trainee-email-error'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('hidden');
-            });
+            'trainee-phone-error'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
     }
 
     clearForms() {
-        ['trainee-login-form', 'trainee-signup-form', 'trainee-verify-form',
-            'trainee-phone-form', 'trainee-email-form'].forEach(id => {
-                const form = document.getElementById(id);
-                if (form) form.reset();
-            });
+        ['trainee-phone-form', 'trainee-signup-form', 'trainee-verify-form'].forEach(id => {
+            const form = document.getElementById(id);
+            if (form) form.reset();
+        });
     }
 
     // ======================
-    // PHONE OTP LOGIN
+    // PHONE CHECK / LOGIN
     // ======================
-    async handlePhoneOtpRequest() {
+    async handlePhoneSubmit() {
         const raw = document.getElementById('trainee-phone')?.value;
         const digits = (raw || '').replace(/\D/g, '').slice(-10);
         const country = document.getElementById('trainee-phone-country')?.value || '+91';
@@ -318,57 +222,108 @@ class TraineeAuthModal {
         try {
             const data = await traineeApi.requestPhoneOtp(fullPhone);
 
-            // If user not registered → redirect to signup with phone pre-filled
-            if (this._checkNeedsSignup(data, null, fullPhone)) {
+            if (data && data.needsSignup === true) {
+                // Phone not registered — redirect to signup with phone pre-filled
+                const phoneInput = document.getElementById('trainee-signup-phone');
+                if (phoneInput) phoneInput.value = digits;
+                this._pendingPhone = fullPhone;
+                errorEl?.classList.add('hidden');
+                showSuccessToast('Phone not registered. Fill in your details to continue.');
+                this.showSignup();
                 return;
             }
 
-            // User exists — data.email is their real email from backend
+            // Phone is registered — OTP was sent via SMS
             this._pendingPhone = fullPhone;
             this._pendingEmail = data.email || null;
+            this._isSignupFlow = false;
             errorEl?.classList.add('hidden');
-            showSuccessToast('OTP sent to your registered email!');
+            showSuccessToast('OTP sent to your mobile!');
             this.showVerify(fullPhone, data.otp || null);
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message || 'Failed to process phone number.'; errorEl.classList.remove('hidden'); }
         } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Send OTP'; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Continue'; }
         }
     }
 
     // ======================
-    // EMAIL OTP LOGIN
+    // GOOGLE LOGIN
     // ======================
-    async handleEmailOtpRequest() {
-        const email = document.getElementById('trainee-email-input')?.value.trim();
-        const errorEl = document.getElementById('trainee-email-error');
+    async handleGoogleLogin() {
+        const errorEl = document.getElementById('trainee-login-error');
 
-        const emailErr = getFieldError('email', email);
-        if (emailErr) {
-            if (errorEl) { errorEl.textContent = emailErr; errorEl.classList.remove('hidden'); }
-            return;
+        const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || null;
+
+        if (GOOGLE_CLIENT_ID && typeof google !== 'undefined' && google.accounts) {
+            // Production: use Google Identity Services
+            google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: async (response) => {
+                    if (response.credential) {
+                        await this._processGoogleCredential(response.credential);
+                    }
+                },
+            });
+            google.accounts.id.prompt();
+        } else {
+            // Mock/dev mode: prompt for email
+            const mockEmail = window.prompt(
+                'Google Auth (Mock Mode)\n\nEnter your email to simulate Google login:',
+                'trainee@sporekart.com'
+            );
+            if (!mockEmail || !mockEmail.trim()) return;
+
+            // Encode as base64 JSON payload for mock verification on backend
+            const payload = JSON.stringify({
+                email: mockEmail.trim(),
+                name: window.prompt('Enter your full name (for signup pre-fill):', 'Trainee User') || '',
+            });
+            const credential = btoa(payload);
+            await this._processGoogleCredential(credential);
         }
+    }
 
-        const btn = document.querySelector('#trainee-email-form button');
-        if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    async _processGoogleCredential(credential) {
+        const errorEl = document.getElementById('trainee-login-error');
+
+        const btn = document.getElementById('btn-trainee-google');
+        if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
 
         try {
-            const data = await traineeApi.requestOtp(email);
+            const data = await traineeApi.googleLogin(credential);
 
-            // If user not registered → redirect to signup with email pre-filled
-            if (this._checkNeedsSignup(data, email, null)) {
+            if (data && data.needsSignup === true) {
+                // Google account not registered — pre-fill signup
+                const nameInput = document.getElementById('trainee-signup-name');
+                const emailInput = document.getElementById('trainee-signup-email');
+                if (nameInput && data.fullName) nameInput.value = data.fullName;
+                if (emailInput && data.email) emailInput.value = data.email;
+                this._pendingEmail = data.email || null;
+                this._pendingFullName = data.fullName || null;
+                errorEl?.classList.add('hidden');
+                showSuccessToast('Complete your registration to continue.');
+                this.showSignup();
                 return;
             }
 
-            // User exists — proceed to OTP verify
-            errorEl?.classList.add('hidden');
-            showSuccessToast('OTP sent to your email!');
-            this._pendingEmail = email;
-            this.showVerify(email, data.otp || null);
+            // Registered — login directly
+            clearAuth();
+            saveAuth(data.token, data.user);
+            this.close();
+            showSuccessToast('Welcome back, Trainee!');
+            if (this.onSuccessCallback) this.onSuccessCallback();
+            const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
+            showPopupModal({
+                title: '🎉 Welcome!',
+                message: `Hello ${userName}, welcome to your training dashboard!`,
+                duration: 2000,
+                refreshOnClose: true,
+            });
         } catch (err) {
-            if (errorEl) { errorEl.textContent = err.message || 'Failed to send OTP.'; errorEl.classList.remove('hidden'); }
+            if (errorEl) { errorEl.textContent = err.message || 'Google sign in failed.'; errorEl.classList.remove('hidden'); }
         } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Get Access Code'; }
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-brands fa-google" style="color:#4285F4"></i> Sign in with Google'; }
         }
     }
 
@@ -424,16 +379,16 @@ class TraineeAuthModal {
         if (btn) { btn.disabled = true; btn.textContent = 'Registering...'; }
 
         try {
-            await traineeApi.signup({ fullName, phone, email, roleType, city, state: stateVal });
+            const data = await traineeApi.signup({ fullName, phone, email, roleType, city, state: stateVal });
 
-            showSuccessToast('Registration successful! Please login to continue.');
-            this._registeredEmail = email;
-            this._registeredPhone = phone;
-            this.showSignupSuccess();
+            // Signup succeeded — OTP was auto-sent via SMS
+            this._pendingPhone = data.phone || phone;
+            this._pendingEmail = data.email || email;
+            this._isSignupFlow = true;
+            showSuccessToast('Account created! Verify OTP to login.');
+            this.showVerify(data.phone || phone, data.otp || null);
         } catch (err) {
             const message = (err.message || '').toLowerCase();
-            // If the user is already registered, auto-request OTP and go to verify view
-            // This breaks the loop: signup says "already registered" → login says "needs signup" → loop
             if (message.includes('already registered') || message.includes('already exists') || message.includes('already taken')) {
                 showSuccessToast('You already have an account! Please login.');
                 this.showLogin();
@@ -463,26 +418,26 @@ class TraineeAuthModal {
 
         try {
             clearAuth();
-            let data;
 
-            if (this._activeMethod === 'phone') {
-                // Phone: verify using phone number (backend looks up user by phone)
-                data = await traineeApi.verifyPhoneOtp(this._pendingPhone, otp);
-            } else {
-                // Email: verify using email address
-                data = await traineeApi.verifyOtp(this._pendingEmail, otp);
+            // Always verify using phone number (supports login + post-signup)
+            const phone = this._pendingPhone;
+            if (!phone) {
+                if (errorEl) { errorEl.textContent = 'Session expired. Please go back and try again.'; errorEl.classList.remove('hidden'); }
+                return;
             }
+
+            const data = await traineeApi.verifyPhoneOtp(phone, otp);
 
             saveAuth(data.token, data.user);
             this.close();
-            showSuccessToast('Welcome back, Trainee!');
+            showSuccessToast('Welcome, Trainee!');
             if (this.onSuccessCallback) this.onSuccessCallback();
             const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
             showPopupModal({
-              title: '🎉 Welcome!',
-              message: `Hello ${userName}, welcome to your training dashboard!`,
-              duration: 2000,
-              refreshOnClose: true,
+                title: '🎉 Welcome!',
+                message: `Hello ${userName}, welcome to your training dashboard!`,
+                duration: 2000,
+                refreshOnClose: true,
             });
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message || 'OTP verification failed.'; errorEl.classList.remove('hidden'); }

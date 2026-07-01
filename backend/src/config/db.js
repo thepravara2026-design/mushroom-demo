@@ -1,6 +1,6 @@
 const { createClient } = require("@supabase/supabase-js");
 const bcrypt = require("bcryptjs");
-const { supabaseAdmin } = require("./supabase");
+const { supabaseAdmin, supabaseAnon, createUserClient } = require("./supabase");
 const logger = require("../utils/logger");
 const escapeRegExp = require("../utils/escapeRegExp");
 
@@ -769,7 +769,134 @@ const mockStore = {
       price_actual: 3499,
     },
   ],
+  training_batches: [],
+  training_enrollments: [],
+  training_payments: [],
+  training_refunds: [],
+  training_offers: [],
+  admin_action_logs: [],
 };
+
+// Seed training batches for mock mode
+function seedTrainingBatches() {
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  mockStore.training_batches.push(
+    {
+      id: "batch-1",
+      training_id: "train-1",
+      title: "Mushroom Cultivation Fundamentals — June Batch",
+      start_date: new Date(now + 10 * day).toISOString(),
+      end_date: new Date(now + 24 * day).toISOString(),
+      capacity: 20,
+      seats_taken: 5,
+      price_actual: 999,
+      price_strikeout: 1999,
+      instructor: "Dr. Radha Sharma",
+      location: "Sporekart Learning Center, Pune",
+      meeting_link: "",
+      cancellation_cutoff_days: 3,
+      status: "upcoming",
+    },
+    {
+      id: "batch-2",
+      training_id: "train-1",
+      title: "Mushroom Cultivation Fundamentals — July Batch",
+      start_date: new Date(now + 40 * day).toISOString(),
+      end_date: new Date(now + 54 * day).toISOString(),
+      capacity: 25,
+      seats_taken: 0,
+      price_actual: 999,
+      price_strikeout: 1999,
+      instructor: "Dr. Radha Sharma",
+      location: "Sporekart Learning Center, Pune",
+      meeting_link: "",
+      cancellation_cutoff_days: 3,
+      status: "upcoming",
+    },
+    {
+      id: "batch-3",
+      training_id: "train-2",
+      title: "Commercial Mushroom Farming — July Cohort",
+      start_date: new Date(now + 30 * day).toISOString(),
+      end_date: new Date(now + 54 * day).toISOString(),
+      capacity: 15,
+      seats_taken: 2,
+      price_actual: 2999,
+      price_strikeout: 4999,
+      instructor: "Rajesh Patil",
+      location: "Online (Zoom)",
+      meeting_link: "https://zoom.us/j/mushroom-farming",
+      cancellation_cutoff_days: 7,
+      status: "upcoming",
+    },
+    // ── 4 additional test batches with varied schedules ──
+    {
+      id: "batch-4",
+      training_id: "train-3",
+      title: "Mushroom Business Masterclass — Early July",
+      start_date: new Date(now + 2 * day).toISOString(),
+      end_date: new Date(now + 9 * day).toISOString(),
+      capacity: 10,
+      seats_taken: 3,
+      price_actual: 3999,
+      price_strikeout: 6999,
+      instructor: "Anita Verma",
+      location: "Online (Zoom)",
+      meeting_link: "https://zoom.us/j/business-masterclass",
+      cancellation_cutoff_days: 3,
+      status: "upcoming",
+    },
+    {
+      id: "batch-5",
+      training_id: "train-4",
+      title: "Certified Mushroom Grower — July Intensive",
+      start_date: new Date(now + 5 * day).toISOString(),
+      end_date: new Date(now + 19 * day).toISOString(),
+      capacity: 12,
+      seats_taken: 4,
+      price_actual: 7999,
+      price_strikeout: 12999,
+      instructor: "Dr. Radha Sharma",
+      location: "Sporekart Learning Center, Pune",
+      meeting_link: "",
+      cancellation_cutoff_days: 7,
+      status: "upcoming",
+    },
+    {
+      id: "batch-6",
+      training_id: "train-5",
+      title: "Intro to Mushroom Growing — September Batch",
+      start_date: new Date(now + 65 * day).toISOString(),
+      end_date: new Date(now + 79 * day).toISOString(),
+      capacity: 30,
+      seats_taken: 2,
+      price_actual: 799,
+      price_strikeout: 1499,
+      instructor: "Meera Iyer",
+      location: "Community Hall, Bangalore",
+      meeting_link: "",
+      cancellation_cutoff_days: 3,
+      status: "upcoming",
+    },
+    {
+      id: "batch-7",
+      training_id: "train-6",
+      title: "Advanced Spawn Production Lab — August",
+      start_date: new Date(now + 20 * day).toISOString(),
+      end_date: new Date(now + 27 * day).toISOString(),
+      capacity: 8,
+      seats_taken: 7,
+      price_actual: 3499,
+      price_strikeout: 5999,
+      instructor: "Dr. Suresh Kulkarni",
+      location: "Lab Facility, Mumbai",
+      meeting_link: "",
+      cancellation_cutoff_days: 5,
+      status: "upcoming",
+    },
+  );
+}
 
 // Seed Users for Sporekart
 const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD;
@@ -832,6 +959,9 @@ mockStore.users.push({
   created_at: new Date().toISOString(),
 });
 
+// Seed training batches
+seedTrainingBatches();
+
 /**
  * Mock Query Builder to replicate Supabase Client Syntax
  */
@@ -876,6 +1006,13 @@ class MockQueryBuilder {
           newRow.total_refunded_amount = newRow.total_refunded_amount || 0.00;
           newRow.fulfillment_status = newRow.fulfillment_status || "pending_fulfillment";
           newRow.restocked = newRow.restocked || false;
+          newRow.version = 1;
+        }
+        if (this.table === "products") {
+          if (newRow.version === undefined) newRow.version = 1;
+        }
+        if (this.table === "refunds") {
+          if (newRow.version === undefined) newRow.version = 1;
         }
         if (this.table === "refunds") {
           newRow.status = newRow.status || newRow.refund_status || "initiated";
@@ -906,16 +1043,32 @@ class MockQueryBuilder {
         }
         return acc;
       }, {});
+
+      // Check optimistic locking version constraint, if version is specified
+      const hasVersionConstraint = "version" in safeUpdates;
+      const expectedVersion = safeUpdates.version;
+      delete safeUpdates.version; // Don't set version directly, always increment
+
       mockStore[this.table] = mockStore[this.table].map((item) => {
         if (targetIds.has(item.id)) {
+          // Optimistic lock check
+          if (hasVersionConstraint && item.version !== undefined && item.version !== expectedVersion) {
+            return item; // Skip update — version mismatch (simulates lost update)
+          }
           const updatedItem = { ...item, ...safeUpdates };
+          if (updatedItem.version !== undefined) {
+            updatedItem.version = (item.version || 0) + 1;
+          }
           return updatedItem;
         }
         return item;
       });
       this.data = this.data.map((item) => {
         if (targetIds.has(item.id)) {
-          return { ...item, ...safeUpdates };
+          if (hasVersionConstraint && item.version !== undefined && item.version !== expectedVersion) {
+            return item;
+          }
+          return { ...item, ...safeUpdates, version: (item.version || 0) + 1 };
         }
         return item;
       });
@@ -1006,6 +1159,12 @@ class MockQueryBuilder {
     return this;
   }
 
+  in(column, values) {
+    if (!Array.isArray(values)) return this;
+    this.data = this.data.filter((item) => values.includes(item[column]));
+    return this;
+  }
+
   neq(column, value) {
     this.data = this.data.filter((item) => item[column] !== value);
     return this;
@@ -1036,13 +1195,31 @@ class MockQueryBuilder {
     return this;
   }
 
-  then(onfulfilled) {
+  catch(onRejected) {
     this.execute();
     const result = { data: this.data, error: this.error };
     if (this._count === "exact") {
       result.count = this.data.length;
     }
-    return Promise.resolve(result).then(onfulfilled);
+    return Promise.resolve(result).catch(onRejected);
+  }
+
+  finally(onFinally) {
+    this.execute();
+    const result = { data: this.data, error: this.error };
+    if (this._count === "exact") {
+      result.count = this.data.length;
+    }
+    return Promise.resolve(result).finally(onFinally);
+  }
+
+  then(onfulfilled, onRejected) {
+    this.execute();
+    const result = { data: this.data, error: this.error };
+    if (this._count === "exact") {
+      result.count = this.data.length;
+    }
+    return Promise.resolve(result).then(onfulfilled, onRejected);
   }
 }
 
@@ -1157,6 +1334,31 @@ const db = {
   },
 };
 
+/**
+ * Anon-key DB client — RLS-enforced, for public/user-facing queries.
+ * Safe for product listings, own-order views, etc.
+ * Mutations (INSERT/UPDATE) will be subject to RLS policies.
+ */
+const dbAnon = (!isMock && supabaseAnon) ? {
+  isMock: false,
+  from: (table) => new SupabaseQueryBuilderWrapper(supabaseAnon.from(table)),
+} : null;
+
+/**
+ * Create a per-request DB client authenticated with the user's JWT.
+ * RLS will see auth.uid() = the JWT subject, enforcing row-level ownership.
+ * Returns null in mock mode.
+ */
+function createUserDb(jwt) {
+  if (isMock) return null;
+  const client = createUserClient(jwt);
+  if (!client) return null;
+  return {
+    isMock: false,
+    from: (table) => new SupabaseQueryBuilderWrapper(client.from(table)),
+  };
+}
+
 function resetMockStore() {
   mockStore.users = [];
   mockStore.orders = [];
@@ -1183,8 +1385,16 @@ function resetMockStore() {
   mockStore.analytics_events = [];
   mockStore.analytics_summaries = [];
   mockStore.notification_preferences = [];
+  mockStore.training_batches = [];
+  mockStore.training_enrollments = [];
+  mockStore.training_payments = [];
+  mockStore.training_refunds = [];
+  mockStore.training_offers = [];
+  mockStore.admin_action_logs = [];
 }
 
 module.exports = db;
+module.exports.dbAnon = dbAnon;
+module.exports.createUserDb = createUserDb;
 module.exports._getMockStore = () => mockStore;
 module.exports.resetMockStore = resetMockStore;

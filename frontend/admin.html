@@ -143,27 +143,17 @@
             <i class="fa-solid fa-truck-fast"></i> Orders &amp; Shipping
             <span id="admin-orders-cancel-badge" class="admin-nav-badge hidden">0</span>
           </button>
-          <button class="admin-tab" data-tab="categories">
-            <i class="fa-solid fa-tags"></i> Categories
-          </button>
+
           <button class="admin-tab" data-tab="trainings">
             <i class="fa-solid fa-graduation-cap"></i> Trainings
+          </button>
+          <button class="admin-tab" data-tab="training-ops">
+            <i class="fa-solid fa-chalkboard-user"></i> Training Ops
           </button>
           <button class="admin-tab" data-tab="blogs">
             <i class="fa-solid fa-newspaper"></i> Blogs
           </button>
-          <button class="admin-tab" data-tab="shipments">
-            <i class="fa-solid fa-cubes"></i> Shipments
-          </button>
-          <button class="admin-tab" data-tab="returns">
-            <i class="fa-solid fa-rotate-left"></i> Returns
-          </button>
-          <button class="admin-tab" data-tab="refunds">
-            <i class="fa-solid fa-hand-holding-dollar"></i> Refunds
-          </button>
-          <button class="admin-tab" data-tab="inventory">
-            <i class="fa-solid fa-warehouse"></i> Inventory
-          </button>
+
           <button class="admin-tab" data-tab="analytics">
             <i class="fa-solid fa-chart-line"></i> Analytics
           </button>
@@ -180,6 +170,10 @@
                     class="fa-solid fa-clock-rotate-left"></i> Recently Added</button>
                 <button class="admin-capsule" data-capsule="add-product" type="button"><i
                     class="fa-solid fa-plus-circle"></i> Add / Edit Product</button>
+                <button class="admin-capsule" data-capsule="categories" type="button"><i
+                    class="fa-solid fa-tags"></i> Categories</button>
+                <button class="admin-capsule" data-capsule="inventory" type="button"><i
+                    class="fa-solid fa-warehouse"></i> Inventory</button>
               </div>
             </div>
             <div class="af-bar">
@@ -488,6 +482,108 @@
               </form>
             </div>
           </div>
+
+          <!-- CATEGORIES CAPSULE PANEL -->
+          <div id="admin-capsule-categories" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="admin-categories-layout">
+              <div class="admin-categories-form-col">
+                <div class="admin-cat-form-wrap">
+                  <input type="hidden" id="admin-edit-cat-id" value="" />
+                  <div class="admin-cat-form-compact">
+                    <div class="admin-cat-form-fields">
+                      <div class="input-field" style="flex: 0.8">
+                        <label>Category UID</label>
+                        <input type="text" id="admin-cat-uid" readonly placeholder="spore-000001" />
+                      </div>
+                      <div class="input-field" style="flex: 1.2">
+                        <label>Category Slug *</label>
+                        <input type="text" id="admin-cat-id" placeholder="e.g. fresh-mushrooms" pattern="[a-z0-9\-]+"
+                          title="Lowercase letters, numbers and hyphens only" />
+                      </div>
+                      <div class="input-field span-2">
+                        <label>Category Name *</label>
+                        <input type="text" id="admin-cat-name" placeholder="e.g. Fresh Mushrooms" />
+                      </div>
+                      <div class="input-field span-2">
+                        <label>Description</label>
+                        <input type="text" id="admin-cat-desc" placeholder="Short description of this category..." />
+                      </div>
+                      <div class="input-field span-2">
+                        <label>Image</label>
+                        <div class="admin-cat-image-upload">
+                          <input type="url" id="admin-cat-image-url" placeholder="Image URL or click Browse" />
+                          <button type="button" id="admin-cat-image-browse" class="btn btn-secondary btn-image-browse">
+                            <i class="fa-solid fa-upload"></i> Browse
+                          </button>
+                          <input type="file" id="admin-cat-image-file" class="hidden-file-input" />
+                        </div>
+                      </div>
+                    </div>
+                    <div id="admin-cat-image-preview" class="admin-cat-image-preview-compact">
+                      <i class="fa-solid fa-image"></i>
+                      <span>Image</span>
+                    </div>
+                  </div>
+                  <div class="admin-cat-form-actions">
+                    <button type="button" id="btn-admin-save-cat" class="btn btn-primary">
+                      <i class="fa-solid fa-floppy-disk"></i> Save
+                    </button>
+                    <button type="button" id="btn-admin-reset-cat" class="btn btn-secondary">
+                      <i class="fa-solid fa-rotate-left"></i> Reset
+                    </button>
+                  </div>
+                  <div class="admin-error-msg hidden" id="admin-cat-feedback"></div>
+                </div>
+              </div>
+              <div class="admin-categories-list-col">
+                <div id="admin-categories-list" class="admin-categories-wrap">
+                  <div class="admin-loading">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Loading categories...
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- INVENTORY CAPSULE PANEL (stock-focused view) -->
+          <div id="admin-capsule-inventory" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="admin-section-header" style="margin-bottom:16px;">
+              <h3><i class="fa-solid fa-warehouse"></i> Inventory Overview</h3>
+              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                <input type="text" id="admin-inv-search" placeholder="Search product name..."
+                  class="admin-search-input" style="min-width:200px;" />
+                <select id="admin-inv-filter" class="admin-select-input" style="min-width:140px;">
+                  <option value="">All</option>
+                  <option value="low">Low Stock Only</option>
+                  <option value="out">Out of Stock</option>
+                  <option value="notify">Notify-Me Requests</option>
+                </select>
+                <button type="button" class="btn btn-secondary" onclick="loadInventoryTab()"
+                  style="white-space:nowrap;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;">
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Low Stock Items</div>
+                <div class="refund-stat-value refund-stat-value--amber" id="admin-inv-stat-low">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Out of Stock</div>
+                <div class="refund-stat-value refund-stat-value--red" id="admin-inv-stat-oos">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Notify-Me Pending</div>
+                <div class="refund-stat-value" id="admin-inv-stat-notify">0</div>
+              </div>
+            </div>
+
+            <div id="admin-inventory-list">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading inventory...</div>
+            </div>
+          </div>
         </div>
 
         <!-- update for admin ordershipping tabs-pravara -->
@@ -502,20 +598,32 @@
               <button class="ship-tab" data-ship-tab="recent">
                 <i class="fa-solid fa-clock-rotate-left"></i> Recent orders
               </button>
+              <button class="ship-tab" data-ship-tab="shipments">
+                <i class="fa-solid fa-cubes"></i> Shipments
+              </button>
+              <button class="ship-tab" data-ship-tab="refunds">
+                <i class="fa-solid fa-hand-holding-dollar"></i> Refunds
+              </button>
+              <button class="ship-tab" data-ship-tab="returns">
+                <i class="fa-solid fa-rotate-left"></i> Returns
+              </button>
             </div>
 
             <!-- CURRENT ORDERS PANEL -->
             <div class="ship-panel active" id="ship-panel-current">
               <div class="ship-status-pills">
                 <button class="ship-status-pill active" data-status="all">All <span class="section-count zero" id="sec-count-all">0</span></button>
-                <button class="ship-status-pill" data-status="placed">
-                  <i class="fa-solid fa-clock"></i> Placed <span class="section-count zero" id="sec-count-placed">0</span>
+                <button class="ship-status-pill" data-status="pending">
+                  <i class="fa-solid fa-box-open"></i> Pending <span class="section-count zero" id="sec-count-pending">0</span>
                 </button>
-                <button class="ship-status-pill" data-status="processing">
-                  <i class="fa-solid fa-gear"></i> Processing <span class="section-count zero" id="sec-count-processing">0</span>
+                <button class="ship-status-pill" data-status="packing">
+                  <i class="fa-solid fa-boxes-packing"></i> Packing <span class="section-count zero" id="sec-count-packing">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="packed">
+                  <i class="fa-solid fa-box-check"></i> Packed <span class="section-count zero" id="sec-count-packed">0</span>
                 </button>
                 <button class="ship-status-pill" data-status="shipping">
-                  <i class="fa-solid fa-truck"></i> Shipping <span class="section-count zero" id="sec-count-shipping">0</span>
+                  <i class="fa-solid fa-truck-fast"></i> Shipping <span class="section-count zero" id="sec-count-shipping">0</span>
                 </button>
                 <button class="ship-status-pill" data-status="delivered">
                   <i class="fa-solid fa-circle-check"></i> Delivered <span class="section-count zero" id="sec-count-delivered">0</span>
@@ -598,69 +706,181 @@
               <div id="admin-history-pagination"></div>
             </div>
 
-          </div>
-        </div>
-
-
-
-        <div class="admin-tab-content" id="admin-content-categories">
-          <div class="admin-content-inner">
-            <div class="admin-section-header">
-              <h3><i class="fa-solid fa-folder-tree"></i> Category Management</h3>
-            </div>
-            <div class="admin-cat-form-wrap">
-              <input type="hidden" id="admin-edit-cat-id" value="" />
-              <div class="admin-cat-form-compact">
-                <div class="admin-cat-form-fields">
-                  <div class="input-field" style="flex: 0.8">
-                    <label>Category UID</label>
-                    <input type="text" id="admin-cat-uid" readonly placeholder="spore-000001" />
-                  </div>
-                  <div class="input-field" style="flex: 1.2">
-                    <label>Category Slug *</label>
-                    <input type="text" id="admin-cat-id" placeholder="e.g. fresh-mushrooms" pattern="[a-z0-9\-]+"
-                      title="Lowercase letters, numbers and hyphens only" />
-                  </div>
-                  <div class="input-field span-2">
-                    <label>Category Name *</label>
-                    <input type="text" id="admin-cat-name" placeholder="e.g. Fresh Mushrooms" />
-                  </div>
-                  <div class="input-field span-2">
-                    <label>Description</label>
-                    <input type="text" id="admin-cat-desc" placeholder="Short description of this category..." />
-                  </div>
-                  <div class="input-field span-2">
-                    <label>Image Upload</label>
-                    <div class="admin-cat-image-upload">
-                      <input type="url" id="admin-cat-image-url" placeholder="Paste image URL or click Browse" />
-                      <button type="button" id="admin-cat-image-browse" class="btn btn-secondary btn-image-browse">
-                        <i class="fa-solid fa-upload"></i> Browse
-                      </button>
-                      <input type="file" id="admin-cat-image-file" class="hidden-file-input" />
-                    </div>
-                  </div>
-                </div>
-                <div id="admin-cat-image-preview" class="admin-cat-image-preview-compact">
-                  <i class="fa-solid fa-image"></i>
-                  <span>Image</span>
+            <!-- SHIPMENTS PANEL (merged into Orders) -->
+            <div class="ship-panel" id="ship-panel-shipments">
+              <div class="admin-section-header" style="margin-bottom:16px;">
+                <h3><i class="fa-solid fa-cubes"></i> Shipments</h3>
+                <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <input type="text" id="admin-shipments-search" placeholder="Search order ID, AWB, courier..."
+                    class="admin-search-input" style="min-width:200px;" />
+                  <select id="admin-shipments-filter-status" class="admin-select-input" style="min-width:140px;">
+                    <option value="">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="pickup_scheduled">Pickup Scheduled</option>
+                    <option value="shipped">Shipped</option>
+                    <option value="in_transit">In Transit</option>
+                    <option value="ndr">NDR (Attention)</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="refreshShipmentsCache();loadShipmentsTab()"
+                    style="white-space:nowrap;">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                  </button>
                 </div>
               </div>
-              <div class="admin-cat-form-actions">
-                <button type="button" id="btn-admin-save-cat" class="btn btn-primary">
-                  <i class="fa-solid fa-floppy-disk"></i> Save
-                </button>
-                <button type="button" id="btn-admin-reset-cat" class="btn btn-secondary">
-                  <i class="fa-solid fa-rotate-left"></i> Reset
-                </button>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Shipments</div>
+                  <div class="refund-stat-value" id="admin-shipment-stat-total">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Pending</div>
+                  <div class="refund-stat-value refund-stat-value--amber" id="admin-shipment-stat-pending">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">In Transit</div>
+                  <div class="refund-stat-value refund-stat-value--blue" id="admin-shipment-stat-transit">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Delivered</div>
+                  <div class="refund-stat-value refund-stat-value--green" id="admin-shipment-stat-delivered">0</div>
+                </div>
+                <div class="refund-stat-card" style="border-color:#dc2626;">
+                  <div class="refund-stat-label" style="color:#dc2626;">NDR (Attention)</div>
+                  <div class="refund-stat-value" style="color:#dc2626;" id="admin-shipment-stat-ndr">0</div>
+                </div>
               </div>
-              <div class="admin-error-msg hidden" id="admin-cat-feedback"></div>
-            </div>
-            <div id="admin-categories-list" class="admin-categories-wrap">
-              <div class="admin-loading">
-                <i class="fa-solid fa-spinner fa-spin"></i> Loading
-                categories...
+
+              <div class="refund-section-card">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-list"></i> All Shipments
+                </div>
+                <div id="admin-shipments-table-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading shipments...</div>
+                </div>
               </div>
             </div>
+
+            <!-- RETURNS PANEL (merged into Orders & Shipping) -->
+            <div class="ship-panel" id="ship-panel-returns">
+              <div class="admin-section-header" style="margin-bottom:16px;">
+                <h3><i class="fa-solid fa-rotate-left"></i> Returns &amp; Exchange Management</h3>
+                <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <input type="text" id="admin-returns-search" placeholder="Search order ID or email..."
+                    class="admin-search-input" style="min-width:200px;" />
+                  <select id="admin-returns-filter-status" class="admin-select-input" style="min-width:140px;">
+                    <option value="">All statuses</option>
+                    <option value="requested">Requested</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="pickup_scheduled">Pickup Scheduled</option>
+                    <option value="pickup_completed">Pickup Completed</option>
+                    <option value="warehouse_received">Warehouse Received</option>
+                    <option value="qc_passed">QC Passed</option>
+                    <option value="qc_failed">QC Failed</option>
+                    <option value="refund_pending">Refund Pending</option>
+                    <option value="refund_completed">Refunded</option>
+                    <option value="replacement_created">Replacement Created</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="loadReturnsDashboard()"
+                    style="white-space:nowrap;">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Pending Approval</div>
+                  <div class="refund-stat-value refund-stat-value--amber" id="admin-return-stat-pending">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Approved</div>
+                  <div class="refund-stat-value refund-stat-value--blue" id="admin-return-stat-approved">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Warehouse Received</div>
+                  <div class="refund-stat-value refund-stat-value--green" id="admin-return-stat-warehouse">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Returns</div>
+                  <div class="refund-stat-value" id="admin-return-stat-total">0</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-list"></i> Returns Queue
+                </div>
+                <div id="admin-returns-table-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading returns...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- REFUNDS PANEL (merged into Orders & Shipping) -->
+            <div class="ship-panel" id="ship-panel-refunds">
+              <div class="admin-section-header" style="margin-bottom:16px;">
+                <h3><i class="fa-solid fa-hand-holding-dollar"></i> Refunds &amp; Cancellations</h3>
+                <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <input type="text" id="admin-refunds-search" placeholder="Search order ID or email..."
+                    class="admin-search-input" style="min-width:200px;" />
+                  <select id="admin-refunds-filter-status" class="admin-select-input" style="min-width:140px;">
+                    <option value="">All statuses</option>
+                    <option value="initiated">Initiated</option>
+                    <option value="processing">Processing</option>
+                    <option value="processed">Processed</option>
+                    <option value="failed">Failed</option>
+                    <option value="pending">Pending</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="loadRefundsDashboard()"
+                    style="white-space:nowrap;">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Refunded</div>
+                  <div class="refund-stat-value refund-stat-value--green" id="admin-refund-stat-total">₹0.00</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Pending</div>
+                  <div class="refund-stat-value refund-stat-value--amber" id="admin-refund-stat-pending">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Failed</div>
+                  <div class="refund-stat-value refund-stat-value--red" id="admin-refund-stat-failed">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Requests</div>
+                  <div class="refund-stat-value" id="admin-refund-stat-count">0</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-list"></i> Refund Queue
+                </div>
+                <div id="admin-refunds-table-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading refund queue...</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card" style="margin-top:20px;">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-clock-rotate-left"></i> Audit Trail
+                </div>
+                <div id="admin-refund-audits-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading audit trail...</div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -775,6 +995,22 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-training-ops">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-chalkboard-user"></i> Training Operations</h3>
+              <div class="admin-section-actions">
+                <button class="btn btn-secondary" id="btn-training-ops-refresh" style="font-size:0.85rem;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+            <div id="training-ops-container" style="padding:0 4px;">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Training Ops…</div>
             </div>
           </div>
         </div>
@@ -937,237 +1173,6 @@
                   </div>
                 </form>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="admin-tab-content" id="admin-content-shipments">
-          <div class="admin-content-inner">
-            <div class="admin-section-header">
-              <h3>
-                <i class="fa-solid fa-cubes"></i> Shipments
-              </h3>
-              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
-                <input type="text" id="admin-shipments-search" placeholder="Search order ID, AWB, courier..."
-                  class="admin-search-input" style="min-width:200px;" />
-                <select id="admin-shipments-filter-status" class="admin-select-input" style="min-width:140px;">
-                  <option value="">All statuses</option>
-                  <option value="pending">Pending</option>
-                  <option value="pickup_scheduled">Pickup Scheduled</option>
-                  <option value="shipped">Shipped</option>
-                  <option value="in_transit">In Transit</option>
-                  <option value="ndr">NDR (Attention)</option>
-                  <option value="delivered">Delivered</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-                <button type="button" class="btn btn-secondary" onclick="refreshShipmentsCache();loadShipmentsTab()"
-                  style="white-space:nowrap;">
-                  <i class="fa-solid fa-rotate"></i> Refresh
-                </button>
-              </div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Total Shipments</div>
-                <div class="refund-stat-value" id="admin-shipment-stat-total">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Pending</div>
-                <div class="refund-stat-value refund-stat-value--amber" id="admin-shipment-stat-pending">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">In Transit</div>
-                <div class="refund-stat-value refund-stat-value--blue" id="admin-shipment-stat-transit">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Delivered</div>
-                <div class="refund-stat-value refund-stat-value--green" id="admin-shipment-stat-delivered">0</div>
-              </div>
-              <div class="refund-stat-card" style="border-color:#dc2626;">
-                <div class="refund-stat-label" style="color:#dc2626;">NDR (Attention)</div>
-                <div class="refund-stat-value" style="color:#dc2626;" id="admin-shipment-stat-ndr">0</div>
-              </div>
-            </div>
-
-            <div class="refund-section-card">
-              <div class="refund-section-header">
-                <i class="fa-solid fa-list"></i> All Shipments
-              </div>
-              <div id="admin-shipments-table-container">
-                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading shipments...</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="admin-tab-content" id="admin-content-returns">
-          <div class="admin-content-inner">
-            <div class="admin-section-header">
-              <h3>
-                <i class="fa-solid fa-rotate-left"></i> Returns &amp; Exchange Management
-              </h3>
-              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
-                <input type="text" id="admin-returns-search" placeholder="Search order ID or email..."
-                  class="admin-search-input" style="min-width:200px;" />
-                <select id="admin-returns-filter-status" class="admin-select-input" style="min-width:140px;">
-                  <option value="">All statuses</option>
-                  <option value="requested">Requested</option>
-                  <option value="approved">Approved</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="pickup_scheduled">Pickup Scheduled</option>
-                  <option value="pickup_completed">Pickup Completed</option>
-                  <option value="warehouse_received">Warehouse Received</option>
-                  <option value="qc_passed">QC Passed</option>
-                  <option value="qc_failed">QC Failed</option>
-                  <option value="refund_pending">Refund Pending</option>
-                  <option value="refund_completed">Refunded</option>
-                  <option value="replacement_created">Replacement Created</option>
-                  <option value="closed">Closed</option>
-                </select>
-                <button type="button" class="btn btn-secondary" onclick="loadReturnsDashboard()"
-                  style="white-space:nowrap;">
-                  <i class="fa-solid fa-rotate"></i> Refresh
-                </button>
-              </div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Pending Approval</div>
-                <div class="refund-stat-value refund-stat-value--amber" id="admin-return-stat-pending">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Approved</div>
-                <div class="refund-stat-value refund-stat-value--blue" id="admin-return-stat-approved">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Warehouse Received</div>
-                <div class="refund-stat-value refund-stat-value--green" id="admin-return-stat-warehouse">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Total Returns</div>
-                <div class="refund-stat-value" id="admin-return-stat-total">0</div>
-              </div>
-            </div>
-
-            <div class="refund-section-card">
-              <div class="refund-section-header">
-                <i class="fa-solid fa-list"></i> Returns Queue
-              </div>
-              <div id="admin-returns-table-container">
-                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading returns...</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="admin-tab-content" id="admin-content-refunds">
-          <div class="admin-content-inner">
-            <div class="admin-section-header">
-              <h3>
-                <i class="fa-solid fa-hand-holding-dollar"></i> Refunds &amp; Cancellations
-              </h3>
-              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
-                <input type="text" id="admin-refunds-search" placeholder="Search order ID or email..."
-                  class="admin-search-input" style="min-width:200px;" />
-                <select id="admin-refunds-filter-status" class="admin-select-input" style="min-width:140px;">
-                  <option value="">All statuses</option>
-                  <option value="initiated">Initiated</option>
-                  <option value="processing">Processing</option>
-                  <option value="processed">Processed</option>
-                  <option value="failed">Failed</option>
-                  <option value="pending">Pending</option>
-                </select>
-                <button type="button" class="btn btn-secondary" onclick="loadRefundsDashboard()"
-                  style="white-space:nowrap;">
-                  <i class="fa-solid fa-rotate"></i> Refresh
-                </button>
-              </div>
-            </div>
-
-            <!-- Stats cards -->
-            <div
-              style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Total Refunded</div>
-                <div class="refund-stat-value refund-stat-value--green" id="admin-refund-stat-total">₹0.00</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Pending</div>
-                <div class="refund-stat-value refund-stat-value--amber" id="admin-refund-stat-pending">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Failed</div>
-                <div class="refund-stat-value refund-stat-value--red" id="admin-refund-stat-failed">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Total Requests</div>
-                <div class="refund-stat-value" id="admin-refund-stat-count">0</div>
-              </div>
-            </div>
-
-            <!-- Refund table -->
-            <div class="refund-section-card">
-              <div class="refund-section-header">
-                <i class="fa-solid fa-list"></i> Refund Queue
-              </div>
-              <div id="admin-refunds-table-container">
-                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading refund queue...</div>
-              </div>
-            </div>
-
-            <!-- Audit trail -->
-            <div class="refund-section-card" style="margin-top:20px;">
-              <div class="refund-section-header">
-                <i class="fa-solid fa-clock-rotate-left"></i> Audit Trail
-              </div>
-              <div id="admin-refund-audits-container">
-                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading audit trail...</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="admin-tab-content" id="admin-content-inventory">
-          <div class="admin-content-inner">
-            <div class="admin-section-header">
-              <h3><i class="fa-solid fa-warehouse"></i> Inventory Management</h3>
-              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
-                <input type="text" id="admin-inv-search" placeholder="Search product name..."
-                  class="admin-search-input" style="min-width:200px;" />
-                <select id="admin-inv-filter" class="admin-select-input" style="min-width:140px;">
-                  <option value="">All</option>
-                  <option value="low">Low Stock Only</option>
-                  <option value="out">Out of Stock</option>
-                  <option value="notify">Notify-Me Requests</option>
-                </select>
-                <button type="button" class="btn btn-secondary" onclick="loadInventoryTab()"
-                  style="white-space:nowrap;">
-                  <i class="fa-solid fa-rotate"></i> Refresh
-                </button>
-              </div>
-            </div>
-
-            <!-- Stats -->
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;">
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Low Stock Items</div>
-                <div class="refund-stat-value refund-stat-value--amber" id="admin-inv-stat-low">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Out of Stock</div>
-                <div class="refund-stat-value refund-stat-value--red" id="admin-inv-stat-oos">0</div>
-              </div>
-              <div class="refund-stat-card">
-                <div class="refund-stat-label">Notify-Me Pending</div>
-                <div class="refund-stat-value" id="admin-inv-stat-notify">0</div>
-              </div>
-            </div>
-
-            <!-- Product list -->
-            <div id="admin-inventory-list">
-              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading inventory...</div>
             </div>
           </div>
         </div>

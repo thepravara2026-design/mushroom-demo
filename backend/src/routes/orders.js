@@ -21,6 +21,7 @@ const logger = require("../utils/logger");
 const { sendSseEvent, addSseSubscriber } = require("../lib/sse");
 const FEATURE_FLAGS = require("../config/featureFlags");
 const inventoryService = require("../services/inventoryService");
+const { withTransaction, withRowLocks, optimisticUpdate } = require("../services/TransactionManager");
 
 function buildInvoiceData(order, user) {
   const gstSummary = {
@@ -443,46 +444,78 @@ router.post(
       }
 
       // ── PHASE 2: Decrement stock for all validated items ──
+      // Use transactional stock decrement with row-level locks when enabled
       const decrementedProducts = [];
-      for (const sd of stockDeductions) {
+
+      if (FEATURE_FLAGS.ENABLE_TRANSACTIONS && !db.isMock) {
         try {
-          if (!db.isMock) {
-            await supabaseAdmin.rpc("decrement_stock", {
-              p_product_id: sd.productId,
-              p_quantity: sd.quantity,
-            });
-          } else {
-            const { data: freshProduct } = await db
-              .from("products")
-              .select("stock")
-              .eq("id", sd.productId)
-              .single();
-            const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
-            await db
-              .from("products")
-              .update({ stock: currentStock - sd.quantity })
-              .eq("id", sd.productId);
-          }
-          decrementedProducts.push(sd);
-        } catch (dedErr) {
-          // Rollback already-decremented products
-          logger.error(`[checkout] Stock decrement failed for ${sd.productId}: ${dedErr.message}. Rolling back...`);
-          for (const done of decrementedProducts) {
-            try {
-              if (!db.isMock) {
-                const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
-                if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
-              } else {
-                const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
-                if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+          await withTransaction(async (client) => {
+            const productIds = stockDeductions.map(sd => sd.productId);
+            const locked = await withRowLocks(client, "products", productIds, "UPDATE");
+            const lockMap = {};
+            for (const p of locked) lockMap[p.id] = p;
+
+            for (const sd of stockDeductions) {
+              const product = lockMap[sd.productId];
+              if (!product) throw new Error(`Product ${sd.productId} not found or locked`);
+              const newStock = (product.stock || 0) - sd.quantity;
+              if (newStock < 0) {
+                throw new Error(`Insufficient stock for ${sd.name}. Available: ${product.stock}, requested: ${sd.quantity}`);
               }
-            } catch (rollbackErr) {
-              logger.error(`[checkout] Rollback failed for ${done.productId}: ${rollbackErr.message}`);
+              const r = await client.query(
+                `UPDATE products SET stock = stock - $1, version = version + 1, updated_at = $2 WHERE id = $3 AND stock >= $1`,
+                [sd.quantity, new Date().toISOString(), sd.productId]
+              );
+              if (r.rowCount === 0) {
+                throw new Error(`Stock decrement failed for ${sd.name} — concurrent modification`);
+              }
+              decrementedProducts.push(sd);
             }
-          }
-          // Delete the order since we couldn't reserve stock
+          });
+        } catch (txErr) {
+          logger.error(`[checkout] Transactional stock decrement failed: ${txErr.message}. Rolling back order creation.`);
           await db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
-          return respondError(res, `Failed to reserve stock for ${sd.name}. Please try again.`, 500);
+          return respondError(res, `Failed to reserve stock: ${txErr.message}`, 500);
+        }
+      } else {
+        for (const sd of stockDeductions) {
+          try {
+            if (!db.isMock) {
+              await supabaseAdmin.rpc("decrement_stock", {
+                p_product_id: sd.productId,
+                p_quantity: sd.quantity,
+              });
+            } else {
+              const { data: freshProduct } = await db
+                .from("products")
+                .select("stock")
+                .eq("id", sd.productId)
+                .single();
+              const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
+              await db
+                .from("products")
+                .update({ stock: currentStock - sd.quantity })
+                .eq("id", sd.productId);
+            }
+            decrementedProducts.push(sd);
+          } catch (dedErr) {
+            logger.error(`[checkout] Stock decrement failed for ${sd.productId}: ${dedErr.message}. Rolling back...`);
+            for (const done of decrementedProducts) {
+              try {
+                if (!db.isMock) {
+                  const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
+                  if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+                } else {
+                  const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
+                  if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+                }
+              } catch (rollbackErr) {
+                logger.error(`[checkout] Rollback failed for ${done.productId}: ${rollbackErr.message}`);
+              }
+            }
+            await db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
+            return respondError(res, `Failed to reserve stock for ${sd.name}. Please try again.`, 500);
+          }
         }
       }
 
@@ -1043,7 +1076,7 @@ router.put("/shipping-settings", authMiddleware, async (req, res) => {
 // Fetch all orders of authenticated user with resolved state
 router.get("/my-orders", authMiddleware, async (req, res) => {
   try {
-    const { data: orders, error } = await db
+    const { data: orders, error } = await req.db
       .from("orders")
       .select("*")
       .eq("user_id", req.user.userId)
@@ -1408,7 +1441,7 @@ router.put("/:id/cancel", authMiddleware, validateBody(cancelSchema), async (req
 // Fetch refund details for an order (owner or admin)
 router.get("/:id/refund", authMiddleware, async (req, res) => {
   try {
-    const { data: order, error: orderErr } = await db
+    const { data: order, error: orderErr } = await req.db
       .from("orders")
       .select("*")
       .eq("id", req.params.id)
@@ -1430,7 +1463,7 @@ router.get("/:id/refund", authMiddleware, async (req, res) => {
       });
     }
 
-    const { data: refund, error: refundErr } = await db
+    const { data: refund, error: refundErr } = await req.db
       .from("refunds")
       .select("*")
       .eq("id", order.refund_id)
@@ -1481,7 +1514,7 @@ router.get("/admin/refunds", authMiddleware, async (req, res) => {
 // Generate detailed invoice data
 router.get("/:id/invoice", authMiddleware, async (req, res) => {
   try {
-    const { data: order, error } = await db
+    const { data: order, error } = await req.db
       .from("orders")
       .select("*")
       .eq("id", req.params.id)
@@ -1700,7 +1733,7 @@ router.get("/share/:token", async (req, res) => {
 // Get tracking status. Uses real shipment data if available, falls back to simulated tracking.
 router.get("/:id/track", authMiddleware, async (req, res) => {
   try {
-    const { data: order, error } = await db
+    const { data: order, error } = await req.db
       .from("orders")
       .select("*")
       .eq("id", req.params.id)
@@ -1721,8 +1754,11 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       );
     }
 
+    // Admins bypass RLS for shipments/events
+    const trackDb = isAdmin ? db : req.db;
+
     // Try to fetch real shipment tracking data
-    const { data: shipment } = await db
+    const { data: shipment } = await trackDb
       .from("shipments")
       .select("*, shipping_provider_id")
       .eq("order_id", order.id)
@@ -1730,7 +1766,7 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
 
     if (shipment) {
       // Real shipment exists — build tracking from events
-      const { data: events } = await db
+      const { data: events } = await trackDb
         .from("shipment_tracking_events")
         .select("*")
         .eq("shipment_id", shipment.id)
@@ -2080,7 +2116,9 @@ router.post(
 // Fetch a single order by ID (owner or admin)
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const { data: order, error } = await db
+    // Use req.db for user queries (RLS-enforced) — admins use req.db too
+    // because the order is shared between owner and admin in RLS policies
+    const { data: order, error } = await req.db
       .from("orders")
       .select("*")
       .eq("id", req.params.id)
@@ -2251,9 +2289,6 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
       metadata: { reason, adminNote }
     });
 
-    const { restockOrderItems } = require("../modules/orders/OrderStateService");
-    await restockOrderItems(order);
-
     if (isPaid && order.razorpay_payment_id) {
       try {
         const { executeRefundProcess } = require("../modules/refunds/RefundService");
@@ -2261,6 +2296,9 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
       } catch (refundErr) {
         logger.error(`[orders] Auto-refund failed for rejected order ${order.id}: ${refundErr.message}`);
       }
+    } else {
+      const { restockOrderItems } = require("../modules/orders/OrderStateService");
+      await restockOrderItems(order);
     }
 
     const { data: user } = await db

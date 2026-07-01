@@ -86,7 +86,25 @@
 
 **15. `backend/src/services/pushService.js`** — Downgraded "not yet implemented" log from `info` to `debug`
 
+**16. `backend/src/config/supabase.js`** — Added `createUserClient(jwt)` — creates a Supabase client with anon key + user's JWT so PostgreSQL RLS policies (`auth.uid()` etc.) can evaluate the real user
+
+**17. `backend/src/config/db.js`** — Added `dbAnon` (shared anon-key client) and `createUserDb(jwt)` (per-request authenticated client), both wrapped in `SupabaseQueryBuilderWrapper` for API compatibility
+
+**18. `backend/src/middleware/auth.js`** — After JWT verification, creates `req.authDb = createUserDb(token)` so route handlers can use RLS-enforced queries
+
+**19. `backend/src/middleware/selectDb.js`** (new) — Global middleware that attaches `req.db` for every request: admins get service_role (bypass RLS), authenticated users get JWT-authenticated client (RLS-enforced), unauthenticated requests get anon client (RLS-enforced public data)
+
+**20. `backend/src/server.js`** — Applied `selectDb` middleware globally before all route mounts
+
+**21. Routes updated to use `req.db` instead of imported `db`:**
+- `orders.js` — `my-orders`, `track`, `:id`, `refund`, `invoice` (user-facing queries now RLS-enforced)
+- `shipping.js` — `create`, `track` (user-facing shipments/events queries RLS-enforced)
+- `trainings.js` — `enroll`, `my-enrollments`, `register`, `verify-payment`, `cancel` enrollment, public `GET /` (user-facing training queries RLS-enforced)
+- `search.js` — public search now uses anon client (RLS-enforced)
+
+**22. Admin-only routes intentionally left using imported `db` (service_role)** — bypass RLS for order management, product CRUD, etc.
+
 ### Tests
-- All **23 backend tests pass** with no regressions
+- All **108 backend tests pass** with no regressions (8 suites, 108 tests)
 - Frontend `app.js`, `admin.js`, and `AuthModal.js` pass `node --check` syntax validation
 - Backend `RefundService.js` and `notificationService.js` pass `require()` validation
