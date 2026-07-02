@@ -18,8 +18,8 @@ async function listProducts(filters = {}) {
 
   // If pagination params provided, return paginated result
   if (page || limit) {
-    const p = parseInt(page, 10) || 1;
-    const l = parseInt(limit, 10) || 10;
+    const p = Math.max(1, parseInt(page, 10) || 1);
+    const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const { count, error: countError } = await productRepo.countAll({ category, search });
     if (countError) throw new Error(countError.message);
 

@@ -5,6 +5,7 @@ const { logRefundAction } = require("./RefundAuditService");
 const { sendRefundNotification } = require("./RefundService");
 const db = require("../../config/db");
 const { sendSseEvent } = require("../../lib/sse");
+const { notify } = require("../../services/notificationService");
 const logger = require("../../utils/logger");
 
 /**
@@ -64,6 +65,54 @@ async function reconcileTrainingRefund(rzpRefundId, newStatus, failureDesc) {
         .eq("id", payment.enrollment_id)
         .update({ status: enrollmentStatus })
         .then(r => r.data || r);
+
+      // Decrement seats_taken when refund is confirmed
+      if (newStatus === "processed") {
+        const enrollRows = await db
+          .from("training_enrollments")
+          .select("batch_id, user_id")
+          .eq("id", payment.enrollment_id)
+          .then(r => r.data || r);
+        if (enrollRows && enrollRows.length > 0) {
+          const batchRows = await db
+            .from("training_batches")
+            .select("seats_taken")
+            .eq("id", enrollRows[0].batch_id)
+            .then(r => r.data || r);
+          if (batchRows && batchRows.length > 0) {
+            await db
+              .from("training_batches")
+              .eq("id", enrollRows[0].batch_id)
+              .update({ seats_taken: Math.max(0, (batchRows[0].seats_taken || 1) - 1) })
+              .then(r => r.data || r);
+          }
+
+          // Send refund notification
+          const batchNameRows = await db
+            .from("training_batches")
+            .select("title")
+            .eq("id", enrollRows[0].batch_id)
+            .then(r => r.data || r);
+          const batchTitle = batchNameRows && batchNameRows.length > 0 ? batchNameRows[0].title : "Training";
+          const userRows = await db
+            .from("users")
+            .select("email, phone, full_name")
+            .eq("id", enrollRows[0].user_id)
+            .then(r => r.data || r);
+          if (userRows && userRows.length > 0) {
+            const user = {
+              email: userRows[0].email,
+              phone: userRows[0].phone,
+              fullName: userRows[0].full_name,
+            };
+            notify("TRAINING_REFUNDED", trainingRefund, user, {
+              batchTitle,
+              amount: trainingRefund.amount,
+              refundId: trainingRefund.razorpay_refund_id,
+            }).catch(() => {});
+          }
+        }
+      }
 
       sendSseEvent("training_enrollment:updated", {
         enrollment_id: payment.enrollment_id,
@@ -240,10 +289,13 @@ async function handleWebhookEvent(event) {
         // Notify customer
         await sendRefundNotification(order, "TECHNICAL_RECOVERY", { amount: order.total });
 
-        // Trigger automatic refund process
-        executeRefundProcess(order, order.total, "system", "Technical recovery refund for orphaned payment webhook")
-          .then(() => logger.info(`[RefundWebhookHandler] Technical recovery refund processed for order ${order.id}`))
-          .catch(err => logger.error(`[RefundWebhookHandler] Technical recovery refund execution failed for order ${order.id}: ${err.message}`));
+        // Trigger automatic refund process (await to prevent retry race)
+        try {
+          await executeRefundProcess(order, order.total, "system", "Technical recovery refund for orphaned payment webhook");
+          logger.info(`[RefundWebhookHandler] Technical recovery refund processed for order ${order.id}`);
+        } catch (err) {
+          logger.error(`[RefundWebhookHandler] Technical recovery refund execution failed for order ${order.id}: ${err.message}`);
+        }
       }
       break;
     }

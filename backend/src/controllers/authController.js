@@ -8,6 +8,10 @@ const { success, error: respondError } = require("../lib/response");
 const db = require("../config/db");
 const { supabaseAdmin, supabaseAnon } = require("../config/supabase");
 const { setAuthCookie, clearAuthCookie } = require("../lib/authCookie");
+const jwt = require("jsonwebtoken");
+const userRepo = require("../repositories/userRepository");
+const { JWT_SECRET, JWT_EXPIRES_IN } = require("../config/jwt");
+const logger = require("../utils/logger");
 
 const registerSchema = Joi.object({
   email: Joi.string().email().required().messages({
@@ -23,7 +27,7 @@ const registerSchema = Joi.object({
     "string.max": "Name must not exceed 100 characters.",
     "any.required": "Name is required.",
   }),
-  role: Joi.string().valid("buyer", "grower", "admin").optional(),
+  role: Joi.string().valid("buyer", "grower").optional(),
 });
 
 /**
@@ -169,7 +173,7 @@ const otpRequestSchema = Joi.object({
     "string.email": "Enter a valid email address.",
     "any.required": "Email is required to request OTP.",
   }),
-  role: Joi.string().valid("buyer", "grower", "admin").optional(),
+  role: Joi.string().valid("buyer", "grower").optional(),
   fullName: Joi.string().min(2).max(100).optional().allow(""),
   phone: Joi.string().optional().allow(""),
 });
@@ -420,6 +424,100 @@ router.post(
     }
   },
 );
+
+const googleLoginSchema = Joi.object({
+  credential: Joi.string().required().messages({
+    "any.required": "Google credential is required.",
+  }),
+});
+
+/**
+ * POST /api/auth/google-login
+ * Handles Google OAuth login for buyers/growers.
+ * In production: verifies the Google credential JWT.
+ * In mock/dev: decodes the base64 credential to extract email/name.
+ */
+router.post("/google-login", validateBody(googleLoginSchema), async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    let email = null;
+    let fullName = null;
+
+    if (db.isMock) {
+      try {
+        const decoded = JSON.parse(Buffer.from(credential, "base64").toString("utf-8"));
+        email = (decoded.email || "").toLowerCase().trim();
+        fullName = (decoded.name || decoded.fullName || "").trim();
+      } catch {
+        try {
+          const raw = Buffer.from(credential, "base64").toString("utf-8").toLowerCase().trim();
+          if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+            email = raw;
+          }
+        } catch {}
+      }
+    } else {
+      try {
+        const { OAuth2Client } = require("google-auth-library");
+        const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+        if (!GOOGLE_CLIENT_ID) {
+          return respondError(res, "Google authentication is not configured.", 500);
+        }
+        const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+        const ticket = await client.verifyIdToken({
+          idToken: credential,
+          audience: GOOGLE_CLIENT_ID,
+        });
+        const payload = ticket.getPayload();
+        email = (payload.email || "").toLowerCase().trim();
+        fullName = (payload.name || "").trim();
+      } catch (verifyErr) {
+        logger.error("Google token verification failed:", verifyErr);
+        return respondError(res, "Invalid Google credential.", 401);
+      }
+    }
+
+    if (!email) {
+      return respondError(res, "Could not extract email from Google credential.", 400);
+    }
+
+    const { data: user } = await userRepo.findByEmail(email);
+
+    if (!user) {
+      return respondError(res, "No account found with this email. Please sign up first.", 404);
+    }
+
+    if (user.role !== "buyer" && user.role !== "grower") {
+      return respondError(res, "This account is not authorized for buyer/grower login.", 403);
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN },
+    );
+
+    setAuthCookie(res, token);
+    return success(res, {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        whatsappNumber: user.whatsapp_number || "",
+        role: user.role,
+        loginMethod: "google",
+      },
+    });
+  } catch (err) {
+    return respondError(
+      res,
+      err.message || "Google login failed",
+      err.status || 500,
+    );
+  }
+});
 
 /**
  * GET /api/auth/me

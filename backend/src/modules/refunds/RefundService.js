@@ -834,9 +834,13 @@ async function progressManualRefundStep(orderId, targetStep, adminUser = null) {
     updated_at: new Date().toISOString()
   };
 
-  // When marking as completed, set the refunded amount
+  // When marking as completed, add this refund amount to running total
   if (targetStep === 'completed') {
-    updates.total_refunded_amount = Number(order.total || 0);
+    const existingRefunds = await repo.findRefundsByOrderId(orderId);
+    const openRefund = existingRefunds.find(r => !["completed", "failed", "superseded"].includes(r.status));
+    const manualRefundAmount = openRefund ? Number(openRefund.amount || 0) : 0;
+    const previouslyRefunded = Number(order.total_refunded_amount || 0);
+    updates.total_refunded_amount = previouslyRefunded + manualRefundAmount;
   }
 
   const updatedOrder = await repo.updateOrder(orderId, updates);

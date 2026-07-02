@@ -17,8 +17,10 @@ async function findAll({ sort, category, search, page, limit } = {}) {
   else if (sort === 'name') builder = builder.order('name', { ascending: true })
   else builder = builder.order('created_at', { ascending: false })
   if (page !== undefined && limit !== undefined) {
-    const from = (page - 1) * limit
-    const to = from + limit - 1
+    const safePage = Math.max(1, parseInt(page, 10) || 1)
+    const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 10))
+    const from = (safePage - 1) * safeLimit
+    const to = from + safeLimit - 1
     builder = builder.range(from, to)
   }
   const { data, error } = await builder

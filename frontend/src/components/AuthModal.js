@@ -56,6 +56,9 @@ export class AuthModal {
 
     // Method selector buttons
     document
+      .getElementById('btn-auth-google')
+      ?.addEventListener('click', () => this.handleGoogleLogin());
+    document
       .getElementById('btn-auth-phone')
       ?.addEventListener('click', () => this.showPhoneView());
     document
@@ -254,9 +257,7 @@ export class AuthModal {
       else titleEl.textContent = 'Welcome to Sporekart';
     }
 
-    // Always show name field so first-time users can set their profile name
-    if (this.nameField) this.nameField.style.display = 'block';
-    if (this.phoneNameField) this.phoneNameField.style.display = 'block';
+    // Name fields stay hidden by default; shown only when lookup pre-fills them or during signup flow
 
     const backBtn = document.getElementById('link-back-method-email');
     if (backBtn) {
@@ -295,7 +296,7 @@ export class AuthModal {
     if (role === 'admin') {
       this.showAdminPasswordView();
     } else {
-      this.showPhoneView();
+      this.showMethodView();
     }
     this.modal.classList.add('open');
   }
@@ -332,6 +333,12 @@ export class AuthModal {
     this._hide(this.verifyView);
     this._hide(this.adminPasswordView);
     this._show(this.methodView);
+
+    const titleEl = document.getElementById('auth-modal-title');
+    if (titleEl) {
+      if (this.currentRole === 'grower') titleEl.textContent = 'Grower Portal Access';
+      else titleEl.textContent = 'Welcome to Sporekart';
+    }
 
     const emailField = document.getElementById('admin-email-field');
     const otpField = document.getElementById('admin-otp-field');
@@ -735,6 +742,124 @@ export class AuthModal {
         btn.disabled = false;
         btn.textContent = 'Verify & Login';
       }
+    }
+  }
+
+  // ======================
+  // GOOGLE LOGIN
+  // ======================
+  async handleGoogleLogin() {
+    const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || null;
+
+    if (GOOGLE_CLIENT_ID && typeof google !== 'undefined' && google.accounts) {
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async (response) => {
+          if (response.credential) {
+            await this._processGoogleCredential(response.credential);
+          }
+        },
+      });
+      google.accounts.id.prompt();
+    } else {
+      this.showGoogleMockView();
+    }
+  }
+
+  showGoogleMockView() {
+    this._hide(this.phoneView);
+    this._hide(this.requestView);
+    this._hide(this.verifyView);
+    this._hide(this.adminPasswordView);
+    this._hide(this.methodView);
+
+    const container = this.methodView.parentElement;
+    if (!container) return;
+
+    let mockView = document.getElementById('auth-google-mock-view');
+    if (!mockView) {
+      mockView = document.createElement('div');
+      mockView.id = 'auth-google-mock-view';
+      mockView.className = 'auth-form-panel';
+      container.appendChild(mockView);
+    }
+    mockView.classList.remove('hidden');
+    mockView.innerHTML = `
+      <div style="text-align:center;margin-bottom:1.25rem;">
+        <div style="width:48px;height:48px;background:#e8f5e9;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 0.75rem;font-size:1.2rem;color:#2e7d32;">
+          <i class="fa-brands fa-google"></i>
+        </div>
+        <h3 style="margin:0 0 0.25rem;font-size:1.05rem;">Mock Google Sign In</h3>
+        <p style="margin:0;font-size:0.85rem;color:#666;">Enter your details to simulate Google login</p>
+      </div>
+      <div class="auth-field">
+        <label for="google-mock-email">Email</label>
+        <input type="email" id="google-mock-email" class="auth-input" placeholder="you@example.com" value="buyer@sporekart.com">
+      </div>
+      <div class="auth-field" style="margin-top:0.75rem;">
+        <label for="google-mock-name">Full Name</label>
+        <input type="text" id="google-mock-name" class="auth-input" placeholder="Your name" value="Buyer User">
+      </div>
+      <div id="google-mock-error" class="auth-error hidden" style="margin-top:0.75rem;"></div>
+      <button id="btn-google-mock-submit" class="btn btn-primary btn-block" style="margin-top:1.25rem;width:100%;">Sign in with Google</button>
+      <button id="btn-google-mock-back" class="btn btn-secondary btn-block" style="margin-top:0.5rem;width:100%;">← Use a different method</button>
+    `;
+
+    document.getElementById('btn-google-mock-submit')?.addEventListener('click', () => this.handleGoogleMockSubmit());
+    document.getElementById('btn-google-mock-back')?.addEventListener('click', () => {
+      mockView.classList.add('hidden');
+      this.showMethodView();
+    });
+    document.getElementById('google-mock-email')?.focus();
+  }
+
+  async handleGoogleMockSubmit() {
+    const email = document.getElementById('google-mock-email')?.value.trim();
+    const name = document.getElementById('google-mock-name')?.value.trim();
+    const errorEl = document.getElementById('google-mock-error');
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (errorEl) { errorEl.textContent = 'Enter a valid email address.'; errorEl.classList.remove('hidden'); }
+      return;
+    }
+
+    if (errorEl) errorEl.classList.add('hidden');
+    const btn = document.getElementById('btn-google-mock-submit');
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+
+    const payload = JSON.stringify({ email, name: name || '' });
+    const credential = btoa(payload);
+    await this._processGoogleCredential(credential);
+    if (btn) { btn.disabled = false; btn.textContent = 'Sign in with Google'; }
+  }
+
+  async _processGoogleCredential(credential) {
+    const errorEl = document.getElementById('request-error');
+    const btn = document.getElementById('btn-auth-google');
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+
+    try {
+      const data = await authApi.googleLogin(credential);
+
+      clearAuth();
+      saveAuth(data.token, data.user);
+      this.close();
+      if (this.onSuccessCallback) this.onSuccessCallback();
+      const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
+      const { showPopupModal } = await import('../utils/notify.js');
+      showPopupModal({
+        title: '🎉 Welcome!',
+        message: `Hello ${userName}, welcome back!`,
+        duration: 2000,
+        refreshOnClose: true,
+      });
+    } catch (err) {
+      if (errorEl) {
+        errorEl.textContent = err.message || 'Google sign in failed.';
+        errorEl.classList.remove('hidden');
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-brands fa-google" style="color:#4285F4"></i> Sign in with Google'; }
     }
   }
 

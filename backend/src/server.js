@@ -28,7 +28,7 @@ const logger = require("./utils/logger");
 // Phase 1 — New module routes (feature-flag gated)
 const inventoryModuleRoutes = require("./modules/inventory");
 const couponModuleRoutes = require("./modules/coupons");
-const guestCheckoutRoutes = require("./modules/guestCheckout");
+
 const pincodeRoutes = require("./routes/pincode");
 const FEATURE_FLAGS = require("./config/featureFlags");
 
@@ -62,38 +62,32 @@ app.use(
   }),
 );
 
-// Rate limiters — disabled in dev/test/mock mode for easier E2E testing
+// Rate limiters — higher limits in dev/test/mock for E2E testing, but never fully disabled
 const isDevOrTest = process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development' || process.env.FORCE_MOCK === 'true';
-const otpLimiter = isDevOrTest
-  ? (req, res, next) => next()
-  : rateLimit({
-    windowMs: 60 * 1000,
-    max: 5,
-    message: { error: "Too many requests. Please try again later." },
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
+const otpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isDevOrTest ? 50 : 5,
+  message: { error: "Too many requests. Please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-const authLimiter = isDevOrTest
-  ? (req, res, next) => next()
-  : rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    message: { error: "Too many requests. Please try again later." },
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isDevOrTest ? 200 : 60,
+  message: { error: "Too many requests. Please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-const globalLimiter = isDevOrTest
-  ? (req, res, next) => next()
-  : rateLimit({
-    windowMs: 60 * 1000,
-    max: 200,
-    message: { error: "Too many requests. Please try again later." },
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: (req) => req.path.includes("/webhooks/"),
-  });
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: isDevOrTest ? 500 : 200,
+  message: { error: "Too many requests. Please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path.includes("/webhooks/"),
+});
 
 // Apply rate limiters — order matters: more specific paths first, then global
 app.use("/api/auth/request-otp", otpLimiter);
@@ -148,7 +142,7 @@ app.use("/api/refunds", refundRoutes);
 // Phase 1 — New feature-flagged routes
 app.use("/api/inventory", inventoryModuleRoutes);
 app.use("/api/coupons", couponModuleRoutes);
-app.use("/api/guest", guestCheckoutRoutes);
+
 app.use("/api/pincode", pincodeRoutes);
 
 // Phase 3 — Abandonment routes

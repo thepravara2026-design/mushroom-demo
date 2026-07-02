@@ -5356,16 +5356,15 @@ async function loadTrainingOpsTab() {
   container.innerHTML = '<div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Training Ops…</div>';
 
   try {
+    // Ensure trainings list is populated for the batch form dropdown
+    if (!_adminTrainings || !_adminTrainings.length) {
+      await fetchAdminTrainings();
+    }
+
     const [dashboard, allBatches, allEnrollments, actionLogs] = await Promise.all([
       trainingApi.getAdminDashboard(),
-      trainingApi.getTrainings().then(trainings => {
-        const batchPromises = (trainings || []).map(t =>
-          // We already have batches nested from the API
-          t.batches || []
-        );
-        return batchPromises.flat();
-      }),
-      fetchWithAuth('/trainings/my-enrollments').then(r => r?.v2 || []),
+      trainingApi.getAllBatches(),
+      trainingApi.getAllEnrollments().then(r => r?.v2 || []),
       trainingApi.getActionLogs(),
     ]);
 
@@ -5374,70 +5373,235 @@ async function loadTrainingOpsTab() {
     const enrollments = Array.isArray(allEnrollments) ? allEnrollments : [];
     const logs = Array.isArray(actionLogs) ? actionLogs : [];
 
+    // Group batches by training_id for accordion
+    const batchBuckets = { _orphan: [] };
+    for (const b of batches) {
+      const key = b.training_id || '_orphan';
+      if (!batchBuckets[key]) batchBuckets[key] = [];
+      batchBuckets[key].push(b);
+    }
+    const orphanBatches = batchBuckets._orphan;
+
+    function batchStatusStyle(status) {
+      const m = { upcoming: ['#d4edda','#155724'], active: ['#cce5ff','#004085'], completed: ['#f8d7da','#721c24'], cancelled: ['#f8d7da','#721c24'] };
+      const s = m[status] || ['#e2e8f0','#475569'];
+      return `background:${s[0]};color:${s[1]};`;
+    }
+
     container.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">
-        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
-          <span style="font-size:1.6rem;font-weight:700;color:#2d6a4f;">${stats.upcoming_batches || 0}</span>
-          <span style="font-size:0.8rem;color:#666;">Upcoming Batches</span>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
+        <div class="admin-stat-chip" style="flex-direction:column;padding:12px;">
+          <span style="font-size:1.4rem;font-weight:700;color:#2d6a4f;">${stats.upcoming_batches || 0}</span>
+          <span style="font-size:0.75rem;color:#666;">Upcoming</span>
         </div>
-        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
-          <span style="font-size:1.6rem;font-weight:700;color:#2d6a4f;">${stats.active_enrollments || 0}</span>
-          <span style="font-size:0.8rem;color:#666;">Active Enrollments</span>
+        <div class="admin-stat-chip" style="flex-direction:column;padding:12px;">
+          <span style="font-size:1.4rem;font-weight:700;color:#2d6a4f;">${stats.active_enrollments || 0}</span>
+          <span style="font-size:0.75rem;color:#666;">Enrolled</span>
         </div>
-        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
-          <span style="font-size:1.6rem;font-weight:700;color:#2d6a4f;">₹${Number(stats.total_revenue || 0).toLocaleString()}</span>
-          <span style="font-size:0.8rem;color:#666;">Total Revenue</span>
+        <div class="admin-stat-chip" style="flex-direction:column;padding:12px;">
+          <span style="font-size:1.4rem;font-weight:700;color:#2d6a4f;">₹${Number(stats.total_revenue || 0).toLocaleString()}</span>
+          <span style="font-size:0.75rem;color:#666;">Revenue</span>
         </div>
-        <div class="admin-stat-chip" style="flex-direction:column;padding:16px;">
-          <span style="font-size:1.6rem;font-weight:700;color:${stats.pending_refunds > 0 ? '#dc3545' : '#2d6a4f'};">${stats.pending_refunds || 0}</span>
-          <span style="font-size:0.8rem;color:#666;">Pending Refunds</span>
+        <div class="admin-stat-chip" style="flex-direction:column;padding:12px;">
+          <span style="font-size:1.4rem;font-weight:700;color:${stats.pending_refunds > 0 ? '#dc3545' : '#2d6a4f'};">${stats.pending_refunds || 0}</span>
+          <span style="font-size:0.75rem;color:#666;">Pending Refunds</span>
         </div>
       </div>
 
-      <div class="admin-section-header"><h3><i class="fa-solid fa-layer-group"></i> Batches</h3></div>
-      <div style="margin-bottom:20px;">
-        <div id="training-ops-batches">
-          ${batches.length === 0 ? '<div class="admin-loading">No batches found.</div>' : batches.map(b => `
-            <div class="admin-card" style="padding:14px;margin-bottom:8px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-                <div>
-                  <strong>${b.title || 'Untitled'}</strong>
-                  <span class="admin-badge" style="background:${b.status === 'upcoming' ? '#d4edda' : b.status === 'active' ? '#cce5ff' : '#f8d7da'};color:${b.status === 'upcoming' ? '#155724' : b.status === 'active' ? '#004085' : '#721c24'};margin-left:8px;padding:2px 10px;border-radius:12px;font-size:0.75rem;">${b.status}</span>
-                  <div style="font-size:0.8rem;color:#666;margin-top:4px;">
-                    ${b.start_date ? new Date(b.start_date).toLocaleDateString('en-IN') : '—'} &middot;
-                    ${b.seats_taken || 0}/${b.capacity || 0} seats &middot;
-                    ₹${Number(b.price_actual || 0).toLocaleString()}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3 style="margin:0;font-size:1.1rem;color:#1e293b;"><i class="fa-solid fa-book-open" style="margin-right:8px;color:#6366f1;"></i>Courses &amp; Batches</h3>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-primary" id="btn-new-batch" style="font-size:0.78rem;padding:4px 12px;"><i class="fa-solid fa-plus"></i> Batch</button>
+          <button class="btn btn-secondary" id="btn-new-course" style="font-size:0.78rem;padding:4px 12px;"><i class="fa-solid fa-plus"></i> Course</button>
+        </div>
+      </div>
+
+      <div id="training-ops-batch-form" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:14px;">
+        <div style="font-weight:600;margin-bottom:10px;color:#1e293b;font-size:0.9rem;" id="tob-form-title">New Batch</div>
+        <input type="hidden" id="tob-edit-id" value="" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Training Course *</label>
+            <select id="tob-training-id" style="font-size:0.82rem;">
+              <option value="">Select training...</option>
+              ${(_adminTrainings || []).map(t => `<option value="${t.id}">${t.title}</option>`).join('')}
+            </select>
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Batch Title *</label>
+            <input type="text" id="tob-title" style="font-size:0.82rem;" placeholder="e.g. March Batch" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Start Date *</label>
+            <input type="date" id="tob-start-date" style="font-size:0.82rem;" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">End Date *</label>
+            <input type="date" id="tob-end-date" style="font-size:0.82rem;" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Capacity *</label>
+            <input type="number" id="tob-capacity" min="1" style="font-size:0.82rem;" placeholder="e.g. 20" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Actual Price (₹) *</label>
+            <input type="number" id="tob-price-actual" min="0" step="0.01" style="font-size:0.82rem;" placeholder="e.g. 999" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Strikeout (₹)</label>
+            <input type="number" id="tob-price-strikeout" min="0" step="0.01" style="font-size:0.82rem;" placeholder="e.g. 1999" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Instructor</label>
+            <input type="text" id="tob-instructor" style="font-size:0.82rem;" placeholder="Name" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Location</label>
+            <input type="text" id="tob-location" style="font-size:0.82rem;" placeholder="Venue" />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Meeting Link</label>
+            <input type="url" id="tob-meeting-link" style="font-size:0.82rem;" placeholder="https://..." />
+          </div>
+          <div class="input-field">
+            <label style="font-size:0.78rem;">Cancel Cutoff (days)</label>
+            <input type="number" id="tob-cancel-cutoff" min="0" value="3" style="font-size:0.82rem;" />
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:10px;">
+          <button type="button" class="btn btn-primary" id="tob-save-btn" style="font-size:0.82rem;padding:5px 14px;"><i class="fa-solid fa-save"></i> Save Batch</button>
+          <button type="button" class="btn btn-secondary" id="tob-cancel-btn" style="font-size:0.82rem;padding:5px 14px;">Cancel</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;" id="training-ops-accordion">
+        ${(!_adminTrainings || !_adminTrainings.length) && (!orphanBatches || !orphanBatches.length)
+          ? '<div class="admin-loading" style="padding:20px;text-align:center;color:#94a3b8;">No courses or batches yet. Click <strong>+ Course</strong> to get started.</div>'
+          : [
+            ..._adminTrainings.map((t, ci) => {
+              const courseBatches = batchBuckets[t.id] || [];
+              const batchCount = courseBatches.length;
+              const statusCounts = { upcoming: 0, active: 0, completed: 0, cancelled: 0 };
+              for (const bb of courseBatches) { if (statusCounts[bb.status] !== undefined) statusCounts[bb.status]++; }
+              const summary = Object.entries(statusCounts).filter(([,c]) => c > 0).map(([k,c]) => `${c} ${k}`).join(', ');
+              const chevSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+              return `
+                <div class="toc-panel" style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden;background:#fff;">
+                  <div class="toc-panel-header" data-index="${ci}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                    <img src="${t.image_url || '/images/training_farm.png'}" alt="" style="width:36px;height:36px;border-radius:6px;object-fit:cover;flex-shrink:0;" />
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-weight:600;font-size:0.88rem;color:#1e293b;">${t.title}</div>
+                      <div style="font-size:0.72rem;color:#64748b;margin-top:1px;">${t.category || ''}${summary ? ' · ' + summary : ''}</div>
+                    </div>
+                    <div style="display:flex;gap:4px;flex-shrink:0;">
+                      <span style="font-size:0.72rem;color:#64748b;background:#e2e8f0;border-radius:10px;padding:1px 8px;">${batchCount}</span>
+                      <button class="btn btn-secondary btn-ops-course-edit" data-id="${t.id}" style="font-size:0.7rem;padding:2px 8px;border:none;background:transparent;color:#6366f1;cursor:pointer;" title="Edit course"><i class="fa-solid fa-pen"></i></button>
+                      <button class="btn btn-secondary btn-ops-course-del" data-id="${t.id}" style="font-size:0.7rem;padding:2px 8px;border:none;background:transparent;color:#dc3545;cursor:pointer;" title="Delete course"><i class="fa-solid fa-trash"></i></button>
+                      <span class="toc-chev" style="color:#94a3b8;transition:transform 0.2s;">${chevSvg}</span>
+                    </div>
+                  </div>
+                  <div class="toc-panel-body" style="max-height:0;overflow:hidden;transition:max-height 0.25s ease;">
+                    <div style="padding:8px 14px 12px;">
+                      ${courseBatches.length === 0
+                        ? '<div style="font-size:0.78rem;color:#94a3b8;padding:8px 0;text-align:center;">No batches for this course.</div>'
+                        : courseBatches.map(b => `
+                          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;margin-bottom:4px;background:#f8fafc;border-radius:6px;border:1px solid #f1f5f9;">
+                            <div style="flex:1;min-width:0;">
+                              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                                <span style="font-weight:500;font-size:0.82rem;color:#1e293b;">${b.title || 'Untitled'}</span>
+                                <span class="admin-badge" style="${batchStatusStyle(b.status)}padding:1px 8px;border-radius:10px;font-size:0.68rem;">${b.status}</span>
+                              </div>
+                              <div style="font-size:0.72rem;color:#64748b;margin-top:2px;">
+                                ${b.start_date ? new Date(b.start_date).toLocaleDateString('en-IN', {day:'numeric',month:'short'}) : '—'}${b.end_date ? ' – '+new Date(b.end_date).toLocaleDateString('en-IN', {day:'numeric',month:'short'}) : ''} &middot;
+                                ${b.seats_taken || 0}/${b.capacity || 0} seats &middot;
+                                ₹${Number(b.price_actual || 0).toLocaleString()}
+                                ${b.instructor ? ' &middot; '+b.instructor : ''}
+                              </div>
+                            </div>
+                            <div style="display:flex;gap:4px;flex-shrink:0;">
+                              <button class="btn btn-secondary btn-ops-edit" data-id="${b.id}" style="font-size:0.68rem;padding:2px 8px;"><i class="fa-solid fa-pen"></i></button>
+                              <button class="btn btn-secondary btn-ops-clone" data-id="${b.id}" style="font-size:0.68rem;padding:2px 8px;"><i class="fa-solid fa-copy"></i></button>
+                              <button class="btn btn-secondary btn-ops-force-cancel" data-id="${b.id}" style="font-size:0.68rem;padding:2px 8px;color:#dc3545;"><i class="fa-solid fa-ban"></i></button>
+                            </div>
+                          </div>
+                        `).join('')}
+                      <button class="btn btn-secondary btn-ops-add-batch-to-course" data-course-id="${t.id}" style="font-size:0.72rem;padding:4px 12px;margin-top:6px;width:100%;border:1px dashed #cbd5e1;background:transparent;color:#6366f1;"><i class="fa-solid fa-plus"></i> Add Batch</button>
+                    </div>
                   </div>
                 </div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                  <button class="btn btn-secondary btn-ops-clone" data-id="${b.id}" style="font-size:0.75rem;padding:4px 12px;"><i class="fa-solid fa-copy"></i> Clone</button>
-                  <button class="btn btn-secondary btn-ops-force-cancel" data-id="${b.id}" style="font-size:0.75rem;padding:4px 12px;color:#dc3545;"><i class="fa-solid fa-ban"></i> Force Cancel</button>
-                </div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
+              `;
+            }),
+            (orphanBatches && orphanBatches.length > 0
+              ? `<div class="toc-panel" style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden;background:#fff;">
+                  <div class="toc-panel-header" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none;background:#fef9ef;border-bottom:1px solid #fde68a;">
+                    <div style="width:36px;height:36px;border-radius:6px;background:#fef3c7;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:1rem;">📦</div>
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-weight:600;font-size:0.88rem;color:#92400e;">Uncategorized</div>
+                      <div style="font-size:0.72rem;color:#a16207;">${orphanBatches.length} batch(es) without a course</div>
+                    </div>
+                    <span class="toc-chev" style="color:#a16207;transition:transform 0.2s;">${'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'}</span>
+                  </div>
+                  <div class="toc-panel-body" style="max-height:0;overflow:hidden;transition:max-height 0.25s ease;">
+                    <div style="padding:8px 14px 12px;">
+                      ${orphanBatches.map(b => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;margin-bottom:4px;background:#fffbeb;border-radius:6px;border:1px solid #fde68a;">
+                          <div style="flex:1;min-width:0;">
+                            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                              <span style="font-weight:500;font-size:0.82rem;color:#1e293b;">${b.title || 'Untitled'}</span>
+                              <span class="admin-badge" style="${batchStatusStyle(b.status)}padding:1px 8px;border-radius:10px;font-size:0.68rem;">${b.status}</span>
+                            </div>
+                            <div style="font-size:0.72rem;color:#64748b;margin-top:2px;">
+                              ${b.start_date ? new Date(b.start_date).toLocaleDateString('en-IN', {day:'numeric',month:'short'}) : '—'}${b.end_date ? ' – '+new Date(b.end_date).toLocaleDateString('en-IN', {day:'numeric',month:'short'}) : ''} &middot;
+                              ${b.seats_taken || 0}/${b.capacity || 0} seats &middot;
+                              ₹${Number(b.price_actual || 0).toLocaleString()}
+                            </div>
+                          </div>
+                          <div style="display:flex;gap:4px;flex-shrink:0;">
+                            <button class="btn btn-secondary btn-ops-edit" data-id="${b.id}" style="font-size:0.68rem;padding:2px 8px;"><i class="fa-solid fa-pen"></i></button>
+                            <button class="btn btn-secondary btn-ops-clone" data-id="${b.id}" style="font-size:0.68rem;padding:2px 8px;"><i class="fa-solid fa-copy"></i></button>
+                            <button class="btn btn-secondary btn-ops-force-cancel" data-id="${b.id}" style="font-size:0.68rem;padding:2px 8px;color:#dc3545;"><i class="fa-solid fa-ban"></i></button>
+                          </div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>`
+              : ''
+            )
+          ].join('')}
       </div>
 
-      <div class="admin-section-header"><h3><i class="fa-solid fa-users"></i> Enrollments / Roster</h3></div>
+      <div class="admin-section-header"><h3><i class="fa-solid fa-users"></i> Enrollments / Roster (${enrollments.length})</h3></div>
       <div style="margin-bottom:20px;" id="training-ops-roster">
-        ${enrollments.length === 0 ? '<div class="admin-loading">No enrollments.</div>' : enrollments.map(e => `
-          <div class="admin-card" style="padding:10px;margin-bottom:4px;font-size:0.85rem;">
+        ${enrollments.length === 0 ? '<div class="admin-loading">No enrollments.</div>' : enrollments.map(e => {
+          const user = e.user || {};
+          const enrolledDate = e.created_at ? new Date(e.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+          return `
+          <div class="admin-card" style="padding:10px;margin-bottom:4px;font-size:0.82rem;">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-              <span>${e.batch?.title || '—'} <span class="admin-badge" style="background:${e.status === 'confirmed' ? '#d4edda' : '#f8d7da'};color:${e.status === 'confirmed' ? '#155724' : '#721c24'};padding:1px 8px;border-radius:10px;font-size:0.7rem;">${e.status}</span></span>
-              <div style="display:flex;gap:6px;">
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <strong style="color:#1e293b;">${user.full_name || e.user_id || '—'}</strong>
+                  <span style="font-size:0.7rem;color:#64748b;">${user.email || ''}${user.phone ? ' · ' + user.phone : ''}</span>
+                </div>
+                <div style="font-size:0.72rem;color:#64748b;margin-top:2px;">
+                  ${e.batch?.title || '—'} &middot; Enrolled ${enrolledDate}
+                  <span class="admin-badge" style="background:${e.status === 'confirmed' ? '#d4edda' : e.status === 'pending_payment' ? '#fff3cd' : '#f8d7da'};color:${e.status === 'confirmed' ? '#155724' : e.status === 'pending_payment' ? '#856404' : '#721c24'};padding:1px 8px;border-radius:10px;font-size:0.68rem;margin-left:4px;">${e.status}</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;">
                 ${e.status === 'confirmed' ? `
-                  <select class="btn-ops-attendance" data-id="${e.id}" style="font-size:0.75rem;padding:2px 6px;">
+                  <select class="btn-ops-attendance" data-id="${e.id}" style="font-size:0.72rem;padding:2px 6px;">
                     <option value="">—</option>
                     <option value="present" ${e.attendance === 'present' ? 'selected' : ''}>Present</option>
                     <option value="no_show" ${e.attendance === 'no_show' ? 'selected' : ''}>No Show</option>
                   </select>
-                  <button class="btn btn-secondary btn-ops-manual-refund" data-id="${e.id}" style="font-size:0.75rem;padding:2px 10px;color:#dc3545;">Refund</button>
+                  <button class="btn btn-secondary btn-ops-manual-refund" data-id="${e.id}" style="font-size:0.72rem;padding:2px 10px;color:#dc3545;">Refund</button>
                 ` : ''}
               </div>
             </div>
           </div>
-        `).join('')}
+        `}).join('')}
       </div>
 
       <div class="admin-section-header"><h3><i class="fa-solid fa-clock-rotate-left"></i> Audit Logs</h3></div>
@@ -5452,6 +5616,92 @@ async function loadTrainingOpsTab() {
         `).join('')}
       </div>
     `;
+
+    // Wire new batch button
+    const newBatchBtn = document.getElementById('btn-new-batch');
+    const batchForm = document.getElementById('training-ops-batch-form');
+    const tobCancelBtn = document.getElementById('tob-cancel-btn');
+    const tobSaveBtn = document.getElementById('tob-save-btn');
+
+    function showBatchForm(batchData) {
+      if (!batchForm) return;
+      batchForm.style.display = '';
+      document.getElementById('tob-edit-id').value = batchData ? batchData.id : '';
+      document.getElementById('tob-form-title').textContent = batchData ? 'Edit Batch' : 'New Batch';
+      document.getElementById('tob-training-id').value = batchData ? batchData.training_id : '';
+      document.getElementById('tob-title').value = batchData ? batchData.title : '';
+      document.getElementById('tob-start-date').value = batchData ? (batchData.start_date || '').slice(0, 10) : '';
+      document.getElementById('tob-end-date').value = batchData ? (batchData.end_date || '').slice(0, 10) : '';
+      document.getElementById('tob-capacity').value = batchData ? batchData.capacity : '';
+      document.getElementById('tob-price-actual').value = batchData ? batchData.price_actual : '';
+      document.getElementById('tob-price-strikeout').value = batchData ? batchData.price_strikeout || '' : '';
+      document.getElementById('tob-instructor').value = batchData ? batchData.instructor || '' : '';
+      document.getElementById('tob-location').value = batchData ? batchData.location || '' : '';
+      document.getElementById('tob-meeting-link').value = batchData ? batchData.meeting_link || '' : '';
+      document.getElementById('tob-cancel-cutoff').value = batchData ? batchData.cancellation_cutoff_days || 3 : 3;
+    }
+
+    function hideBatchForm() {
+      if (!batchForm) return;
+      batchForm.style.display = 'none';
+    }
+
+    if (newBatchBtn) {
+      newBatchBtn.addEventListener('click', () => showBatchForm(null));
+    }
+    if (tobCancelBtn) {
+      tobCancelBtn.addEventListener('click', hideBatchForm);
+    }
+    if (tobSaveBtn) {
+      tobSaveBtn.addEventListener('click', async () => {
+        const editId = document.getElementById('tob-edit-id').value;
+        const training_id = document.getElementById('tob-training-id').value;
+        const title = (document.getElementById('tob-title').value || '').trim();
+        const start_date = document.getElementById('tob-start-date').value;
+        const end_date = document.getElementById('tob-end-date').value;
+        const capacity = parseInt(document.getElementById('tob-capacity').value, 10);
+        const price_actual = parseFloat(document.getElementById('tob-price-actual').value);
+        const price_strikeout = parseFloat(document.getElementById('tob-price-strikeout').value) || undefined;
+        const instructor = (document.getElementById('tob-instructor').value || '').trim() || undefined;
+        const location = (document.getElementById('tob-location').value || '').trim() || undefined;
+        const meeting_link = (document.getElementById('tob-meeting-link').value || '').trim() || undefined;
+        const cancellation_cutoff_days = parseInt(document.getElementById('tob-cancel-cutoff').value, 10) || undefined;
+
+        if (!training_id) { showErrorToast('Please select a training course.'); return; }
+        if (!title) { showErrorToast('Batch title is required.'); return; }
+        if (!start_date || !end_date) { showErrorToast('Start and end dates are required.'); return; }
+        if (!capacity || capacity < 1) { showErrorToast('Capacity must be at least 1.'); return; }
+        if (isNaN(price_actual) || price_actual < 0) { showErrorToast('Valid actual price is required.'); return; }
+
+        tobSaveBtn.disabled = true;
+        tobSaveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
+        try {
+          const payload = { training_id, title, start_date, end_date, capacity, price_actual, price_strikeout, instructor, location, meeting_link, cancellation_cutoff_days };
+          if (editId) {
+            await trainingApi.updateBatch(editId, payload);
+            showSuccessToast('Batch updated!');
+          } else {
+            await trainingApi.createBatch(payload);
+            showSuccessToast('Batch created!');
+          }
+          hideBatchForm();
+          loadTrainingOpsTab();
+        } catch (err) {
+          showErrorToast(err.message);
+          tobSaveBtn.disabled = false;
+          tobSaveBtn.innerHTML = '<i class="fa-solid fa-save"></i> Save Batch';
+        }
+      });
+    }
+
+    // Wire edit buttons
+    container.querySelectorAll('.btn-ops-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const b = batches.find(x => x.id === id);
+        if (b) showBatchForm(b);
+      });
+    });
 
     // Wire clone buttons
     container.querySelectorAll('.btn-ops-clone').forEach(btn => {
@@ -5493,7 +5743,6 @@ async function loadTrainingOpsTab() {
     // Wire attendance selects
     container.querySelectorAll('.btn-ops-attendance').forEach(sel => {
       sel.addEventListener('change', async () => {
-        if (!sel.value) return;
         try {
           await trainingApi.markAttendance(sel.dataset.id, { attendance: sel.value });
           showSuccessToast('Attendance marked!');
@@ -5508,10 +5757,7 @@ async function loadTrainingOpsTab() {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.id;
         const reason = prompt('Reason for manual refund (required, min 10 chars):');
-        if (!reason || reason.length < 10) {
-          showErrorToast('Please provide a reason (min 10 characters).');
-          return;
-        }
+        if (!reason) return;
         if (!confirm(`Issue manual refund for enrollment ${id}?`)) return;
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
@@ -5524,6 +5770,64 @@ async function loadTrainingOpsTab() {
           btn.disabled = false;
           btn.innerHTML = 'Refund';
         }
+      });
+    });
+
+    // Wire accordion toggle
+    container.querySelectorAll('.toc-panel-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        const body = header.nextElementSibling;
+        const chev = header.querySelector('.toc-chev');
+        if (!body) return;
+        const isOpen = body.style.maxHeight && body.style.maxHeight !== '0px';
+        body.style.maxHeight = isOpen ? '0' : body.scrollHeight + 'px';
+        if (chev) chev.style.transform = isOpen ? '' : 'rotate(90deg)';
+      });
+    });
+    // Open first panel by default
+    const firstHeader = container.querySelector('.toc-panel-header');
+    if (firstHeader) {
+      const firstBody = firstHeader.nextElementSibling;
+      if (firstBody) {
+        firstBody.style.maxHeight = firstBody.scrollHeight + 'px';
+        const chev = firstHeader.querySelector('.toc-chev');
+        if (chev) chev.style.transform = 'rotate(90deg)';
+      }
+    }
+
+    // Wire "Add Batch to Course" buttons
+    container.querySelectorAll('.btn-ops-add-batch-to-course').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const courseId = btn.dataset.courseId;
+        showBatchForm(null);
+        const trainingSelect = document.getElementById('tob-training-id');
+        if (trainingSelect && courseId) trainingSelect.value = courseId;
+      });
+    });
+
+    // Wire course buttons
+    const newCourseBtn = document.getElementById('btn-new-course');
+    if (newCourseBtn) {
+      newCourseBtn.addEventListener('click', () => {
+        const editId = document.getElementById('admin-train-edit-id');
+        if (editId) editId.value = '';
+        const resetBtn = document.getElementById('btn-admin-reset-train');
+        if (resetBtn) resetBtn.click();
+        toggleAdminTrainForm();
+      });
+    }
+    container.querySelectorAll('.btn-ops-course-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const t = _adminTrainings.find(x => x.id === id);
+        if (t) globalThis.adminEditTraining(t.id);
+      });
+    });
+    container.querySelectorAll('.btn-ops-course-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        globalThis.adminDeleteTraining(id);
       });
     });
 

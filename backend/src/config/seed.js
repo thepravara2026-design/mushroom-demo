@@ -209,6 +209,93 @@ const trainings = [
     content_url: "",
     allowed_roles: ["entrepreneur"],
   },
+  {
+    id: "train-3",
+    title: "Mushroom Product Mastery for Buyers",
+    category: "Buyer",
+    description:
+      "Learn to identify, select, and store the freshest mushrooms. Perfect for chefs, retailers, and home cooks.",
+    image_url: "/images/training_business.png",
+    content_url: "",
+    allowed_roles: ["buyer"],
+  },
+  {
+    id: "train-4",
+    title: "Advanced Grower Certification",
+    category: "Grower",
+    description:
+      "Master sterile techniques, spawn run optimization, and high-yield fruiting for commercial growers.",
+    image_url: "/images/training_farm.png",
+    content_url: "",
+    allowed_roles: ["grower"],
+  },
+];
+
+const trainingBatches = [
+  {
+    id: "batch-seed-1",
+    training_id: "train-1",
+    title: "Beginner Cultivation — July Cohort",
+    start_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    end_date: new Date(Date.now() + 35 * 24 * 60 * 60 * 1000).toISOString(),
+    capacity: 20,
+    seats_taken: 0,
+    price_actual: 999,
+    price_strikeout: 1999,
+    instructor: "Dr. Radha Sharma",
+    location: "Sporekart Learning Center, Pune",
+    meeting_link: "",
+    cancellation_cutoff_days: 3,
+    status: "upcoming",
+  },
+  {
+    id: "batch-seed-2",
+    training_id: "train-2",
+    title: "Entrepreneur Bootcamp — August Cohort",
+    start_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+    end_date: new Date(Date.now() + 70 * 24 * 60 * 60 * 1000).toISOString(),
+    capacity: 15,
+    seats_taken: 0,
+    price_actual: 2999,
+    price_strikeout: 4999,
+    instructor: "Anita Verma",
+    location: "Online (Zoom)",
+    meeting_link: "https://zoom.us/j/entrepreneur-bootcamp",
+    cancellation_cutoff_days: 7,
+    status: "upcoming",
+  },
+  {
+    id: "batch-seed-3",
+    training_id: "train-3",
+    title: "Buyer's Guide to Mushrooms — August Session",
+    start_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
+    end_date: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
+    capacity: 30,
+    seats_taken: 0,
+    price_actual: 499,
+    price_strikeout: 999,
+    instructor: "Chef Meera Iyer",
+    location: "Online (Zoom)",
+    meeting_link: "https://zoom.us/j/buyers-guide",
+    cancellation_cutoff_days: 2,
+    status: "upcoming",
+  },
+  {
+    id: "batch-seed-4",
+    training_id: "train-4",
+    title: "Advanced Grower Lab — September Intensive",
+    start_date: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+    end_date: new Date(Date.now() + 75 * 24 * 60 * 60 * 1000).toISOString(),
+    capacity: 10,
+    seats_taken: 0,
+    price_actual: 5999,
+    price_strikeout: 9999,
+    instructor: "Dr. Suresh Kulkarni",
+    location: "Lab Facility, Mumbai",
+    meeting_link: "",
+    cancellation_cutoff_days: 5,
+    status: "upcoming",
+  },
 ];
 
 const adminSeedPassword = process.env.ADMIN_SEED_PASSWORD;
@@ -280,7 +367,15 @@ async function seed() {
     if (trainErr) throw new Error(`Trainings error: ${trainErr.message}`);
     logger.info("✅ Trainings seeded successfully.");
 
-    // 5. Seed Users
+    // 5. Seed Training Batches
+    logger.info("Training batches seeding...");
+    const { error: batchErr } = await supabase
+      .from("training_batches")
+      .upsert(trainingBatches, { onConflict: "id" });
+    if (batchErr) throw new Error(`Training batches error: ${batchErr.message}`);
+    logger.info("✅ Training batches seeded successfully.");
+
+    // 6. Seed Users
     logger.info("Users seeding...");
     const { error: userErr } = await supabase.from("users").upsert(users);
     if (userErr) throw new Error(`Users error: ${userErr.message}`);

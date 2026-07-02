@@ -7134,6 +7134,22 @@ button {
   transform: translateX(3px);
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted, #999);
+  font-size: 0.8rem;
+  margin: 4px 0;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border, #eee);
+}
+
 .auth-method-btn>i:first-child {
   font-size: 1.2rem;
   width: 28px;
@@ -18292,88 +18308,8 @@ button {
 }
 
 /* ==========================================================================
-   PHASE 2 — Guest Checkout, Coupon, Order Review, Pincode Check
+   PHASE 2 — Coupon, Order Review, Pincode Check
    ========================================================================== */
-
-/* ── Guest Checkout Modal ── */
-.guest-checkout-wrap {
-  padding: 2rem 1.5rem;
-  max-width: 440px;
-  margin: 0 auto;
-}
-.guest-checkout-wrap .gc-card {
-  background: var(--color-bg-card, #fff);
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-  text-align: center;
-}
-.guest-checkout-wrap .gc-icon {
-  width: 56px;
-  height: 56px;
-  background: var(--green-light, #e8f5e9);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 1rem;
-  font-size: 1.4rem;
-  color: var(--green-dark, #2e7d32);
-}
-.guest-checkout-wrap .gc-card h3 {
-  font-size: 1.2rem;
-  margin: 0 0 0.25rem;
-  color: var(--color-text, #1a1a1a);
-}
-.guest-checkout-wrap .gc-subtitle {
-  font-size: 0.85rem;
-  color: var(--color-text-muted, #666);
-  margin-bottom: 1.5rem;
-}
-.guest-checkout-wrap .gc-field {
-  text-align: left;
-  margin-bottom: 1rem;
-}
-.guest-checkout-wrap .gc-field label {
-  display: block;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-text-muted, #666);
-  margin-bottom: 0.35rem;
-}
-.guest-checkout-wrap .gc-input {
-  width: 100%;
-  padding: 0.65rem 0.75rem;
-  border: 1.5px solid var(--color-border, #ddd);
-  border-radius: 8px;
-  font-size: 0.95rem;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
-}
-.guest-checkout-wrap .gc-input:focus {
-  outline: none;
-  border-color: var(--green-dark, #2e7d32);
-}
-.guest-checkout-wrap .gc-divider {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin: 1.25rem 0;
-  color: var(--color-text-muted, #999);
-  font-size: 0.8rem;
-}
-.guest-checkout-wrap .gc-divider::before,
-.guest-checkout-wrap .gc-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--color-border, #eee);
-}
-.guest-checkout-wrap .gc-error {
-  color: var(--color-red, #d32f2f);
-  font-size: 0.8rem;
-  margin-top: 0.75rem;
-}
 
 /* ── Coupon Section ── */
 .coupon-section-wrap {

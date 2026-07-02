@@ -38,15 +38,6 @@ window.trackEvent = function trackEvent(eventType, metadata = {}) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
         body: JSON.stringify(body),
       }).catch(() => {});
-    } else {
-      const guestToken = localStorage.getItem('guest_token');
-      const headers = { 'Content-Type': 'application/json' };
-      if (guestToken) headers['x-guest-token'] = guestToken;
-      fetch(`${API_BASE}/analytics/track`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      }).catch(() => {});
     }
   } catch (e) { /* fire-and-forget */ }
 };
@@ -301,6 +292,10 @@ function initOrderSse() {
 }
 
 window.addEventListener('auth:changed', () => {
+  if (orderEs) {
+    try { orderEs.close(); } catch (_) {}
+    orderEs = null;
+  }
   initOrderSse();
   if (state.token && state.user) {
     _startInactivityTracking();
@@ -784,6 +779,8 @@ function initEventListeners() {
   // Listen for global auth changes from new modules
   window.addEventListener('auth:changed', () => {
     updateAuthHeaderUI();
+    updateCartUI();
+    toggleCartDrawer(false);
     handleRouting({ fromAuthChanged: true });
   });
 
@@ -2560,20 +2557,6 @@ function addToCart(productId, weightInfo) {
     return;
   }
 
-  // Ensure a lightweight guest profile exists for anonymous users so they have a profile page
-  if (!state.user) {
-    const guest = {
-      id: `guest_${Date.now()}`,
-      fullName: 'Guest User',
-      email: '',
-      whatsappNumber: '',
-      role: 'buyer',
-      loginMethod: 'guest',
-    };
-    saveUserProfile(guest);
-    updateAuthHeaderUI();
-  }
-
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
 
@@ -2619,48 +2602,12 @@ function addToCart(productId, weightInfo) {
 
   saveCart();
   updateCartUI();
-  showAddedToCartPopup(addedItem);
 
   // Track cart activity (Phase 3 — abandonment recovery)
   trackCartAbandonment();
 
   // Analytics (Phase 8)
   trackEvent('add_to_cart', { productId, name: product?.name, price: effectivePrice, quantity: addedItem?.quantity || 1 });
-}
-
-function showAddedToCartPopup(item) {
-  document.getElementById('added-to-cart-popup')?.remove();
-  const totalCount = state.cart.reduce((sum, cartItem) => sum + cartItem.quantity, 0);
-  const popup = document.createElement('div');
-  popup.id = 'added-to-cart-popup';
-  popup.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9999;max-width:340px;background:#fff;padding:14px 16px;border-radius:14px;box-shadow:0 18px 52px rgba(0,0,0,0.18);font-family:inherit;';
-  popup.innerHTML = `
-    <div style="display:flex;gap:12px;align-items:center;">
-      <img src="${item.image_url || '/images/product_fresh.png'}" alt="${item.name}" style="width:56px;height:56px;object-fit:cover;border-radius:12px;">
-      <div style="flex:1;min-width:0;">
-        <div style="font-weight:700;margin-bottom:3px;">Added to cart</div>
-        <div style="font-size:0.92rem;color:#4b5563;line-height:1.3;">${item.name}</div>
-        <div style="font-size:0.95rem;color:#111;margin-top:6px;">₹${item.price.toFixed(2)}</div>
-      </div>
-    </div>
-    <div style="margin-top:10px;padding:8px 12px;background:#f0fdf4;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:0.85rem;color:#166534;"><i class="fa-solid fa-cart-shopping"></i> ${totalCount} item${totalCount !== 1 ? 's' : ''} in cart</span>
-      <span style="font-size:0.85rem;font-weight:600;color:#166534;">₹${state.cart.reduce((sum, ci) => sum + ci.price * ci.quantity, 0).toFixed(2)}</span>
-    </div>
-    <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:10px;">
-      <button id="popup-view-cart" class="btn btn-secondary" style="flex:1;">View Cart</button>
-      <button id="popup-continue" class="btn btn-primary" style="flex:1;">Continue</button>
-    </div>
-  `;
-
-  document.body.appendChild(popup);
-  document.getElementById('popup-view-cart')?.addEventListener('click', () => {
-    toggleCartDrawer(true);
-    popup.remove();
-  });
-  document
-    .getElementById('popup-continue')
-    ?.addEventListener('click', () => popup.remove());
 }
 
 function changeQuantity(cartId, delta) {
@@ -3945,26 +3892,14 @@ function renderCheckoutPage() {
   renderCheckoutOrderSummary(summaryContainer);
 
   if (!state.token || !state.user || state.user.role !== 'buyer') {
-    renderCheckoutWithGuestOption();
-  } else {
-    renderCheckoutDeliveryForm();
-  }
-}
-
-function renderCheckoutWithGuestOption() {
-  const formPanel = document.querySelector('.checkout-form-panel');
-  if (!formPanel) return;
-
-  if (!state.token || !state.user) {
-    import('./components/GuestCheckoutModal.js').then(mod => {
-      mod.renderGuestCheckoutModal(formPanel);
-      formPanel.__proceedGuest = () => {
-        window.__guestInfo = window.__guestInfo || {};
-        renderCheckoutDeliveryForm();
-      };
-    });
-  } else if (state.user.role !== 'buyer') {
-    formPanel.innerHTML = `<p style="padding:2rem;text-align:center;">Cultivator profiles are read-only. Please use a Buyer account.</p>`;
+    const formPanel = document.querySelector('.checkout-form-panel');
+    if (formPanel) {
+      formPanel.innerHTML = `<div class="grid-skeleton" style="padding:2rem;"><i class="fa-solid fa-spinner fa-spin loader-icon"></i><p>Please sign in to continue…</p></div>`;
+    }
+    setTimeout(() => authModal.open('buyer', () => {
+      const fp = document.querySelector('.checkout-form-panel');
+      if (fp) renderCheckoutDeliveryForm();
+    }), 300);
   } else {
     renderCheckoutDeliveryForm();
   }
@@ -6214,19 +6149,10 @@ async function completeOrderPayment(orderId, paymentId, signature) {
         // ignore if BroadcastChannel isn't available
       }
 
-      // Show thank you popup then redirect
+      // Show thank you + WhatsApp community invite
       const isAdminOrGrower = state.user && (state.user.role === 'admin' || state.user.role === 'grower');
-      showPopupModal({
-        title: '🎉 Thank you for your order!',
-        message: `${userName}, your order is confirmed. We are updating your shipping status and will notify you soon.`,
-        duration: 1000,
-        redirectHash: isAdminOrGrower ? `#track-${data.order.id}` : '#shop',
-      });
-
-      // Show WhatsApp community prompt after thanks popup
-      setTimeout(() => {
-        showOrderCommunityPrompt(data.order);
-      }, 1500);
+      const redirectHash = isAdminOrGrower ? `#track-${data.order.id}` : '#shop';
+      showOrderThankYouWithCommunity(userName, data.order, redirectHash);
     } else {
       showErrorToast(data.error || 'Payment verification failed.');
     }
@@ -6239,47 +6165,57 @@ async function completeOrderPayment(orderId, paymentId, signature) {
 }
 
 // ── WhatsApp Community Prompts ──
-function showOrderCommunityPrompt(order) {
-  const existing = document.getElementById('wa-community-order');
+function showOrderThankYouWithCommunity(userName, order, redirectHash) {
+  const existing = document.getElementById('spk-popup-overlay');
   if (existing) existing.remove();
 
-  const container = document.createElement('div');
-  container.id = 'wa-community-order';
-  container.className = 'wa-community-order-prompt';
+  const overlay = document.createElement('div');
+  overlay.id = 'spk-popup-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:99998;';
 
-  container.innerHTML = `
-    <div class="wa-community-icon"><span class="wa-spore-particle">🍄</span>🌱</div>
-    <p class="wa-community-title">You're now part of the mushroom movement!</p>
-    <p class="wa-community-desc">
-      Join <strong>500+ growers</strong> in our WhatsApp Community for exclusive growing tips,
-      seasonal offers, harvest updates &amp; early access to new spawn.
-    </p>
-    <div class="wa-community-actions">
-      <button class="wa-join-btn" id="wa-order-join"><i class="fa-brands fa-whatsapp"></i> Join Community</button>
-      <button class="wa-later-btn" id="wa-order-later">Maybe later</button>
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#fff;border-radius:16px;padding:32px 36px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.15);text-align:center;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;position:relative;animation:spkFadeIn 0.3s ease;';
+
+  card.innerHTML = `
+    <h3 style="margin:0 0 8px;font-size:1.3rem;color:#1d2939;">🎉 Thank you for your order!</h3>
+    <p style="margin:0 0 12px;font-size:1rem;color:#475569;line-height:1.5;">${userName}, your order is confirmed. We are updating your shipping status and will notify you soon.</p>
+    <div style="margin:16px 0;padding:16px;background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0;">
+      <p style="margin:0 0 8px;font-size:0.9rem;color:#166534;font-weight:600;">🍄 Join the Mushroom Movement!</p>
+      <p style="margin:0 0 12px;font-size:0.85rem;color:#15803d;line-height:1.4;">Get exclusive growing tips, seasonal offers &amp; harvest updates in our WhatsApp Community.</p>
+      <a href="${WHATSAPP_COMMUNITY_LINK}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;background:#25d366;color:#fff;border-radius:8px;text-decoration:none;font-size:0.9rem;font-weight:600;" onclick="event.stopPropagation();">
+        <i class="fa-brands fa-whatsapp"></i> Join Community
+      </a>
     </div>
+    <button style="padding:10px 28px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;color:#344054;font-size:0.9rem;cursor:pointer;font-family:inherit;margin-top:4px;">Continue</button>
   `;
 
-  document.body.appendChild(container);
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '&times;';
+  closeBtn.title = 'Dismiss';
+  closeBtn.style.cssText = 'position:absolute;top:8px;right:12px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:#94a3b8;line-height:1;padding:4px;';
+  closeBtn.setAttribute('aria-label', 'Close');
+  card.appendChild(closeBtn);
 
-  requestAnimationFrame(() => container.classList.add('show'));
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
 
-  document.getElementById('wa-order-join').addEventListener('click', () => {
-    window.open(WHATSAPP_COMMUNITY_LINK, '_blank');
-    container.classList.remove('show');
-    setTimeout(() => container.remove(), 400);
-  });
-  document.getElementById('wa-order-later').addEventListener('click', () => {
-    container.classList.remove('show');
-    setTimeout(() => container.remove(), 400);
-  });
+  if (!document.getElementById('spk-popup-styles')) {
+    const style = document.createElement('style');
+    style.id = 'spk-popup-styles';
+    style.textContent = '@keyframes spkFadeIn{from{opacity:0;transform:scale(0.9)}to{opacity:1;transform:scale(1)}}';
+    document.head.appendChild(style);
+  }
 
-  setTimeout(() => {
-    if (container && container.parentNode) {
-      container.classList.remove('show');
-      setTimeout(() => container.remove(), 400);
-    }
-  }, 20000);
+  const done = () => {
+    overlay.remove();
+    window.location.hash = redirectHash;
+  };
+
+  closeBtn.addEventListener('click', done);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) done(); });
+  card.querySelector('button:last-of-type').addEventListener('click', done);
+
+  setTimeout(done, 8000);
 }
 
 function initVisitorCommunityPopup() {
@@ -8560,18 +8496,17 @@ async function renderPincodeCheck(container, productId) {
 async function trackCartAbandonment() {
   try {
     const userId = state.user?.id || null
-    const guestToken = window.__guestInfo?.token || localStorage.getItem('guestToken') || null
-    if (!userId && !guestToken) return
+    if (!userId) return
     const cartData = {
       items: state.cart.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price })),
       total: state.cart.reduce((t, i) => t + i.price * i.quantity, 0),
-      email: state.user?.email || window.__guestInfo?.email || '',
-      phone: state.user?.whatsappNumber || state.user?.whatsapp_number || window.__guestInfo?.phone || '',
+      email: state.user?.email || '',
+      phone: state.user?.whatsappNumber || state.user?.whatsapp_number || '',
     }
     await fetch('/api/abandonment/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, guestToken, cartData }),
+      body: JSON.stringify({ userId, cartData }),
     })
   } catch (e) {
     // Non-critical — silent fail

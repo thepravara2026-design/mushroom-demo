@@ -31,6 +31,8 @@ export const trainingApi = {
 
   // ── Admin Console ──
   getAdminDashboard: () => fetchWithAuth('/trainings/admin/dashboard'),
+  getAllBatches: () => fetchWithAuth('/trainings/admin/batches'),
+  getAllEnrollments: () => fetchWithAuth('/trainings/enrollments'),
   createBatch: (body) => fetchWithAuth('/trainings/admin/batches', { method: 'POST', body: JSON.stringify(body) }),
   updateBatch: (id, body) => fetchWithAuth(`/trainings/admin/batches/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   cloneBatch: (id, body = {}) => fetchWithAuth(`/trainings/admin/batches/${id}/clone`, { method: 'POST', body: JSON.stringify(body) }),

@@ -341,6 +341,76 @@ INSERT INTO trainings (id, title, category, description, image_url, content_url,
   '/images/training_business.png',
   '',
   '["entrepreneur"]'::jsonb
+),
+(
+  'train-3',
+  'Mushroom Product Mastery for Buyers',
+  'Buyer',
+  'Learn to identify, select, and store the freshest mushrooms. Perfect for chefs, retailers, and home cooks.',
+  '/images/training_business.png',
+  '',
+  '["buyer"]'::jsonb
+),
+(
+  'train-4',
+  'Advanced Grower Certification',
+  'Grower',
+  'Master sterile techniques, spawn run optimization, and high-yield fruiting for commercial growers.',
+  '/images/training_farm.png',
+  '',
+  '["grower"]'::jsonb
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed Training Batches
+INSERT INTO training_batches (id, training_id, title, start_date, end_date, capacity, seats_taken, price_actual, price_strikeout, instructor, location, meeting_link, cancellation_cutoff_days, status) VALUES
+(
+  'batch-seed-1',
+  'train-1',
+  'Beginner Cultivation — July Cohort',
+  NOW() + INTERVAL '14 days',
+  NOW() + INTERVAL '35 days',
+  20, 0, 999, 1999,
+  'Dr. Radha Sharma',
+  'Sporekart Learning Center, Pune',
+  '',
+  3, 'upcoming'
+),
+(
+  'batch-seed-2',
+  'train-2',
+  'Entrepreneur Bootcamp — August Cohort',
+  NOW() + INTERVAL '45 days',
+  NOW() + INTERVAL '70 days',
+  15, 0, 2999, 4999,
+  'Anita Verma',
+  'Online (Zoom)',
+  'https://zoom.us/j/entrepreneur-bootcamp',
+  7, 'upcoming'
+),
+(
+  'batch-seed-3',
+  'train-3',
+  'Buyer''s Guide to Mushrooms — August Session',
+  NOW() + INTERVAL '21 days',
+  NOW() + INTERVAL '28 days',
+  30, 0, 499, 999,
+  'Chef Meera Iyer',
+  'Online (Zoom)',
+  'https://zoom.us/j/buyers-guide',
+  2, 'upcoming'
+),
+(
+  'batch-seed-4',
+  'train-4',
+  'Advanced Grower Lab — September Intensive',
+  NOW() + INTERVAL '60 days',
+  NOW() + INTERVAL '75 days',
+  10, 0, 5999, 9999,
+  'Dr. Suresh Kulkarni',
+  'Lab Facility, Mumbai',
+  '',
+  5, 'upcoming'
 )
 ON CONFLICT (id) DO NOTHING;
 

@@ -158,6 +158,7 @@ router.post(
 
       const { data: dbProducts } = await db.from("products").select("*");
       let subtotal = 0;
+      let gstAmount = 0;
       let discountPercent = 0;
       let discountAmount = 0;
       const reviewItems = [];
@@ -168,13 +169,18 @@ router.post(
         const qty = parseInt(cartItem.quantity, 10) || 1;
         const price = product.price || 0;
         const lineTotal = price * qty;
+        const gstRate = product.gst_rate || 5;
+        const lineGst = +(lineTotal * (gstRate / 100)).toFixed(2);
         subtotal += lineTotal;
+        gstAmount += lineGst;
         reviewItems.push({
           id: product.id,
           name: product.name,
           quantity: qty,
           price,
           lineTotal,
+          gstRate,
+          gstAmount: lineGst,
           image: product.image_url || null,
         });
       }
@@ -185,9 +191,9 @@ router.post(
         discountAmount = +(subtotal * discountPercent / 100).toFixed(2);
       }
 
-      const gst = +(subtotal * 0.05).toFixed(2);
+      const gst = +gstAmount.toFixed(2);
       const shipping = 0;
-      const total = subtotal + gst + shipping - discountAmount;
+      const total = +(subtotal + gst + shipping - discountAmount).toFixed(2);
 
       let deliveryEstimate = null;
       if (pincode) {
@@ -840,6 +846,40 @@ router.post(
       });
 
       if (isValid) {
+        // Re-check stock availability before confirming payment
+        const { data: pendingOrder } = await db
+          .from("orders")
+          .select("id, items, total")
+          .eq("razorpay_order_id", razorpay_order_id)
+          .single();
+
+        if (pendingOrder && Array.isArray(pendingOrder.items)) {
+          for (const item of pendingOrder.items) {
+            const qty = parseInt(item.quantity, 10) || 0;
+            if (qty <= 0 || !item.productId) continue;
+            const { data: prod } = await db
+              .from("products")
+              .select("stock, reserved_quantity")
+              .eq("id", item.productId)
+              .single();
+            if (prod) {
+              const available = prod.stock - (prod.reserved_quantity || 0);
+              if (available < qty) {
+                await db.from("orders").update({ status: "failed" }).eq("razorpay_order_id", razorpay_order_id);
+                try {
+                  await razorpay.payments.refund(razorpay_payment_id, {
+                    amount: Math.round(Number(pendingOrder.total || 0) * 100),
+                    notes: { reason: "Stock unavailable at payment confirmation", order_id: pendingOrder.id },
+                  });
+                } catch (refundErr) {
+                  logger.warn(`[verify-payment] Auto-refund failed for order ${pendingOrder.id}: ${refundErr.message}`);
+                }
+                return respondError(res, `Sorry, "${item.name || item.productId}" is now out of stock. Your payment will be refunded.`, 409);
+              }
+            }
+          }
+        }
+
         // Update order status to paid and record payment details
         const transactionId = `TXN-${razorpay_payment_id}`;
         const { data: existingOrder } = await db
@@ -955,11 +995,20 @@ router.post(
           });
         }
 
+        // Use version-based optimistic update to prevent overwriting concurrent status changes
+        const version = Number(currentOrder.version || 0);
         const { data: failedOrder } = await db
           .from("orders")
-          .update({ status: "failed" })
+          .update({ status: "failed", version: version + 1 })
           .eq("razorpay_order_id", razorpay_order_id)
+          .eq("version", version)
           .single();
+
+        // If no rows were updated (version mismatch due to concurrent change), skip SSE broadcast
+        if (!failedOrder) {
+          logger.warn(`[verify-payment] Skipped status update for order ${currentOrder.id} — concurrent status change detected`);
+          return respondError(res, "Payment verification failed.", 400);
+        }
 
         // Broadcast failure via SSE so frontends update in real-time
         try {
@@ -2466,7 +2515,8 @@ router.get("/:id/cancel-window", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/orders/admin/order-reject/:id — Admin rejects an order with reason (v3)
+// POST /api/orders/admin/order-reject/:id — Admin rejects an order (v3: admin_pending/paid/cancel_requested → ADMIN_REJECTED)
+// NOTE: This differs from POST /api/refunds/cancel-requests/:id/reject which handles legacy CANCEL_REQUESTED → PAID revert.
 const orderRejectSchema = Joi.object({
   reason: Joi.string().trim().min(1).max(500).required().messages({
     "string.empty": "Rejection reason is required.",

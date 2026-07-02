@@ -92,4 +92,9 @@ export const authApi = {
   },
 
   getMe: () => fetchWithAuth('/auth/me'),
+
+  googleLogin: (credential) => fetchWithAuth('/auth/google-login', {
+    method: 'POST',
+    body: JSON.stringify({ credential }),
+  }),
 };

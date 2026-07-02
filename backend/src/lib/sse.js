@@ -4,6 +4,21 @@ const { JWT_SECRET } = require("../config/jwt");
 
 // Map of event names to subscriber callbacks
 const subscribers = new Map();
+
+// Periodic stale connection pruning
+setInterval(() => {
+  let pruned = 0;
+  for (const [resId, sub] of subscribers.entries()) {
+    if (!sub.res || sub.res.destroyed || sub.res.writableEnded) {
+      sub.unsubscribe();
+      pruned++;
+    }
+  }
+  if (pruned > 0) {
+    logger.info(`[SSE] Pruned ${pruned} stale subscriber connections`);
+  }
+}, 60000).unref();
+
 function addSseSubscriber(req, res, user = null) {
   const resId = Math.random().toString(36).substring(2, 9);
 

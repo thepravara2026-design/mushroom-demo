@@ -144,9 +144,6 @@
             <span id="admin-orders-cancel-badge" class="admin-nav-badge hidden">0</span>
           </button>
 
-          <button class="admin-tab" data-tab="trainings">
-            <i class="fa-solid fa-graduation-cap"></i> Trainings
-          </button>
           <button class="admin-tab" data-tab="training-ops">
             <i class="fa-solid fa-chalkboard-user"></i> Training Ops
           </button>
@@ -884,16 +881,20 @@
           </div>
         </div>
 
-        <div class="admin-tab-content" id="admin-content-trainings">
+        <div class="admin-tab-content" id="admin-content-training-ops">
           <div class="admin-content-inner">
             <div class="admin-section-header">
-              <h3>
-                <i class="fa-solid fa-book-open"></i> Training Programs
-              </h3>
+              <h3><i class="fa-solid fa-chalkboard-user"></i> Training Operations</h3>
+              <div class="admin-section-actions">
+                <button class="btn btn-secondary" id="btn-training-ops-refresh" style="font-size:0.85rem;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
             </div>
 
-            <div class="admin-trainings-wrap">
-              <div class="admin-trainings-container">
+            <!-- Course form (hidden by default, toggled by "New Course" button) -->
+            <div id="admin-train-form-collapse" style="display:none;max-height:0;opacity:0;overflow:hidden;transition:max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease;margin:0;">
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:16px;">
                 <form id="form-admin-add-training" class="admin-train-form-compact" novalidate>
                   <input type="hidden" id="admin-train-edit-id" value="" />
                   <div class="input-field">
@@ -942,8 +943,7 @@
                       <label>Price (Strikeout) *</label>
                       <input type="number" id="admin-train-price-strikeout" min="0" step="0.01" required
                         placeholder="₹ 1,999" />
-                      <small style="color:#6b7280;font-size:0.75rem;">Must be at least 10% higher than actual
-                        price</small>
+                      <small style="color:#6b7280;font-size:0.75rem;">Must be at least 10% higher than actual price</small>
                     </div>
                     <div class="input-field">
                       <label>Actual Price *</label>
@@ -971,8 +971,7 @@
                     <div class="admin-train-roles-grid">
                       <label><input type="checkbox" id="admin-train-role-trainee" value="trainee" /> Trainee</label>
                       <label><input type="checkbox" id="admin-train-role-farmer" value="farmer" /> Farmer</label>
-                      <label><input type="checkbox" id="admin-train-role-entrepreneur" value="entrepreneur" />
-                        Entrepreneur</label>
+                      <label><input type="checkbox" id="admin-train-role-entrepreneur" value="entrepreneur" /> Entrepreneur</label>
                     </div>
                   </div>
                   <div class="input-field">
@@ -980,35 +979,13 @@
                     <input type="url" id="admin-train-content" placeholder="https://..." />
                   </div>
                   <div class="admin-train-actions">
-                    <button type="submit" class="btn btn-primary">
-                      <i class="fa-solid fa-save"></i> Save
-                    </button>
-                    <button type="button" id="btn-admin-reset-train" class="btn btn-secondary">
-                      <i class="fa-solid fa-rotate-left"></i> Reset
-                    </button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save</button>
+                    <button type="button" id="btn-admin-reset-train" class="btn btn-secondary"><i class="fa-solid fa-rotate-left"></i> Reset</button>
                   </div>
                 </form>
-
-                <div id="admin-trainings-list" class="admin-trainings-list-compact">
-                  <div class="admin-loading">
-                    <i class="fa-solid fa-spinner fa-spin"></i> Loading trainings...
-                  </div>
-                </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        <div class="admin-tab-content" id="admin-content-training-ops">
-          <div class="admin-content-inner">
-            <div class="admin-section-header">
-              <h3><i class="fa-solid fa-chalkboard-user"></i> Training Operations</h3>
-              <div class="admin-section-actions">
-                <button class="btn btn-secondary" id="btn-training-ops-refresh" style="font-size:0.85rem;">
-                  <i class="fa-solid fa-rotate"></i> Refresh
-                </button>
-              </div>
-            </div>
             <div id="training-ops-container" style="padding:0 4px;">
               <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Training Ops…</div>
             </div>

@@ -2,17 +2,14 @@ const jwt = require("jsonwebtoken");
 const db = require("../config/db");
 const { JWT_SECRET } = require("../config/jwt");
 const logger = require("../utils/logger");
-const FEATURE_FLAGS = require("../config/featureFlags");
-
 /**
  * Authentication middleware.
  *
- * Tri-mode:
+ * Modes:
  *  - Mock mode (db.isMock = true): verifies our own JWT (jsonwebtoken) which encodes
  *    { userId, email, role } — used in tests and local dev without Supabase.
  *  - Live Supabase mode: verifies the Supabase JWT via supabaseAdmin.auth.getUser().
  *    Then does a DB lookup to attach the full user profile (role, etc.) to req.user.
- *  - Guest mode: accepts x-guest-token header, attaches limited guest user to req.user.
  */
 const authMiddleware = async (req, res, next) => {
   req.authOptional = false;
@@ -24,30 +21,10 @@ const authMiddleware = async (req, res, next) => {
     token = req.cookies.token;
   }
 
-  // Guest token support (Phase 2)
-  const guestToken = req.headers['x-guest-token'];
-  if (!token && guestToken && FEATURE_FLAGS.GUEST_CHECKOUT) {
-    try {
-      const decoded = jwt.verify(guestToken, JWT_SECRET);
-      if (decoded.isGuest) {
-        req.user = {
-          userId: decoded.userId,
-          role: 'guest',
-          isGuest: true,
-        };
-        req.guestToken = guestToken;
-        return next();
-      }
-    } catch {
-      // Invalid guest token — fall through to require auth
-    }
-  }
-
   if (!token) {
     // Optional auth mode — set anonymous user and continue
     if (req.authOptional) {
-      req.user = { userId: null, role: 'guest', isGuest: true };
-      req.guestToken = req.headers['x-guest-token'] || null;
+      req.user = { userId: null };
       return next();
     }
     return res.status(401).json({ error: "Access denied. No token provided." });
@@ -122,6 +99,7 @@ const authMiddleware = async (req, res, next) => {
       // Anon key + user's JWT → PostgreSQL enforces RLS policies (auth.uid() etc.)
       const { createUserDb } = require("../config/db");
       req.authDb = createUserDb(token) || db;
+      req.db = req.authDb;
 
       req.user = {
         userId: effectiveUserId,

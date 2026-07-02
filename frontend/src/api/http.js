@@ -27,9 +27,6 @@ export async function fetchWithAuth(
 
   if (state.token) {
     headers.Authorization = `Bearer ${state.token}`;
-  } else {
-    const guestToken = window.__appState?.guestToken || localStorage.getItem('guestToken');
-    if (guestToken) headers['x-guest-token'] = guestToken;
   }
 
   let attempt = 0;

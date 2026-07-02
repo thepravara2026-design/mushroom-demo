@@ -58,6 +58,9 @@ class AuthService {
 
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
     const resolvedRole = role || "buyer";
+    if (resolvedRole === "admin") {
+      throw new Error("Cannot register as admin via this endpoint.");
+    }
     const expiresAt = Date.now() + OTP_TTL_MS;
 
     otpStore.set(emailLower, {
@@ -143,6 +146,9 @@ class AuthService {
             }
           }
           if (!user) {
+            if (record.role === "admin") {
+              throw new Error("Cannot register as admin via this endpoint.");
+            }
             // Try creating in live DB
             const insertPayload = {
               email: emailLower,
@@ -186,6 +192,9 @@ const mockUsers = mockStore.users;
           }
         }
         if (!user) {
+          if (record.role === "admin") {
+            throw new Error("Cannot register as admin via this endpoint.");
+          }
           const newUser = {
             id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             email: emailLower,

@@ -18,6 +18,7 @@
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script type="application/ld+json">
 {
@@ -1895,6 +1896,15 @@
           <h3 id="auth-modal-title">Welcome to Sporekart</h3>
           <p class="auth-subtitle">Choose how you'd like to continue</p>
           <div class="auth-methods-list">
+            <button class="auth-method-btn" id="btn-auth-google">
+              <i class="fa-brands fa-google" style="color: #4285F4"></i>
+              <div>
+                <strong>Sign in with Google</strong>
+                <span>Use your Google account</span>
+              </div>
+              <i class="fa-solid fa-chevron-right auth-method-arrow"></i>
+            </button>
+            <div class="auth-divider"><span>or</span></div>
             <button class="auth-method-btn" id="btn-auth-phone">
               <i class="fa-solid fa-mobile-screen" style="color: #25d366"></i>
               <div>

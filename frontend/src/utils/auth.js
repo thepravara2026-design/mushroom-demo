@@ -34,6 +34,7 @@ export function createEventSourceWithAuth(url, token) {
   let reconnectTimeout = null;
   let reader = null;
   let isClosed = false;
+  let reconnectAttempts = 0;
 
   async function connect() {
     if (isClosed) return;
@@ -83,7 +84,11 @@ export function createEventSourceWithAuth(url, token) {
       }
     } finally {
       if (shouldReconnect && !isClosed) {
-        reconnectTimeout = setTimeout(connect, 3000);
+        reconnectAttempts++;
+        const delay = Math.min(3000 * Math.pow(2, reconnectAttempts - 1), 30000);
+        reconnectTimeout = setTimeout(connect, delay);
+      } else {
+        reconnectAttempts = 0;
       }
     }
   }
