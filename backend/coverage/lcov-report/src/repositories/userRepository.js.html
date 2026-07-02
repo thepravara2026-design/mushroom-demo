@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">73.91% </span>
+                <span class="strong">65.38% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>17/23</span>
+                <span class='fraction'>17/26</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">47.36% </span>
+                <span class="strong">42.85% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>9/19</span>
+                <span class='fraction'>9/21</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">73.91% </span>
+                <span class="strong">68% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>17/23</span>
+                <span class='fraction'>17/25</span>
             </div>
         
             
@@ -133,20 +133,30 @@
 <a name='L68'></a><a href='#L68'>68</a>
 <a name='L69'></a><a href='#L69'>69</a>
 <a name='L70'></a><a href='#L70'>70</a>
-<a name='L71'></a><a href='#L71'>71</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">11x</span>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">28x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -155,8 +165,14 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -195,7 +211,7 @@
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-yes">28x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -218,15 +234,23 @@ async function findByEmail(email) {
 }
 &nbsp;
 async function <span class="fstat-no" title="function not covered" >findByPhone(</span>phone) {
-  const { data, error } = <span class="cstat-no" title="statement not covered" >await db</span>
+  const cleaned = <span class="cstat-no" title="statement not covered" >phone.replace(/^\+91/, "").replace(/\s/g, "").trim();</span>
+  // Try without +91 prefix (normalized storage)
+  let { data, error } = <span class="cstat-no" title="statement not covered" >await db</span>
     .from("users")
     .select("*")
-    .eq("whatsapp_number", phone.replace(/^\+91/, "").replace(/\s/g, "").trim())
+    .eq("whatsapp_number", cleaned)
     .single();
-<span class="cstat-no" title="statement not covered" >  if (error &amp;&amp; (error.message === "No rows found" || error.code === "PGRST116")) {</span>
-<span class="cstat-no" title="statement not covered" >    return { data: null, error: null };</span>
+<span class="cstat-no" title="statement not covered" >  if (data) <span class="cstat-no" title="statement not covered" >return { data, error: null };</span></span>
+<span class="cstat-no" title="statement not covered" >  if (error &amp;&amp; error.message !== "No rows found" &amp;&amp; error.code !== "PGRST116") {</span>
+<span class="cstat-no" title="statement not covered" >    return { data: null, error };</span>
   }
-<span class="cstat-no" title="statement not covered" >  return { data, error };</span>
+  // Fallback: try with +91 prefix (legacy storage from OTP-created users)
+<span class="cstat-no" title="statement not covered" >  return db</span>
+    .from("users")
+    .select("*")
+    .eq("whatsapp_number", `+91${cleaned}`)
+    .single();
 }
 &nbsp;
 async function findById(id) {
@@ -280,7 +304,7 @@ module.exports = {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-06-24T18:25:13.031Z
+                at 2026-07-02T06:22:03.419Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
