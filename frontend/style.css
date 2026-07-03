@@ -18163,105 +18163,119 @@ button {
 }
 
 /* ============================================================
-   PREMIUM MOBILE NAV BAR — Landing Page
-   Attractive · Premium Brand · Compact
+   MINIMAL MOBILE NAV BAR — Clean · Compact · No Overflow
    ============================================================ */
 
 /* ── Topbar Mobile ─────────────────────────────── */
 @media (max-width: 768px) {
   .topbar { padding: 8px 0; }
-  .topbar-inner { padding: 0 14px; gap: 8px; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .topbar-inner { padding: 0 16px; gap: 8px; flex-wrap: nowrap; justify-content: space-between; }
+  .logo { gap: 8px; }
+  .logo-icon-wrap { width: 34px; height: 34px; font-size: 0.95rem; }
   .logo-brand { font-size: 1rem; }
   .logo-tagline { display: none; }
   .topbar-search {
-    flex: 1 1 100px;
+    flex: 0 1 180px;
     min-width: 0;
-    max-width: 200px;
+    max-width: 240px;
     order: 2;
+    border-radius: 20px;
   }
-  .topbar-search input { font-size: 0.78rem; padding: 8px 10px 8px 32px; min-width: 0; width: 100%; }
-  .topbar-search i { font-size: 0.78rem; left: 10px; }
-  .topbar-actions { gap: 4px; order: 3; flex-shrink: 0; }
+  .topbar-search > i { display: none; }
+  .topbar-search input {
+    font-size: 0.82rem;
+    padding: 7px 12px;
+    min-width: 0;
+    width: 100%;
+  }
+  .topbar-search .search-btn { display: none; }
+  .topbar-actions { gap: 2px; order: 3; flex-shrink: 0; }
   .topbar-action-btn {
-    padding: 6px 10px;
-    font-size: 0.75rem;
-    min-width: 36px;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+    min-width: 34px;
     justify-content: center;
   }
   .topbar-action-btn span:not(.cart-badge) { display: none; }
-  .cart-badge { width: 16px; height: 16px; font-size: 0.55rem; top: -4px; right: -4px; }
-  #user-profile-section .user-profile-nav { gap: 4px; }
+  .cart-badge { width: 16px; height: 16px; font-size: 0.55rem; top: -3px; right: -3px; }
+  #user-profile-section .user-profile-nav { gap: 2px; }
   #user-profile-section .user-profile-nav span { display: none; }
   #user-profile-section .user-profile-nav i { font-size: 0.9rem; }
 }
 
-/* ── Main Navbar Mobile — Premium Glassmorphism ── */
+/* ── Main Navbar Mobile ────────────────────────── */
 @media (max-width: 900px) {
   .main-navbar {
-    background: rgba(255,255,255,0.82);
-    backdrop-filter: blur(18px) saturate(1.5);
-    -webkit-backdrop-filter: blur(18px) saturate(1.5);
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
     border-bottom: 1px solid rgba(0,0,0,0.04);
-    box-shadow: 0 1px 12px rgba(0,0,0,0.04);
+    box-shadow: 0 1px 8px rgba(0,0,0,0.04);
   }
-  .navbar-inner { padding: 0 14px; gap: 6px; }
+  .navbar-inner { padding: 0 16px; gap: 4px; }
   .cat-dropdown-btn {
     padding: 8px 12px;
-    font-size: 0.78rem;
-    border-radius: 10px;
+    font-size: 0.82rem;
+    border-radius: 8px;
     gap: 6px;
     min-width: 0;
     flex: 0 1 auto;
   }
   .cat-dropdown-btn i:first-child { font-size: 0.85rem; }
-  .cat-dropdown-btn .cat-label { font-size: 0.78rem; }
+  .cat-dropdown-btn .cat-label { font-size: 0.82rem; }
   .cat-dropdown-btn .chevron { font-size: 0.6rem; }
   .hamburger {
     display: inline-flex;
     margin-left: auto;
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-    background: rgba(22,128,62,0.06);
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: transparent;
     border: none;
     color: #16803e;
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
   }
-  .hamburger:hover { background: rgba(22,128,62,0.12); }
-  .hamburger:active { transform: scale(0.92); }
+  .hamburger:hover { background: rgba(22,128,62,0.08); }
 }
 
 @media (max-width: 520px) {
   .topbar { padding: 6px 0; }
-  .topbar-inner { padding: 0 8px; gap: 4px; }
+  .topbar-inner { padding: 0 12px; gap: 6px; }
+  .logo-icon-wrap { width: 30px; height: 30px; font-size: 0.85rem; }
+  .logo-brand { font-size: 0.9rem; }
+  .logo { gap: 6px; }
   .topbar-search {
-    max-width: 140px;
-    flex: 1 1 80px;
+    flex: 0 1 130px;
+    max-width: 150px;
   }
-  .topbar-search input { font-size: 0.72rem; padding: 6px 6px 6px 24px; }
-  .navbar-inner { padding: 0 8px; gap: 4px; }
-  .cat-dropdown-btn { padding: 6px 8px; font-size: 0.72rem; gap: 4px; }
-  .cat-dropdown-btn .cat-label { font-size: 0.72rem; }
-  .hamburger { width: 34px; height: 34px; font-size: 0.95rem; flex-shrink: 0; }
+  .topbar-search input { font-size: 0.75rem; padding: 6px 10px; }
+  .topbar-action-btn { padding: 5px 6px; min-width: 30px; font-size: 0.72rem; }
+  .navbar-inner { padding: 0 12px; gap: 2px; }
+  .cat-dropdown-btn { padding: 6px 10px; font-size: 0.75rem; gap: 4px; }
+  .cat-dropdown-btn .cat-label { font-size: 0.75rem; }
+  .hamburger { width: 32px; height: 32px; font-size: 1rem; }
+  .cat-dropdown-menu { min-width: 180px; }
 }
 
 /* ── Ultra-small screens (≤360px) ─────────────── */
 @media (max-width: 360px) {
-  .topbar { padding: 4px 0; }
-  .topbar-inner { padding: 0 6px; gap: 3px; }
-  .logo-icon-wrap { width: 30px; height: 30px; font-size: 0.8rem; }
-  .logo-brand { font-size: 0.85rem; }
-  .logo { gap: 6px; }
-  .topbar-search { max-width: 110px; flex: 1 1 60px; }
-  .topbar-search input { font-size: 0.65rem; padding: 5px 4px 5px 20px; }
-  .topbar-action-btn { padding: 4px 5px; min-width: 28px; font-size: 0.65rem; }
-  .cat-dropdown-btn { padding: 5px 6px; font-size: 0.65rem; gap: 3px; }
+  .topbar-inner { padding: 0 8px; gap: 4px; }
+  .logo-icon-wrap { width: 26px; height: 26px; font-size: 0.75rem; }
+  .logo-brand { font-size: 0.8rem; }
+  .logo { gap: 4px; }
+  .topbar-search { flex: 0 1 90px; max-width: 110px; }
+  .topbar-search input { font-size: 0.68rem; padding: 5px 8px; }
+  .topbar-action-btn { padding: 4px 4px; min-width: 26px; font-size: 0.65rem; }
+  .topbar-action-btn i { font-size: 0.85rem; }
+  .navbar-inner { padding: 0 8px; }
+  .cat-dropdown-btn { padding: 5px 6px; font-size: 0.68rem; gap: 3px; }
   .cat-dropdown-btn .cat-label { display: none; }
-  .cat-dropdown-btn i:first-child { font-size: 0.75rem; }
-  .hamburger { width: 30px; height: 30px; font-size: 0.85rem; }
+  .cat-dropdown-btn i:first-child { font-size: 0.8rem; }
+  .hamburger { width: 28px; height: 28px; font-size: 0.85rem; }
 }
 
 /* ── Premium Mobile Nav Overlay ──────────────────── */
