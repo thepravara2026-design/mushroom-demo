@@ -18163,10 +18163,10 @@ button {
 }
 
 /* ============================================================
-   MINIMAL MOBILE NAV BAR — Clean · Compact · No Overflow
+   PREMIUM MOBILE NAV — Compact · Glass · Brand-focused
    ============================================================ */
 
-/* ── Topbar Mobile ─────────────────────────────── */
+/* ── Topbar (tablet & down) ───────────────────── */
 @media (max-width: 768px) {
   .topbar { padding: 8px 0; }
   .topbar-inner { padding: 0 16px; gap: 8px; flex-wrap: nowrap; justify-content: space-between; }
@@ -18189,7 +18189,7 @@ button {
     width: 100%;
   }
   .topbar-search .search-btn { display: none; }
-  .topbar-actions { gap: 2px; order: 3; flex-shrink: 0; }
+  .topbar-actions { gap: 2px; order: 3; flex-shrink: 0; width: auto; }
   .topbar-action-btn {
     padding: 6px 8px;
     font-size: 0.78rem;
@@ -18203,7 +18203,7 @@ button {
   #user-profile-section .user-profile-nav i { font-size: 0.9rem; }
 }
 
-/* ── Main Navbar Mobile ────────────────────────── */
+/* ── Main Navbar (tablet & down) ──────────────── */
 @media (max-width: 900px) {
   .main-navbar {
     background: rgba(255,255,255,0.85);
@@ -18242,40 +18242,56 @@ button {
   .hamburger:hover { background: rgba(22,128,62,0.08); }
 }
 
-@media (max-width: 520px) {
-  .topbar { padding: 6px 0; }
-  .topbar-inner { padding: 0 12px; gap: 6px; }
-  .logo-icon-wrap { width: 30px; height: 30px; font-size: 0.85rem; }
-  .logo-brand { font-size: 0.9rem; }
-  .logo { gap: 6px; }
-  .topbar-search {
-    flex: 0 1 130px;
-    max-width: 150px;
-  }
-  .topbar-search input { font-size: 0.75rem; padding: 6px 10px; }
-  .topbar-action-btn { padding: 5px 6px; min-width: 30px; font-size: 0.72rem; }
-  .navbar-inner { padding: 0 12px; gap: 2px; }
-  .cat-dropdown-btn { padding: 6px 10px; font-size: 0.75rem; gap: 4px; }
-  .cat-dropdown-btn .cat-label { font-size: 0.75rem; }
-  .hamburger { width: 32px; height: 32px; font-size: 1rem; }
-  .cat-dropdown-menu { min-width: 180px; }
+/* ── Small phones (≤480px) — hide cat label, tighter ─ */
+@media (max-width: 480px) {
+  .topbar { padding: 5px 0; }
+  .topbar-inner { padding: 0 10px; gap: 5px; }
+  .logo-icon-wrap { width: 28px; height: 28px; font-size: 0.8rem; }
+  .logo-brand { font-size: 0.85rem; }
+  .logo { gap: 5px; }
+  .topbar-search { flex: 0 1 110px; max-width: 130px; }
+  .topbar-search input { font-size: 0.72rem; padding: 5px 8px; }
+  .topbar-action-btn { padding: 4px 5px; min-width: 28px; font-size: 0.7rem; }
+  .navbar-inner { padding: 0 10px; gap: 2px; }
+  .cat-dropdown-btn { padding: 5px 8px; font-size: 0.72rem; gap: 3px; }
+  .cat-dropdown-btn .cat-label { display: none; }
+  .cat-dropdown-btn i:first-child { font-size: 0.85rem; }
+  .hamburger { width: 30px; height: 30px; font-size: 0.95rem; }
+  .cat-dropdown-menu { min-width: 170px; }
 }
 
-/* ── Ultra-small screens (≤360px) ─────────────── */
-@media (max-width: 360px) {
+/* ── Premium compact (≤390px) — flagship phones ─ */
+@media (max-width: 390px) {
+  .topbar { padding: 4px 0; }
   .topbar-inner { padding: 0 8px; gap: 4px; }
-  .logo-icon-wrap { width: 26px; height: 26px; font-size: 0.75rem; }
-  .logo-brand { font-size: 0.8rem; }
+  .logo-icon-wrap { width: 24px; height: 24px; font-size: 0.7rem; }
+  .logo-brand { font-size: 0.78rem; }
   .logo { gap: 4px; }
   .topbar-search { flex: 0 1 90px; max-width: 110px; }
-  .topbar-search input { font-size: 0.68rem; padding: 5px 8px; }
-  .topbar-action-btn { padding: 4px 4px; min-width: 26px; font-size: 0.65rem; }
+  .topbar-search input { font-size: 0.65rem; padding: 4px 6px; }
+  .topbar-action-btn { padding: 3px 4px; min-width: 24px; font-size: 0.62rem; }
   .topbar-action-btn i { font-size: 0.85rem; }
-  .navbar-inner { padding: 0 8px; }
-  .cat-dropdown-btn { padding: 5px 6px; font-size: 0.68rem; gap: 3px; }
-  .cat-dropdown-btn .cat-label { display: none; }
+  .cart-badge { width: 14px; height: 14px; font-size: 0.5rem; top: -2px; right: -2px; }
+  .navbar-inner { padding: 0 8px; gap: 1px; }
+  .cat-dropdown-btn { padding: 4px 6px; gap: 2px; }
   .cat-dropdown-btn i:first-child { font-size: 0.8rem; }
-  .hamburger { width: 28px; height: 28px; font-size: 0.85rem; }
+  .cat-dropdown-btn .chevron { font-size: 0.5rem; }
+  .hamburger { width: 26px; height: 26px; font-size: 0.85rem; }
+  .cat-dropdown-menu { min-width: 160px; top: 34px; }
+}
+
+/* ── Ultra-small (≤360px) — minimum viable ────── */
+@media (max-width: 360px) {
+  .topbar-inner { gap: 3px; }
+  .logo-icon-wrap { width: 22px; height: 22px; font-size: 0.65rem; }
+  .logo-brand { font-size: 0.7rem; }
+  .topbar-search { flex: 0 1 70px; max-width: 90px; }
+  .topbar-search input { font-size: 0.6rem; padding: 3px 5px; }
+  .topbar-action-btn { min-width: 22px; padding: 2px 3px; }
+  .topbar-action-btn i { font-size: 0.75rem; }
+  .hamburger { width: 24px; height: 24px; font-size: 0.75rem; }
+  .cat-dropdown-btn { padding: 3px 5px; }
+  .cat-dropdown-btn i:first-child { font-size: 0.7rem; }
 }
 
 /* ── Premium Mobile Nav Overlay ──────────────────── */
