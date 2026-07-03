@@ -18170,17 +18170,18 @@ button {
 /* ── Topbar Mobile ─────────────────────────────── */
 @media (max-width: 768px) {
   .topbar { padding: 8px 0; }
-  .topbar-inner { padding: 0 14px; gap: 10px; flex-wrap: nowrap; }
+  .topbar-inner { padding: 0 14px; gap: 8px; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .logo-brand { font-size: 1rem; }
   .logo-tagline { display: none; }
   .topbar-search {
-    flex: 0 1 auto;
-    max-width: 180px;
+    flex: 1 1 100px;
+    min-width: 0;
+    max-width: 200px;
     order: 2;
   }
-  .topbar-search input { font-size: 0.78rem; padding: 8px 10px 8px 32px; }
+  .topbar-search input { font-size: 0.78rem; padding: 8px 10px 8px 32px; min-width: 0; width: 100%; }
   .topbar-search i { font-size: 0.78rem; left: 10px; }
-  .topbar-actions { gap: 4px; order: 3; }
+  .topbar-actions { gap: 4px; order: 3; flex-shrink: 0; }
   .topbar-action-btn {
     padding: 6px 10px;
     font-size: 0.75rem;
@@ -18235,13 +18236,32 @@ button {
 
 @media (max-width: 520px) {
   .topbar { padding: 6px 0; }
-  .topbar-inner { padding: 0 10px; gap: 6px; }
-  .topbar-search { max-width: 120px; }
-  .topbar-search input { font-size: 0.72rem; padding: 6px 8px 6px 26px; }
-  .navbar-inner { padding: 0 10px; }
-  .cat-dropdown-btn { padding: 6px 10px; font-size: 0.72rem; }
+  .topbar-inner { padding: 0 8px; gap: 4px; }
+  .topbar-search {
+    max-width: 140px;
+    flex: 1 1 80px;
+  }
+  .topbar-search input { font-size: 0.72rem; padding: 6px 6px 6px 24px; }
+  .navbar-inner { padding: 0 8px; gap: 4px; }
+  .cat-dropdown-btn { padding: 6px 8px; font-size: 0.72rem; gap: 4px; }
   .cat-dropdown-btn .cat-label { font-size: 0.72rem; }
-  .hamburger { width: 34px; height: 34px; font-size: 0.95rem; }
+  .hamburger { width: 34px; height: 34px; font-size: 0.95rem; flex-shrink: 0; }
+}
+
+/* ── Ultra-small screens (≤360px) ─────────────── */
+@media (max-width: 360px) {
+  .topbar { padding: 4px 0; }
+  .topbar-inner { padding: 0 6px; gap: 3px; }
+  .logo-icon-wrap { width: 30px; height: 30px; font-size: 0.8rem; }
+  .logo-brand { font-size: 0.85rem; }
+  .logo { gap: 6px; }
+  .topbar-search { max-width: 110px; flex: 1 1 60px; }
+  .topbar-search input { font-size: 0.65rem; padding: 5px 4px 5px 20px; }
+  .topbar-action-btn { padding: 4px 5px; min-width: 28px; font-size: 0.65rem; }
+  .cat-dropdown-btn { padding: 5px 6px; font-size: 0.65rem; gap: 3px; }
+  .cat-dropdown-btn .cat-label { display: none; }
+  .cat-dropdown-btn i:first-child { font-size: 0.75rem; }
+  .hamburger { width: 30px; height: 30px; font-size: 0.85rem; }
 }
 
 /* ── Premium Mobile Nav Overlay ──────────────────── */
