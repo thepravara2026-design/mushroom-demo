@@ -1359,7 +1359,7 @@ sendSseEvent(userId, {
 
 **Description:**
 The `.env` file contains real Supabase credentials committed to the git repository:
-- `SUPABASE_URL` = `nqpjzxzrdeucherewatt.supabase.co` (real project)
+- `SUPABASE_URL` = `your-project-ref.supabase.co` (example project host)
 - `SUPABASE_SERVICE_ROLE_KEY` = full admin access token
 - `SUPABASE_ANON_KEY` = public key
 - `SUPABASE_DB_PASSWORD` = raw database password

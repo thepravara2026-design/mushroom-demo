@@ -1,36 +1,61 @@
 # Dependency directories
 node_modules/
 
-# Environment files
+# Environment and secrets
 .env
-.env.*.bak
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
+!.env.sample
+*.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.p8
+service-account.json
+credentials.json
+firebase*.json
+firebase*.js
 
-# Build output
+# Build and generated output
 dist/
 build/
+coverage/
+.vite/
+.cache/
+.tmp/
+.temp/
+out/
 
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
+# Logs and runtime artifacts
 logs/
+*.log
+*.pid
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pids/
+*.tsbuildinfo
 
-# Coverage
-coverage/
-
-# Test results
+# Test and e2e artifacts
 test-results/
 playwright-report/
+e2e-artifacts/
+screenshots/
+videos/
+traces/
 
-# Environment backups
-.env.bak
-backend/.env.bak
+# IDE and editor files
+.idea/
+.history/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Backup and temporary files
+*.bak
+*.orig

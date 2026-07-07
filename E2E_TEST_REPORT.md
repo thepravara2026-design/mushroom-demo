@@ -34,7 +34,7 @@
 
 **Description:**  
 The `.env` file contains **live** Supabase credentials:
-- `SUPABASE_URL` — points to a real Supabase project (`nqpjzxzrdeucherewatt.supabase.co`)
+- `SUPABASE_URL` — points to a Supabase project host that has been redacted for safety (`your-project-ref.supabase.co`)
 - `SUPABASE_SERVICE_ROLE_KEY` — **bypasses all RLS policies**, grants full admin access
 - `SUPABASE_ANON_KEY` — public anon key
 - `SUPABASE_DB_PASSWORD` — raw database password
