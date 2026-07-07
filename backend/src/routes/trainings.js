@@ -12,6 +12,7 @@ const { success, error: respondError } = require("../lib/response");
 const { sendSseEvent } = require("../lib/sse");
 const { generateRefundIdempotencyKey, initiateRazorpayRefund } = require("../modules/payments/PaymentService");
 const { notify } = require("../services/notificationService");
+const logger = require("../utils/logger");
 
 const priceRatioValidator = (value, helpers) => {
   if (value.price_strikeout != null && value.price_actual != null) {
@@ -52,8 +53,8 @@ const enrollSchema = Joi.object({
   role: Joi.string().valid("buyer", "grower", "trainee").optional(),
 });
 
-// POST /api/trainings/:id/enroll (requires auth)
-router.post("/:id/enroll", authMiddleware, validateBody(enrollSchema), async (req, res) => {
+// POST /api/trainings/:id/enroll (requires auth, grower or trainee only)
+router.post("/:id/enroll", authMiddleware, requireRole("grower", "trainee"), validateBody(enrollSchema), async (req, res) => {
   try {
     const trainingId = req.params.id;
     const userId = req.user && req.user.userId;
@@ -80,7 +81,7 @@ router.post("/:id/enroll", authMiddleware, validateBody(enrollSchema), async (re
 
 // GET /api/trainings/my-enrollments (requires auth)
 // Returns legacy enrollments + v2 training_enrollments enriched with batch details
-router.get("/my-enrollments", authMiddleware, async (req, res) => {
+router.get("/my-enrollments", authMiddleware, requireRole("grower", "trainee"), async (req, res) => {
   try {
     const userId = req.user && req.user.userId;
     if (!userId) return respondError(res, "Authentication required", 401);
@@ -375,8 +376,8 @@ router.get("/batches/:id", async (req, res) => {
   }
 });
 
-// POST /api/trainings/batches/:id/register — register for a batch with Razorpay payment
-router.post("/batches/:id/register", authMiddleware, validateBody(registerSchema), async (req, res) => {
+// POST /api/trainings/batches/:id/register — register for a batch with Razorpay payment (grower or trainee only)
+router.post("/batches/:id/register", authMiddleware, requireRole("grower", "trainee"), validateBody(registerSchema), async (req, res) => {
   try {
     const batchId = req.params.id;
     const userId = req.user.userId;
@@ -460,7 +461,7 @@ router.post("/batches/:id/register", authMiddleware, validateBody(registerSchema
 });
 
 // POST /api/trainings/verify-payment — verify Razorpay signature and confirm enrollment
-router.post("/verify-payment", authMiddleware, validateBody(verifyPaymentSchema), async (req, res) => {
+router.post("/verify-payment", authMiddleware, requireRole("grower", "trainee"), validateBody(verifyPaymentSchema), async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, enrollment_id } = req.body;
     const userId = req.user.userId;
@@ -531,17 +532,48 @@ router.post("/verify-payment", authMiddleware, validateBody(verifyPaymentSchema)
       const b = batchRows[0];
       batchTitle = b.title;
       if (b.seats_taken >= b.capacity) {
+        // Payment was already captured (signature verified) — initiate refund
         await req.db
           .from("training_enrollments")
           .eq("id", enrollment_id)
           .update({ status: "failed" })
           .then(r => r.data || r);
-        await req.db
-          .from("training_payments")
-          .eq("id", payment.id)
-          .update({ status: "failed" })
-          .then(r => r.data || r);
-        return respondError(res, "Batch is now full. Your seat could not be confirmed. Refund will be processed automatically.", 409);
+
+        try {
+          const rzpRefund = await initiateRazorpayRefund(
+            razorpay_payment_id,
+            Math.round(payment.amount * 100),
+            generateRefundIdempotencyKey(enrollment_id, razorpay_payment_id, payment.amount, 0),
+            { reason: "Batch full at payment verification", enrollment_id },
+          );
+
+          await req.db
+            .from("training_refunds")
+            .insert({
+              payment_id: payment.id,
+              razorpay_refund_id: rzpRefund.id,
+              amount: payment.amount,
+              status: "initiated",
+              reason: "Batch full at payment verification",
+            })
+            .then(r => r.data || r);
+
+          await req.db
+            .from("training_payments")
+            .eq("id", payment.id)
+            .update({ status: "refunded" })
+            .then(r => r.data || r);
+
+          return respondError(res, "Batch is now full. Your payment has been refunded automatically.", 409);
+        } catch (refundErr) {
+          logger.error(`[trainings] Auto-refund failed for batch-full enrollment ${enrollment_id}: ${refundErr.message}`);
+          await req.db
+            .from("training_payments")
+            .eq("id", payment.id)
+            .update({ status: "failed" })
+            .then(r => r.data || r);
+          return respondError(res, "Batch is now full and automatic refund failed. Please contact support.", 409);
+        }
       }
       await req.db
         .from("training_batches")
@@ -574,7 +606,7 @@ router.post("/verify-payment", authMiddleware, validateBody(verifyPaymentSchema)
 });
 
 // POST /api/trainings/enrollments/:id/cancel — self-cancel within cancellation window
-router.post("/enrollments/:id/cancel", authMiddleware, validateBody(cancelEnrollmentSchema), async (req, res) => {
+router.post("/enrollments/:id/cancel", authMiddleware, requireRole("grower", "trainee"), validateBody(cancelEnrollmentSchema), async (req, res) => {
   try {
     const enrollmentId = req.params.id;
     const userId = req.user.userId;

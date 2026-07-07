@@ -14243,6 +14243,41 @@ button {
   box-shadow: 0 4px 12px rgba(26, 92, 56, 0.15) !important;
 }
 
+/* ── Chip Stock Badges ────────────────────────────────── */
+.chip-stock-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.4;
+  background: rgba(245, 166, 35, 0.15);
+  color: #b45309;
+}
+
+.chip-stock-limited {
+  border-color: #f59e0b !important;
+}
+
+.chip-stock-out {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.chip-stock-available {
+  border-color: var(--green-light) !important;
+}
+
+.weight-chip:disabled,
+.detail-weight-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ============================================================
    MOBILE PORTRAIT — 2-COLUMN PRODUCT GRID
    ============================================================ */
@@ -16291,6 +16326,41 @@ button {
   color: #0f172a;
   line-height: 1.3;
   margin: 0;
+}
+
+.ppm-sci-name {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ppm-sci-name i {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+.ppm-sci-name em {
+  font-style: italic;
+  color: #475569;
+  font-weight: 500;
+}
+
+.ppm-shelf-life-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ppm-shelf-life-badge i {
+  font-size: 0.65rem;
+  color: #9ca3af;
 }
 
 .ppm-price-row {

@@ -181,6 +181,96 @@ export function showErrorToast(message) {
   setTimeout(() => toast.remove(), 5000);
 }
 
+/**
+ * Premium role-switch modal.
+ * Shows when a user tries to access a section their role doesn't permit.
+ * @param {object} opts
+ * @param {string} opts.title - Modal heading
+ * @param {string} opts.message - Explanation text
+ * @param {string} opts.targetRole - The role needed ('buyer', 'grower', 'trainee')
+ * @param {string} opts.targetHash - Hash to redirect to after re-register
+ * @param {string} opts.icon - Emoji or icon HTML
+ * @param {string} opts.accentColor - CSS color for accent elements
+ */
+export function showRoleSwitchModal({ title, message, targetRole, targetHash, icon = '🔄', accentColor = '#8b5cf6' } = {}) {
+  const existing = document.getElementById('spk-role-switch-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'spk-role-switch-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);z-index:99998;padding:18px;backdrop-filter:blur(4px);';
+
+  const card = document.createElement('div');
+  card.style.cssText = `background:#fff;border-radius:20px;padding:36px 40px 32px;max-width:460px;width:100%;box-shadow:0 25px 80px rgba(0,0,0,0.2);text-align:center;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;position:relative;animation:spkFadeIn 0.35s ease;`;
+
+  // Icon circle
+  const iconWrap = document.createElement('div');
+  iconWrap.style.cssText = `width:64px;height:64px;border-radius:50%;background:${accentColor}15;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:2rem;`;
+  iconWrap.innerHTML = icon;
+  card.appendChild(iconWrap);
+
+  if (title) {
+    const titleEl = document.createElement('h3');
+    titleEl.style.cssText = 'margin:0 0 10px;font-size:1.25rem;font-weight:700;color:#0f172a;line-height:1.3;';
+    titleEl.textContent = title;
+    card.appendChild(titleEl);
+  }
+
+  if (message) {
+    const msgEl = document.createElement('p');
+    msgEl.style.cssText = 'margin:0 0 24px;font-size:0.95rem;color:#475569;line-height:1.6;';
+    msgEl.innerHTML = message;
+    card.appendChild(msgEl);
+  }
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
+
+  const switchBtn = document.createElement('button');
+  const roleLabel = targetRole === 'buyer' ? 'Buyer Account' : targetRole === 'grower' ? 'Cultivator Account' : 'Trainee Account';
+  switchBtn.innerHTML = `<i class="fa-solid fa-pen-to-square"></i> Register as ${roleLabel}`;
+  switchBtn.style.cssText = `padding:12px 28px;border:none;border-radius:12px;background:${accentColor};color:#fff;font-size:0.95rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.2s;box-shadow:0 4px 14px ${accentColor}40;`;
+  switchBtn.addEventListener('mouseenter', () => { switchBtn.style.transform = 'translateY(-1px)'; switchBtn.style.boxShadow = `0 6px 20px ${accentColor}50`; });
+  switchBtn.addEventListener('mouseleave', () => { switchBtn.style.transform = ''; switchBtn.style.boxShadow = `0 4px 14px ${accentColor}40`; });
+  btnRow.appendChild(switchBtn);
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.innerHTML = 'Stay';
+  dismissBtn.style.cssText = 'padding:12px 24px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;color:#475569;font-size:0.95rem;cursor:pointer;font-family:inherit;transition:all 0.2s;';
+  dismissBtn.addEventListener('mouseenter', () => { dismissBtn.style.background = '#f8fafc'; });
+  dismissBtn.addEventListener('mouseleave', () => { dismissBtn.style.background = '#fff'; });
+  btnRow.appendChild(dismissBtn);
+
+  card.appendChild(btnRow);
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  if (!document.getElementById('spk-popup-styles')) {
+    const style = document.createElement('style');
+    style.id = 'spk-popup-styles';
+    style.textContent = '@keyframes spkFadeIn{from{opacity:0;transform:scale(0.92) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}';
+    document.head.appendChild(style);
+  }
+
+  const close = () => overlay.remove();
+
+  dismissBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  switchBtn.addEventListener('click', () => {
+    close();
+    // Use globally exposed auth modal
+    if (window.authModal && typeof window.authModal.open === 'function') {
+      window.authModal.open(targetRole, () => {
+        if (targetHash) window.location.hash = targetHash;
+      });
+    }
+  });
+
+  return { overlay, card, close };
+}
+
 export function showInfoToast(message) {
   const existing = document.getElementById('spk-info-toast');
   if (existing) existing.remove();

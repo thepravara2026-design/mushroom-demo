@@ -180,6 +180,52 @@ const products = [
     gst_rate: 5,
     stock: 65,
   },
+  {
+    id: "prod-10",
+    name: "Fresh Shiitake Mushrooms",
+    description:
+      "Premium organic fresh Shiitake mushrooms (Lentinula edodes). Harvested at peak ripeness for maximum umami flavor and nutritional value. Each order is cold-chain packed and delivered within 24 hours of harvest.",
+    price: 180.0,
+    mrp_price: 249.0,
+    image_url:
+      "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+    image_urls: [
+      "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+      "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600",
+      "https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600",
+    ],
+    category: "fresh",
+    difficulty: "beginner",
+    gst_rate: 5,
+    stock: 59,
+    weight_pricing: [
+      { weight: 100, unit: "g", price: 180, mrp_price: 249, stock: 2 },
+      { weight: 200, unit: "g", price: 320, mrp_price: 449, stock: 7 },
+      { weight: 500, unit: "g", price: 720, mrp_price: 999, stock: 50 },
+    ],
+    storage_handling: "Refrigerate immediately at 2–4°C. Consume within 5–7 days for best quality. Do not freeze.",
+    warranty_policy: "100% freshness guarantee — replacement issued if spoilage is reported within 24 hours of delivery.",
+    return_policy: "Perishable goods are non-returnable. Quality-related replacements handled within 24 hours of delivery.",
+    shipping_info: "Free shipping on orders above ₹499. Dispatched in insulated cold-boxes with gel ice packs.",
+    compliance_info: "FSSAI licensed. Grown under Good Agricultural Practices (GAP) in a controlled environment. Pesticide-free certification available on request.",
+    highlights: [
+      "Hand-picked at peak freshness from our climate-controlled farm",
+      "Cold-chain maintained throughout transit — delivered fresh",
+      "Rich in vitamin D, B-vitamins, and beta-glucans",
+      "Authentic Japanese Kuroko variety — premium grade",
+      "Shelf life: 5–7 days under refrigeration",
+    ],
+    certificates: [
+      { icon: "fa-solid fa-certificate", label: "FSSAI Certified" },
+      { icon: "fa-solid fa-leaf", label: "Organic Produce" },
+      { icon: "fa-solid fa-check-circle", label: "Non-GMO Verified" },
+    ],
+    manufacturer_supplier: "Shriyap Enterprises, Basavura Village Davangere",
+    scientific_name: "Lentinula edodes",
+    shelf_life: "5–7 days under refrigeration",
+    seo_title: "Buy Fresh Shiitake Mushrooms Online | Premium Grade | Spore Kings",
+    seo_slug: "fresh-shiitake-mushrooms",
+  },
 ];
 
 const settings = [

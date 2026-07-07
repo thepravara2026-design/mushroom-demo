@@ -30,7 +30,6 @@ const inventoryModuleRoutes = require("./modules/inventory");
 const couponModuleRoutes = require("./modules/coupons");
 
 const pincodeRoutes = require("./routes/pincode");
-const FEATURE_FLAGS = require("./config/featureFlags");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -159,6 +158,20 @@ app.use("/api/returns", returnRoutes);
 const analyticsRoutes = require("./routes/analytics");
 app.use("/api/analytics", analyticsRoutes);
 
+const bulkImportRoutes = require("./routes/bulkImport");
+app.use("/api/bulk-import", bulkImportRoutes);
+
+// ── Backup & Recovery System (Phase 10) ──
+// Completely isolated module — zero impact on existing functionality
+const backupRoutes = require("./backup/routes/backupAdminRoutes");
+app.use("/api/admin/backup", backupRoutes);
+
+// ── Communication Module (Phase 11) ──
+// Isolated provider-based communication system (SMS, OTP, WhatsApp, Email)
+const communicationRoutes = require("./services/communication/routes/communicationRoutes");
+app.use("/api/communication", communicationRoutes);
+app.use("/api/admin/communication", communicationRoutes);
+
 // Reset mock database (dev only)
 // ── Global unhandled rejection / exception handlers ──
 // Prevents process crashes; logs to help debug without losing the request
@@ -186,6 +199,7 @@ app.get("/api/health", (req, res) => {
     status: "healthy",
     databaseMode: db.isMock ? "Mock In-Memory" : "Production Supabase",
     paymentMode: razorpay.isMock ? "Mock Simulator" : "Production Razorpay",
+    communicationMode: process.env.COMMUNICATION_PROVIDER === "msg91" ? "MSG91" : "Mock",
     timestamp: new Date().toISOString(),
   });
 });
@@ -482,11 +496,16 @@ async function runMigrations() {
       `CREATE INDEX IF NOT EXISTS idx_notification_log_event ON notification_log(event_type, created_at)`,
       // ── Optimistic concurrency control — version columns ──
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS manufacturer_supplier TEXT DEFAULT 'Shriyap Enterprises, Basavura Village Davangere'`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS scientific_name TEXT`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf_life TEXT`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS seo_title TEXT`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS seo_slug TEXT`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL`,
       `ALTER TABLE refunds ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1 NOT NULL`,
       // ── Phase 1/2 — Seed data ──
       `INSERT INTO notification_triggers (event_type, channels, delay_minutes) VALUES ('payment.success', '["email","whatsapp","sms"]', 0), ('payment.failed', '["sms","whatsapp"]', 0), ('order.confirmed', '["email","whatsapp"]', 0), ('admin.approved', '["email"]', 0), ('order.shipped', '["whatsapp","sms","email"]', 0), ('out.for.delivery', '["whatsapp","sms"]', 0), ('delivered', '["whatsapp","email"]', 0), ('ndr.raised', '["sms","whatsapp"]', 0), ('order.cancelled', '["email","whatsapp"]', 0), ('refund.initiated', '["email","whatsapp"]', 0), ('refund.completed', '["email","sms"]', 0), ('cart.abandoned.1hr', '["whatsapp"]', 60), ('cart.abandoned.12hr', '["email"]', 720), ('cart.abandoned.24hr', '["email","sms"]', 1440) ON CONFLICT DO NOTHING`,
-      `INSERT INTO coupons (code, type, value, min_order, max_discount, usage_limit, description, is_active, auto_apply, expires_at) VALUES ('SAVE10', 'percentage', 10, 500, 150, 1000, '10% off on orders above Rs500 (max Rs150)', TRUE, TRUE, '2027-12-31'), ('WELCOME5', 'fixed', 5, 0, NULL, 500, 'Rs5 off for new customers', TRUE, TRUE, '2027-12-31'), ('FREESHIP', 'free_shipping', 0, 299, NULL, 500, 'Free shipping on orders above Rs299', TRUE, TRUE, '2027-12-31'), ('SPORE15', 'percentage', 15, 1000, 300, 200, '15% off on orders above Rs1000 (max Rs300)', TRUE, FALSE, '2027-06-30'), ('FIRST50', 'fixed', 50, 200, NULL, 100, 'Rs50 off on first order', TRUE, FALSE, '2027-12-31'), ('MONSOON20', 'percentage', 20, 1500, 500, 50, 'Monsoon special: 20% off above Rs1500', TRUE, FALSE, '2026-09-30') ON CONFLICT (code) DO NOTHING`,
+      `INSERT INTO coupons (code, type, value, min_order, max_discount, usage_limit, description, is_active, is_auto_apply, expires_at) VALUES ('SAVE10', 'percentage', 10, 500, 150, 1000, '10% off on orders above Rs500 (max Rs150)', TRUE, TRUE, '2027-12-31'), ('WELCOME5', 'fixed', 5, 0, NULL, 500, 'Rs5 off for new customers', TRUE, TRUE, '2027-12-31'), ('FREESHIP', 'free_shipping', 0, 299, NULL, 500, 'Free shipping on orders above Rs299', TRUE, TRUE, '2027-12-31'), ('SPORE15', 'percentage', 15, 1000, 300, 200, '15% off on orders above Rs1000 (max Rs300)', TRUE, FALSE, '2027-06-30'), ('FIRST50', 'fixed', 50, 200, NULL, 100, 'Rs50 off on first order', TRUE, FALSE, '2027-12-31'), ('MONSOON20', 'percentage', 20, 1500, 500, 50, 'Monsoon special: 20% off above Rs1500', TRUE, FALSE, '2026-09-30') ON CONFLICT (code) DO NOTHING`,
       `INSERT INTO pincode_serviceability (pincode, cod_available, estimated_days_min, estimated_days_max, courier_id) VALUES ('110001', TRUE, 1, 3, 'default'), ('400001', TRUE, 1, 3, 'default'), ('700001', TRUE, 2, 4, 'default'), ('600001', TRUE, 2, 4, 'default'), ('500001', TRUE, 1, 3, 'default'), ('380001', TRUE, 2, 4, 'default'), ('560001', TRUE, 1, 3, 'default'), ('800001', TRUE, 3, 5, 'default'), ('226001', TRUE, 2, 4, 'default'), ('302001', TRUE, 2, 4, 'default') ON CONFLICT (pincode, courier_id) DO NOTHING`,
       // ── Grower Training v2 — Tables ──
       `CREATE TABLE IF NOT EXISTS training_batches (
@@ -580,8 +599,6 @@ async function runMigrations() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function registerQueueWorkers(work, QUEUES) {
-  const logger = require("./utils/logger");
-
   work(QUEUES.ORDER_PROCESSING, async (job) => {
     const { action, orderId, payload } = job.data;
     logger.info(`[QueueWorker] ORDER_PROCESSING: ${action} for ${orderId}`);
@@ -690,6 +707,18 @@ function startServer(port, attempts = 0) {
     // Phase 8 — Analytics aggregation (every 6 hours)
     const { runAnalyticsAggregation } = require("./jobs/analyticsAggregation");
     setInterval(() => runAnalyticsAggregation().catch(() => {}), 6 * 60 * 60 * 1000);
+
+    // Phase 10 — Backup system (isolated, non-blocking)
+    const { initBackupSystem } = require("./backup");
+    initBackupSystem({ db, supabase: null }).catch(err => {
+      logger.warn(`[Server] Backup system init skipped: ${err.message}`);
+    });
+
+    // Phase 11 — Communication Module (isolated, non-blocking)
+    const { initCommunicationModule } = require("./services/communication");
+    initCommunicationModule().catch(err => {
+      logger.warn(`[Server] Communication module init error: ${err.message}`);
+    });
 
     logger.info("==================================================");
   });

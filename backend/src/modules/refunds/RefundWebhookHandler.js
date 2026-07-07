@@ -247,13 +247,8 @@ async function handleWebhookEvent(event) {
       const rzpPaymentId = entity.id;
 
       // Scan for orphaned order: order exists as 'pending' but payment captured on gateway
-      const { data: orders, error } = await repo.findPotentialOrphanedOrders();
-      if (error) {
-        logger.error(`[RefundWebhookHandler] Error scanning for orphaned order: ${error.message}`);
-        return;
-      }
-
-      const order = (orders || []).find(o => o.razorpay_order_id === rzpOrderId);
+      const orphanedOrders = await repo.findPotentialOrphanedOrders();
+      const order = (orphanedOrders || []).find(o => o.razorpay_order_id === rzpOrderId);
 
       if (order && order.status === "pending") {
         // Re-read order from DB to avoid race with auto-refund sweep

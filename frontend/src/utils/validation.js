@@ -1,11 +1,12 @@
 export function isValidIndianPhone(value) {
   if (!value) return false;
   const digits = value.replace(/\D/g, '');
-  // If more than 10 digits, take the last 10 (handles country code prefix and maxlength truncation)
-  const normalized = digits.length > 10 ? digits.slice(-10) : digits;
-  if (normalized.length === 10) {
-    return /^[6-9]\d{9}$/.test(normalized);
-  }
+  // 10 digits: must start with 6-9
+  if (digits.length === 10) return /^[6-9]\d{9}$/.test(digits);
+  // 11 digits starting with 0: 0 + 10-digit Indian number
+  if (digits.length === 11 && digits.startsWith('0')) return /^0[6-9]\d{9}$/.test(digits);
+  // 12 digits starting with 91: country code + 10-digit Indian number
+  if (digits.length === 12 && digits.startsWith('91')) return /^91[6-9]\d{9}$/.test(digits);
   return false;
 }
 

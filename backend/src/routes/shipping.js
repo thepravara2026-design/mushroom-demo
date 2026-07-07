@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const authMiddleware = require('../middleware/auth');
+const { requireRole } = require('../middleware/roles');
 const { success, error: respondError } = require('../lib/response');
 const logger = require('../utils/logger');
 const selectBestProvider = require('../services/shipping/selectBestProvider');
@@ -9,10 +10,8 @@ const { getProvider, getDefaultProvider } = require('../services/shipping/Provid
 
 // GET /api/shipping/all
 // Admin: fetch all shipments with order info
-router.get('/all', authMiddleware, async (req, res) => {
+router.get('/all', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') return respondError(res, 'Admins only', 403);
-
     const { data: shipments } = await db
       .from('shipments')
       .select('*')
@@ -20,16 +19,24 @@ router.get('/all', authMiddleware, async (req, res) => {
 
     if (!shipments) return success(res, []);
 
-    // Enrich with customer name from orders (bounded concurrency to avoid pool exhaustion)
-    const enriched = [];
-    for (const s of shipments) {
-      const { data: order } = await db
+    // Batch-fetch orders to avoid N+1
+    const orderIds = [...new Set(shipments.map(s => s.order_id).filter(Boolean))];
+    const ordersMap = {};
+    if (orderIds.length > 0) {
+      const { data: orders } = await db
         .from('orders')
-        .select('customer_name, delivery_phone')
-        .eq('id', s.order_id)
-        .single();
-      enriched.push({ ...s, customer_name: order?.customer_name || '', delivery_phone: order?.delivery_phone || '' });
+        .select('id, customer_name, delivery_phone')
+        .in('id', orderIds);
+      if (orders) {
+        for (const o of orders) ordersMap[o.id] = o;
+      }
     }
+
+    const enriched = shipments.map(s => ({
+      ...s,
+      customer_name: ordersMap[s.order_id]?.customer_name || '',
+      delivery_phone: ordersMap[s.order_id]?.delivery_phone || '',
+    }));
 
     return success(res, enriched);
   } catch (error) {
@@ -368,10 +375,8 @@ router.post('/cancel/:orderId', authMiddleware, async (req, res) => {
 
 // GET /api/shipping/ndr-shipments
 // Admin: fetch all shipments with NDR status
-router.get('/ndr-shipments', authMiddleware, async (req, res) => {
+router.get('/ndr-shipments', authMiddleware, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') return respondError(res, 'Admins only', 403);
-
     const { data: shipments } = await db
       .from('shipments')
       .select('*')
@@ -380,24 +385,32 @@ router.get('/ndr-shipments', authMiddleware, async (req, res) => {
 
     if (!shipments || shipments.length === 0) return success(res, []);
 
-    const enriched = [];
-    for (const s of shipments) {
-      const { data: order } = await db
+    // Batch-fetch orders to avoid N+1
+    const orderIds = [...new Set(shipments.map(s => s.order_id).filter(Boolean))];
+    const ordersMap = {};
+    if (orderIds.length > 0) {
+      const { data: orders } = await db
         .from('orders')
-        .select('customer_name, delivery_phone, delivery_address, id, total, status, delivery_status, fulfillment_status')
-        .eq('id', s.order_id)
-        .single();
-      enriched.push({
-        ...s,
-        customer_name: order?.customer_name || '',
-        delivery_phone: order?.delivery_phone || '',
-        delivery_address: order?.delivery_address || '',
-        order_total: order?.total || 0,
-        order_status: order?.status || '',
-        order_delivery_status: order?.delivery_status || '',
-        order_fulfillment_status: order?.fulfillment_status || '',
-      });
+        .select('id, customer_name, delivery_phone, delivery_address, total, status, delivery_status, fulfillment_status')
+        .in('id', orderIds);
+      if (orders) {
+        for (const o of orders) ordersMap[o.id] = o;
+      }
     }
+
+    const enriched = shipments.map(s => {
+      const order = ordersMap[s.order_id] || {};
+      return {
+        ...s,
+        customer_name: order.customer_name || '',
+        delivery_phone: order.delivery_phone || '',
+        delivery_address: order.delivery_address || '',
+        order_total: order.total || 0,
+        order_status: order.status || '',
+        order_delivery_status: order.delivery_status || '',
+        order_fulfillment_status: order.fulfillment_status || '',
+      };
+    });
 
     return success(res, enriched);
   } catch (error) {

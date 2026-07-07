@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const repo = require("./RefundRepository");
 const { OrderStates, isValidTransition, restockOrderItems, isWithCarrier } = require("../orders/OrderStateService");
 const { generateRefundIdempotencyKey, initiateRazorpayRefund } = require("../payments/PaymentService");
@@ -8,7 +7,7 @@ const razorpay = require("../../config/razorpay");
 const db = require("../../config/db");
 const logger = require("../../utils/logger");
 const FEATURE_FLAGS = require("../../config/featureFlags");
-const { withTransaction, withRowLock, optimisticUpdate } = require("../../services/TransactionManager");
+const { withTransaction, withRowLock } = require("../../services/TransactionManager");
 const { send, QUEUES } = require("../../services/QueueService");
 
 /**
@@ -95,6 +94,9 @@ async function sendRefundNotification(order, actionType, metadata = {}) {
       break;
     case "ADMIN_REJECTED":
       message = `❌ *Order Rejected* \n\nOrder *#${orderIdShort}* could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for details.'} A refund will be processed if payment was made.`;
+      break;
+    case "ADMIN_CANCELLED":
+      message = `❌ *Order Cancelled by Admin* \n\nOrder *#${orderIdShort}* has been cancelled by an administrator. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for details.'} A refund will be processed if payment was made.`;
       break;
     case "RETURN_WINDOW":
       message = `📦 *Return Window Open* \n\nOrder *#${orderIdShort}* delivered! You have 7 days from delivery to request a return. Log in to your Sporekart account to start a return.`;
@@ -459,7 +461,7 @@ async function executeRefundWithCompensatingTransaction(order, refundAmount, ini
 }
 
 /**
- * Admin approves user cancellation request (auto-triggers gateway refund)
+ * Admin approves user cancellation request (creates pending refund record)
  */
 async function approveCancellation(orderId, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
@@ -476,6 +478,7 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
   await cancelCarrierShipment(orderId, order.cancel_reason || "cancellation approved");
 
   const auditPerformer = adminUser || "ADMIN";
+  const cancelledByIdentity = adminUser ? (adminUser.userId || adminUser.id || "admin") : "customer";
   let refundRecord = null;
 
   if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
@@ -485,7 +488,7 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
 
       await client.query(
         `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, refund_status = $4, cancelled_by = $5, cancelled_at = $6, version = version + 1, updated_at = $7 WHERE id = $8 AND version = $9`,
-        [OrderStates.CANCELLED, "cancelled", null, "pending", "customer", new Date().toISOString(), new Date().toISOString(), orderId, lockedOrder.version]
+        [OrderStates.CANCELLED, "cancelled", null, "pending", cancelledByIdentity, new Date().toISOString(), new Date().toISOString(), orderId, lockedOrder.version]
       );
 
       refundRecord = await repo.createRefund({
@@ -496,7 +499,7 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
         amount: order.total,
         refund_reason: order.cancel_reason || "approved cancellation request",
         status: "pending",
-        cancelled_by: "customer",
+        cancelled_by: cancelledByIdentity,
         admin_note: adminNote
       });
     });
@@ -506,7 +509,7 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
       delivery_status: "cancelled",
       fulfillment_status: null,
       refund_status: "pending",
-      cancelled_by: "customer",
+      cancelled_by: cancelledByIdentity,
       cancelled_at: new Date().toISOString()
     });
 
@@ -519,7 +522,7 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
         amount: order.total,
         refund_reason: order.cancel_reason || "approved cancellation request",
         status: "pending",
-        cancelled_by: "customer",
+        cancelled_by: cancelledByIdentity,
         admin_note: adminNote
       });
     } catch (createErr) {
@@ -580,6 +583,11 @@ async function rejectCancellation(orderId, reason = "", adminUser = null) {
 /**
  * Admin cancels order directly (manual refund only - no auto gateway refund)
  */
+const TERMINAL_STATES = new Set([
+  OrderStates.COMPLETED, OrderStates.REFUND_COMPLETED, OrderStates.CANCELLED,
+  "cancelled", "delivered",
+]);
+
 async function adminDirectCancellation(orderId, reason, adminNote = "", adminUser = null) {
   const order = await repo.findOrderById(orderId);
   if (!order) throw new Error("Order not found");
@@ -588,10 +596,12 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
     throw new Error("Order cannot be cancelled after it has been handed to the carrier. Use RTO flow instead.");
   }
 
-  const isPaid = order.status === "paid" && order.razorpay_payment_id;
-  const auditPerformer = adminUser || "ADMIN";
+  if (TERMINAL_STATES.has(order.status) || order.delivery_status === "delivered") {
+    throw new Error("Cannot cancel an order that is already completed, delivered, or cancelled.");
+  }
 
-  await cancelCarrierShipment(orderId, reason);
+  const isPaid = order.status === OrderStates.PAID && order.razorpay_payment_id;
+  const auditPerformer = adminUser || "ADMIN";
 
   if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
     await withTransaction(async (client) => {
@@ -602,6 +612,8 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
         `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, cancel_reason = $4, cancelled_by = $5, cancelled_at = $6, refund_status = $7, version = version + 1, updated_at = $8 WHERE id = $9 AND version = $10`,
         [OrderStates.CANCELLED, "cancelled", null, reason, "admin", new Date().toISOString(), isPaid ? "pending" : "none", new Date().toISOString(), orderId, lockedOrder.version]
       );
+
+      await cancelCarrierShipment(orderId, reason);
     });
   } else {
     await repo.updateOrder(orderId, {
@@ -613,6 +625,8 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
       cancelled_at: new Date().toISOString(),
       refund_status: isPaid ? "pending" : "none"
     });
+
+    await cancelCarrierShipment(orderId, reason);
   }
 
   const cancelledOrder = await repo.findOrderById(orderId);
@@ -685,18 +699,21 @@ async function initiatePartialRefund(orderId, refundAmount, reason, adminNote = 
 }
 
 /**
- * Retry a failed refund
+ * Retry a failed refund by order ID
+ * Finds the most recent failed refund for the order and retries it.
  */
-async function retryFailedRefund(refundId) {
-  const refund = await repo.findRefundById(refundId);
-  if (!refund) throw new Error("Refund record not found");
+async function retryFailedRefund(orderId) {
+  const order = await repo.findOrderById(orderId);
+  if (!order) throw new Error("Order not found");
 
-  if (refund.status !== "failed") {
-    throw new Error("Only failed refunds can be retried");
+  const refunds = await repo.findRefundsByOrderId(orderId);
+  const failedRefunds = refunds.filter(r => r.status === "failed");
+  if (failedRefunds.length === 0) {
+    throw new Error("No failed refund found for this order");
   }
 
-  const order = await repo.findOrderById(refund.order_id);
-  if (!order) throw new Error("Associated order not found");
+  // Pick the most recent failed refund
+  const refund = failedRefunds.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
   // Re-run executeRefundProcess with the old refund's parameters
   const result = await executeRefundProcess(order, refund.amount, refund.cancelled_by || "admin", refund.refund_reason || "Retry Refund", refund.admin_note);

@@ -124,7 +124,7 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
         });
 
       expect(checkoutRes.status).toBe(200);
-      expect(checkoutRes.body.data.order.status).toBe('pending');
+      expect(checkoutRes.body.data.order.status).toBe('order_created');
       const orderId = checkoutRes.body.data.order.id;
       const rzpOrderId = checkoutRes.body.data.order.razorpay_order_id;
       expect(rzpOrderId).toBeTruthy();
@@ -144,7 +144,7 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
         });
 
       expect(verifyRes.status).toBe(200);
-      expect(verifyRes.body.data.order.status).toBe('paid');
+      expect(verifyRes.body.data.order.status).toBe('payment_verified');
       expect(verifyRes.body.data.order.delivery_status).toBe('placed');
       expect(verifyRes.body.data.order.razorpay_payment_id).toMatch(/^pay_/);
       expect(verifyRes.body.data.order.admin_approval_status).toBe('pending');
@@ -155,7 +155,7 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
 
       // ── Verify persisted order state ──
       const { data: persisted } = await db.from('orders').select('*').eq('id', orderId).single();
-      expect(persisted.status).toBe('paid');
+      expect(persisted.status).toBe('payment_verified');
       expect(persisted.razorpay_payment_id).toBeTruthy();
       expect(persisted.items).toHaveLength(1);
       expect(persisted.items[0].productId).toBe(seededProdId);

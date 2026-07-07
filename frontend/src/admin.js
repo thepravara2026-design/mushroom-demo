@@ -658,6 +658,18 @@ function renderAdminInventory() {
     return;
   }
 
+  // ── Bulk Import capsule ────────────────────────
+  if (_activeCapsule === 'bulk-import') {
+    if (afBar) afBar.style.display = 'none';
+    if (capsuleForm) capsuleForm.style.display = 'none';
+    if (capsuleCategories) capsuleCategories.style.display = 'none';
+    if (capsuleInventory) capsuleInventory.style.display = 'none';
+    const bulkPanel = document.getElementById('admin-capsule-bulk-import');
+    if (bulkPanel) bulkPanel.style.display = 'block';
+    grid.innerHTML = '';
+    return;
+  }
+
   // ── Inventory capsule ──────────────────────────
   if (_activeCapsule === 'inventory') {
     if (afBar) afBar.style.display = 'none';
@@ -940,6 +952,17 @@ function resetCapsuleAddForm() {
   resetPremiumGallery();
   const fb = document.getElementById('admin-capsule-add-feedback');
   if (fb) { fb.classList.add('hidden'); fb.textContent = ''; }
+  // Reset new fields
+  const manEl = document.getElementById('admin-capsule-prod-manufacturer');
+  if (manEl) manEl.value = 'Shriyap Enterprises, Basavura Village Davangere';
+  const sciEl = document.getElementById('admin-capsule-prod-sci-name');
+  if (sciEl) sciEl.value = '';
+  const shelfEl = document.getElementById('admin-capsule-prod-shelf-life');
+  if (shelfEl) shelfEl.value = '';
+  const seoTitleEl = document.getElementById('admin-capsule-prod-seo-title');
+  if (seoTitleEl) seoTitleEl.value = '';
+  const seoSlugEl = document.getElementById('admin-capsule-prod-seo-slug');
+  if (seoSlugEl) seoSlugEl.value = '';
 }
 
 async function handleCapsuleAddSubmit(e) {
@@ -1065,6 +1088,11 @@ async function handleCapsuleAddSubmit(e) {
   const returnPolicy = document.getElementById('admin-capsule-prod-returns')?.value.trim() || '';
   const shippingInfo = document.getElementById('admin-capsule-prod-shipping')?.value.trim() || '';
   const complianceInfo = document.getElementById('admin-capsule-prod-compliance')?.value.trim() || '';
+  const manufacturerSupplier = document.getElementById('admin-capsule-prod-manufacturer')?.value.trim() || '';
+  const scientificName = document.getElementById('admin-capsule-prod-sci-name')?.value.trim() || '';
+  const shelfLife = document.getElementById('admin-capsule-prod-shelf-life')?.value.trim() || '';
+  const seoTitle = document.getElementById('admin-capsule-prod-seo-title')?.value.trim() || '';
+  const seoSlug = document.getElementById('admin-capsule-prod-seo-slug')?.value.trim() || '';
   const rawCerts = document.getElementById('admin-capsule-prod-certificates')?.value.trim() || '';
   const certificates = rawCerts ? rawCerts.split('\n').map(s => s.trim()).filter(Boolean).map(line => {
     const colonIdx = line.indexOf(':');
@@ -1090,6 +1118,11 @@ async function handleCapsuleAddSubmit(e) {
     compliance_info: complianceInfo,
     highlights,
     certificates,
+    manufacturer_supplier: manufacturerSupplier || 'Shriyap Enterprises, Basavura Village Davangere',
+    scientific_name: scientificName || null,
+    shelf_life: shelfLife || null,
+    seo_title: seoTitle || null,
+    seo_slug: seoSlug || null,
   };
   if (imageUrl) payload.image_url = imageUrl;
 
@@ -1269,6 +1302,18 @@ function adminEditProduct(productId) {
     const iconPart = c.icon ? c.icon.replace(/^fa-solid\s+fa-/i, '').replace(/^fa-/i, '') : '';
     return iconPart && iconPart !== 'certificate' ? `${iconPart}:${c.label}` : c.label;
   }).join('\n');
+
+  // New fields
+  const manEl = document.getElementById('admin-capsule-prod-manufacturer');
+  if (manEl) manEl.value = product.manufacturer_supplier || 'Shriyap Enterprises, Basavura Village Davangere';
+  const sciEl = document.getElementById('admin-capsule-prod-sci-name');
+  if (sciEl) sciEl.value = product.scientific_name || '';
+  const shelfEl = document.getElementById('admin-capsule-prod-shelf-life');
+  if (shelfEl) shelfEl.value = product.shelf_life || '';
+  const seoTitleEl = document.getElementById('admin-capsule-prod-seo-title');
+  if (seoTitleEl) seoTitleEl.value = product.seo_title || '';
+  const seoSlugEl = document.getElementById('admin-capsule-prod-seo-slug');
+  if (seoSlugEl) seoSlugEl.value = product.seo_slug || '';
 }
 
 
@@ -1896,7 +1941,7 @@ async function adminOrderApproveModal(orderId) {
     modal.remove();
 
     try {
-      await fetchWithAuth(`/orders/admin/approve/${orderId}`, {
+      await fetchWithAuth(`/orders/admin/order-approve/${orderId}`, {
         method: 'POST',
         body: JSON.stringify({ adminNote }),
       });
@@ -1983,7 +2028,7 @@ async function adminOrderRejectModal(orderId) {
     modal.remove();
 
     try {
-      await fetchWithAuth(`/orders/admin/reject/${orderId}`, {
+      await fetchWithAuth(`/orders/admin/order-reject/${orderId}`, {
         method: 'POST',
         body: JSON.stringify({ reason, adminNote }),
       });
@@ -4437,6 +4482,226 @@ async function loadInventoryTab() {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   BULK IMPORT
+   ═══════════════════════════════════════════════════════════════ */
+let _bulkImportFile = null;
+
+function renderBulkImportTab() {
+  const entitySelect = document.getElementById('bulk-import-entity');
+  const dropzone = document.getElementById('bulk-import-dropzone');
+  const fileInput = document.getElementById('bulk-import-file-input');
+  const uploadBtn = document.getElementById('bulk-import-upload-btn');
+  const downloadBtn = document.getElementById('bulk-import-download-template');
+  const progress = document.getElementById('bulk-import-progress');
+  const progressFill = document.getElementById('bulk-import-progress-fill');
+  const progressLabel = document.getElementById('bulk-import-progress-label');
+  const feedback = document.getElementById('bulk-import-feedback');
+  const results = document.getElementById('bulk-import-results');
+  const resultsBody = document.getElementById('bulk-import-results-body');
+
+  // Reset state
+  _bulkImportFile = null;
+  if (fileInput) fileInput.value = '';
+  if (dropzone) {
+    dropzone.classList.remove('file-selected');
+    const inner = dropzone.querySelector('.bulk-import-dropzone-inner');
+    if (inner) {
+      const fileName = inner.querySelector('.file-selected-name');
+      if (fileName) fileName.remove();
+      inner.querySelector('i').style.display = '';
+      inner.querySelector('.bulk-import-drop-text').style.display = '';
+      inner.querySelector('small').style.display = '';
+    }
+  }
+  if (uploadBtn) uploadBtn.disabled = true;
+  if (progress) progress.classList.add('hidden');
+  if (feedback) feedback.classList.add('hidden');
+  if (results) results.classList.add('hidden');
+
+  // ── Dropzone click ──
+  if (dropzone) {
+    dropzone.onclick = () => fileInput?.click();
+  }
+
+  // ── File input change ──
+  if (fileInput) {
+    fileInput.onchange = () => {
+      const file = fileInput.files?.[0];
+      if (file) setBulkFile(file, dropzone, fileInput, uploadBtn);
+    };
+  }
+
+  // ── Drag and drop ──
+  if (dropzone) {
+    dropzone.ondragover = (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); };
+    dropzone.ondragleave = () => dropzone.classList.remove('drag-over');
+    dropzone.ondrop = (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      const file = e.dataTransfer.files?.[0];
+      if (file) {
+        if (fileInput) fileInput.files = e.dataTransfer.files;
+        setBulkFile(file, dropzone, fileInput, uploadBtn);
+      }
+    };
+  }
+
+  // ── Upload button ──
+  if (uploadBtn) {
+    uploadBtn.onclick = () => handleBulkUpload(uploadBtn, progress, progressFill, progressLabel, feedback, results, resultsBody);
+  }
+
+  // ── Download template ──
+  if (downloadBtn) {
+    downloadBtn.onclick = () => {
+      const entity = entitySelect?.value;
+      if (!entity) {
+        if (feedback) { feedback.textContent = 'Please select an entity type first.'; feedback.className = 'bulk-import-feedback error'; feedback.classList.remove('hidden'); }
+        return;
+      }
+      window.open(`/api/bulk-import/template/${entity}`, '_blank');
+    };
+  }
+}
+
+function setBulkFile(file, dropzone, fileInput, uploadBtn) {
+  if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.csv')) {
+    if (fileInput) fileInput.value = '';
+    alert('Only .xlsx and .csv files are supported.');
+    return;
+  }
+  _bulkImportFile = file;
+  if (dropzone) {
+    dropzone.classList.add('file-selected');
+    const inner = dropzone.querySelector('.bulk-import-dropzone-inner');
+    if (inner) {
+      inner.querySelector('i').style.display = 'none';
+      inner.querySelector('.bulk-import-drop-text').style.display = 'none';
+      inner.querySelector('small').style.display = 'none';
+      const existing = inner.querySelector('.file-selected-name');
+      if (existing) existing.remove();
+      const nameEl = document.createElement('div');
+      nameEl.className = 'file-selected-name';
+      nameEl.innerHTML = `<i class="fa-solid fa-file-circle-check"></i> ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      inner.appendChild(nameEl);
+    }
+  }
+  if (uploadBtn) uploadBtn.disabled = false;
+}
+
+async function handleBulkUpload(uploadBtn, progress, progressFill, progressLabel, feedback, results, resultsBody) {
+  if (!_bulkImportFile) return;
+  const entitySelect = document.getElementById('bulk-import-entity');
+  const entity = entitySelect?.value;
+  if (!entity) {
+    if (feedback) { feedback.textContent = 'Please select an entity type.'; feedback.className = 'bulk-import-feedback error'; feedback.classList.remove('hidden'); }
+    return;
+  }
+
+  if (uploadBtn) uploadBtn.disabled = true;
+  if (progress) progress.classList.remove('hidden');
+  if (progressFill) progressFill.style.width = '30%';
+  if (progressLabel) progressLabel.textContent = 'Uploading...';
+  if (feedback) feedback.classList.add('hidden');
+  if (results) results.classList.add('hidden');
+
+  try {
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('file', _bulkImportFile);
+
+    if (progressFill) progressFill.style.width = '60%';
+    if (progressLabel) progressLabel.textContent = 'Importing...';
+
+    const res = await fetch(`/api/bulk-import/${entity}`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+
+    if (progressFill) progressFill.style.width = '90%';
+    if (progressLabel) progressLabel.textContent = 'Finalizing...';
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || data.message || 'Import failed');
+    }
+
+    if (progressFill) progressFill.style.width = '100%';
+    if (progressLabel) progressLabel.textContent = 'Done!';
+
+    // Render results
+    renderBulkResults(data, feedback, results, resultsBody);
+  } catch (err) {
+    if (feedback) {
+      feedback.textContent = err.message;
+      feedback.className = 'bulk-import-feedback error';
+      feedback.classList.remove('hidden');
+    }
+  } finally {
+    if (uploadBtn) uploadBtn.disabled = false;
+    setTimeout(() => {
+      if (progress) progress.classList.add('hidden');
+      if (progressFill) progressFill.style.width = '0%';
+    }, 2000);
+  }
+}
+
+function renderBulkResults(data, feedback, results, resultsBody) {
+  const total = data.total || 0;
+  const successCount = data.success?.length || 0;
+  const errors = data.errors || [];
+
+  if (feedback) {
+    if (errors.length === 0) {
+      feedback.textContent = `✅ All ${successCount} records imported successfully.`;
+      feedback.className = 'bulk-import-feedback success';
+    } else {
+      feedback.textContent = `⚠ Imported ${successCount}/${total} records. ${errors.length} error(s) found.`;
+      feedback.className = 'bulk-import-feedback error';
+    }
+    feedback.classList.remove('hidden');
+  }
+
+  // Stats
+  const statTotal = document.getElementById('bi-stat-total');
+  const statSuccess = document.getElementById('bi-stat-success');
+  const statFailed = document.getElementById('bi-stat-failed');
+  if (statTotal) statTotal.textContent = total;
+  if (statSuccess) statSuccess.textContent = successCount;
+  if (statFailed) statFailed.textContent = errors.length;
+
+  // Rows
+  if (resultsBody) {
+    if (errors.length === 0 && successCount > 0) {
+      resultsBody.innerHTML = `<div class="bulk-import-success-row"><i class="fa-solid fa-check-circle"></i> All ${successCount} records created/updated successfully.</div>`;
+    } else {
+      resultsBody.innerHTML = errors.map((e, i) => `
+        <div class="bulk-import-error-row">
+          <span class="bulk-err-row-num">Row ${e.row || '?'}</span>
+          <span class="bulk-err-row-msg">${e.message || 'Unknown error'}</span>
+          <button class="bulk-err-row-toggle" data-target="bi-err-detail-${i}" type="button">Details</button>
+        </div>
+        <div class="bulk-import-error-detail" id="bi-err-detail-${i}">${e.data ? JSON.stringify(e.data, null, 2) : ''}</div>
+      `).join('');
+    }
+
+    // Toggle detail
+    resultsBody.querySelectorAll('.bulk-err-row-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = document.getElementById(btn.getAttribute('data-target'));
+        if (target) {
+          target.classList.toggle('open');
+          btn.textContent = target.classList.contains('open') ? 'Hide' : 'Details';
+        }
+      });
+    });
+  }
+
+  if (results) results.classList.remove('hidden');
+}
+
 // Wire up shipments search/filter
 document.addEventListener('input', (e) => {
   if (e.target.id === 'admin-shipments-search' || e.target.id === 'admin-shipments-filter-status') {
@@ -4478,6 +4743,10 @@ function activateAdminTab(tabName) {
   if (tabName === 'analytics') {
     loadAnalyticsTab();
   }
+  if (tabName === 'communication') {
+    loadCommunicationTab();
+  }
+}
   if (tabName === 'training-ops') {
     loadTrainingOpsTab();
   }
@@ -4622,6 +4891,234 @@ function renderEvents(events) {
     </tr>`;
   }).join('') + '</tbody></table></div>';
 }
+
+/* ── Communication Management Tab ── */
+
+let _commTemplatesVisible = false;
+
+async function loadCommunicationTab() {
+  try {
+    const [healthRes, logsRes, statsRes] = await Promise.all([
+      fetchWithAuth('/communication/health'),
+      fetchWithAuth('/communication/logs'),
+      fetchWithAuth('/communication/stats'),
+    ]);
+
+    if (healthRes?.success) {
+      renderCommProvider(healthRes.data);
+    }
+    if (logsRes?.success) {
+      renderCommLogs(logsRes.data);
+    }
+    if (statsRes?.success) {
+      renderCommStats(statsRes.data);
+    }
+
+    loadCommTemplates();
+    checkCommDevMode();
+
+    const channelFilter = document.getElementById('comm-filter-channel');
+    const statusFilter = document.getElementById('comm-filter-status');
+    const searchInput = document.getElementById('comm-search');
+
+    if (channelFilter) channelFilter.onchange = loadCommunicationTab;
+    if (statusFilter) statusFilter.onchange = loadCommunicationTab;
+    if (searchInput) {
+      const handler = () => loadCommunicationTab();
+      searchInput.onkeyup = (e) => { if (e.key === 'Enter') handler(); };
+    }
+  } catch (err) {
+    showErrorToast(getApiErrorMessage(err) || 'Failed to load communication data');
+  }
+}
+globalThis.loadCommunicationTab = loadCommunicationTab;
+
+function renderCommProvider(health) {
+  const badge = document.getElementById('comm-provider-badge');
+  if (badge) {
+    const provider = health?.provider?.provider || 'mock';
+    const mode = health?.provider?.mode || 'mock';
+    badge.textContent = `Provider: ${provider} (${mode})`;
+    badge.style.background = provider === 'msg91' ? '#1e3a5f' : '#2d6a4f';
+    badge.style.color = provider === 'msg91' ? '#93c5fd' : '#bbf7d0';
+  }
+}
+
+function renderCommStats(stats) {
+  const logs = stats?.logs || {};
+  const queue = stats?.queue || {};
+
+  setText('comm-stat-total', logs.total ?? 0);
+  setText('comm-stat-sent', logs.sent ?? 0);
+  setText('comm-stat-delivered', logs.delivered ?? 0);
+  setText('comm-stat-failed', logs.failed ?? 0);
+  setText('comm-stat-queued', (logs.queued ?? 0) + (queue.queued ?? 0));
+
+  const channelStats = logs.byChannel || {};
+  const channelContainer = document.getElementById('comm-channel-stats');
+  if (channelContainer) {
+    channelContainer.innerHTML = Object.entries(channelStats).map(([ch, count]) =>
+      `<div style="background:#1a2e22;border-radius:8px;padding:12px 16px;text-align:center;flex:1;min-width:80px;">
+        <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;">${ch}</div>
+        <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;margin-top:4px;">${count}</div>
+      </div>`
+    ).join('');
+  }
+
+  const queueContainer = document.getElementById('comm-queue-status');
+  if (queueContainer) {
+    if (!queue || queue.total === 0) {
+      queueContainer.innerHTML = '<span style="color:#94a3b8;">No queued jobs</span>';
+    } else {
+      queueContainer.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <span style="color:#94a3b8;">Total Jobs: <strong style="color:#e2e8f0;">${queue.total}</strong></span>
+        <span style="color:#94a3b8;">Queued: <strong style="color:#f59e0b;">${queue.queued}</strong></span>
+        <span style="color:#94a3b8;">Processing: <strong style="color:#3b82f6;">${queue.processing}</strong></span>
+        <span style="color:#94a3b8;">Completed: <strong style="color:#10b981;">${queue.completed}</strong></span>
+        <span style="color:#94a3b8;">Failed: <strong style="color:#ef4444;">${queue.failed}</strong></span>
+      </div>`;
+    }
+  }
+
+  const failBadge = document.getElementById('admin-comm-fail-badge');
+  if (failBadge) {
+    const failed = (logs.failed ?? 0) + (queue.failed ?? 0);
+    failBadge.classList.toggle('hidden', failed === 0);
+    if (failed > 0) failBadge.textContent = failed > 99 ? '99+' : failed;
+  }
+}
+
+function renderCommLogs(data) {
+  const container = document.getElementById('comm-message-list');
+  if (!container) return;
+  const logs = data?.logs || [];
+  if (!logs.length) {
+    container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No messages yet. Send a test message to see logs here.</p>';
+    return;
+  }
+
+  const channelFilter = document.getElementById('comm-filter-channel')?.value || '';
+  const statusFilter = document.getElementById('comm-filter-status')?.value || '';
+  const searchQuery = document.getElementById('comm-search')?.value?.toLowerCase() || '';
+
+  let filtered = logs;
+  if (channelFilter) filtered = filtered.filter(l => l.channel === channelFilter);
+  if (statusFilter) filtered = filtered.filter(l => l.status === statusFilter);
+  if (searchQuery) filtered = filtered.filter(l => l.recipient?.toLowerCase().includes(searchQuery));
+
+  container.innerHTML = `<div style="max-height:400px;overflow-y:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+      <thead><tr style="color:#64748b;text-align:left;position:sticky;top:0;background:#0f1c16;">
+        <th style="padding:6px 8px;">ID</th>
+        <th style="padding:6px 8px;">Recipient</th>
+        <th style="padding:6px 8px;">Channel</th>
+        <th style="padding:6px 8px;">Type</th>
+        <th style="padding:6px 8px;">Status</th>
+        <th style="padding:6px 8px;">Provider</th>
+        <th style="padding:6px 8px;">Time</th>
+        <th style="padding:6px 8px;">Error</th>
+      </tr></thead><tbody>
+      ${filtered.map(l => {
+        const statusColor = l.status === 'delivered' ? '#10b981' : l.status === 'sent' ? '#3b82f6' : l.status === 'failed' ? '#ef4444' : '#f59e0b';
+        return `<tr>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;font-family:monospace;font-size:0.7rem;">${(l.id || '').substring(0, 16)}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#e2e8f0;">${l.recipient || '-'}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);"><span class="badge badge-info" style="background:#1e3a5f;color:#93c5fd;">${l.channel}</span></td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#94a3b8;">${l.type || '-'}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);"><span style="color:${statusColor};font-weight:600;">${l.status}</span></td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;">${l.provider || '-'}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#64748b;font-size:0.7rem;">${l.createdAt ? new Date(l.createdAt).toLocaleTimeString() : ''}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid rgba(56,177,123,0.06);color:#ef4444;font-size:0.7rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;">${l.error || ''}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>
+  </div>`;
+  if (filtered.length === 0) {
+    container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No messages match the current filters.</p>';
+  }
+}
+
+async function loadCommTemplates() {
+  try {
+    const res = await fetchWithAuth('/communication/templates');
+    const container = document.getElementById('comm-templates-container');
+    if (!container) return;
+    if (!res?.success) {
+      container.innerHTML = '<span style="color:#94a3b8;">Failed to load templates</span>';
+      return;
+    }
+    const templates = res.data || {};
+    let html = '';
+    for (const [channel, tpls] of Object.entries(templates)) {
+      html += `<div style="margin-bottom:12px;">
+        <h4 style="color:#e2e8f0;margin:0 0 6px;font-size:0.85rem;text-transform:capitalize;">${channel}</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">`;
+      for (const [name, content] of Object.entries(tpls)) {
+        const preview = typeof content === 'object' ? content.subject || JSON.stringify(content).substring(0, 60) : String(content).substring(0, 60);
+        html += `<span style="background:#1a2e22;border-radius:4px;padding:3px 8px;font-size:0.7rem;color:#94a3b8;">
+          <strong style="color:#e2e8f0;">${name}</strong>: ${preview}...
+        </span>`;
+      }
+      html += `</div></div>`;
+    }
+    container.innerHTML = html;
+  } catch (err) {
+    console.warn('Failed to load templates:', err);
+  }
+}
+
+function checkCommDevMode() {
+  const section = document.getElementById('comm-otp-dev-section');
+  if (section) {
+    section.style.display = ''; 
+  }
+}
+
+async function lookupDevOtp() {
+  const identifier = document.getElementById('comm-dev-otp-identifier')?.value?.trim();
+  const resultEl = document.getElementById('comm-dev-otp-result');
+  if (!identifier || !resultEl) return;
+
+  try {
+    const res = await fetchWithAuth(`/communication/dev-otp/${encodeURIComponent(identifier)}`);
+    if (res?.success) {
+      resultEl.textContent = `OTP: ${res.data?.otp || 'No active OTP'}`;
+      resultEl.style.color = '#f59e0b';
+    } else {
+      resultEl.textContent = 'Error: ' + (getApiErrorMessage(res) || 'Lookup failed');
+      resultEl.style.color = '#ef4444';
+    }
+  } catch (err) {
+    resultEl.textContent = 'Error: ' + (err.message || 'Lookup failed');
+    resultEl.style.color = '#ef4444';
+  }
+}
+globalThis.lookupDevOtp = lookupDevOtp;
+
+function toggleCommTemplates() {
+  _commTemplatesVisible = !_commTemplatesVisible;
+  const container = document.getElementById('comm-templates-container');
+  if (container) {
+    container.style.display = _commTemplatesVisible ? 'block' : 'none';
+  }
+}
+globalThis.toggleCommTemplates = toggleCommTemplates;
+
+async function retryAllFailedComm() {
+  if (!confirm('Retry all failed communication messages?')) return;
+  try {
+    const res = await fetchWithAuth('/communication/retry-all', { method: 'POST' });
+    if (res?.success) {
+      showSuccessToast(`Retrying ${res.data?.retried || 0} failed messages`);
+      loadCommunicationTab();
+    } else {
+      showErrorToast(getApiErrorMessage(res) || 'Failed to retry');
+    }
+  } catch (err) {
+    showErrorToast(err.message || 'Failed to retry');
+  }
+}
+globalThis.retryAllFailedComm = retryAllFailedComm;
 
 function setText(id, val) {
   const el = document.getElementById(id);
@@ -4904,6 +5401,9 @@ function setupAdminEventHandlers() {
       }
       if (_activeCapsule === 'inventory') {
         loadInventoryTab();
+      }
+      if (_activeCapsule === 'bulk-import') {
+        renderBulkImportTab();
       }
       _adminInventoryPage = 1;
       renderAdminInventory();

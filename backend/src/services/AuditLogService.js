@@ -3,6 +3,7 @@ const logger = require("../utils/logger");
 
 const AUDIT_ACTIONS = {
   ORDER_STATUS_CHANGED: "order_status_changed",
+  NOTIFICATION_SENT: "notification_sent",
   USER_ACTION: "user_action",
   SYSTEM_ACTION: "system_action",
 };
@@ -68,8 +69,24 @@ async function logAuditAction({ orderId, action, performedBy, previousState, new
   }
 }
 
+async function getAuditLogs(orderId) {
+  try {
+    const { data, error } = await db
+      .from("refund_audits")
+      .select("*")
+      .eq("order_id", orderId)
+      .order("timestamp", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    logger.error(`[AuditLogService] Failed to fetch audit logs for order ${orderId}: ${err.message}`);
+    return [];
+  }
+}
+
 module.exports = {
   logAuditAction,
+  getAuditLogs,
   AUDIT_ACTIONS,
   UnauthorizedError,
   hasPermission,

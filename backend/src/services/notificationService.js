@@ -18,6 +18,7 @@ const EVENT_CHANNELS = {
   CANCEL_REJECTED:         { email: true, sms: true,  whatsapp: false, in_app: true },
   SELF_CANCELLED:          { email: true, sms: true,  whatsapp: true,  in_app: true },
   ADMIN_REJECTED:          { email: true, sms: true,  whatsapp: true,  in_app: true },
+  ADMIN_CANCELLED:         { email: true, sms: true,  whatsapp: true,  in_app: true },
   RETURN_WINDOW:           { email: true, sms: true,  whatsapp: true,  in_app: true },
   RETURN_APPROVED:         { email: true, sms: true,  whatsapp: true,  in_app: true },
   RETURN_REJECTED:         { email: true, sms: true,  whatsapp: false, in_app: true },
@@ -47,6 +48,7 @@ const EMAIL_SUBJECTS = {
   CANCEL_REJECTED:         'Cancellation Update — Sporekart',
   SELF_CANCELLED:          'Self Cancellation Confirmed — Sporekart',
   ADMIN_REJECTED:          'Order Rejected — Sporekart',
+  ADMIN_CANCELLED:         'Order Cancelled by Admin — Sporekart',
   RETURN_WINDOW:           'Return Window Open — Sporekart',
   RETURN_APPROVED:         'Return Request Approved — Sporekart',
   RETURN_REJECTED:         'Return Request Update — Sporekart',
@@ -102,6 +104,7 @@ function buildEmailHtml(eventType, order, metadata) {
     CANCEL_REJECTED:         `Your cancellation request was not approved. ${metadata.reason ? `Reason: ${metadata.reason}` : ''}`,
     SELF_CANCELLED:          'Your order has been self-cancelled successfully. Refund will be processed shortly.',
     ADMIN_REJECTED:          `Your order could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for more details.'}`,
+    ADMIN_CANCELLED:         `Your order has been cancelled by admin. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for more details.'}`,
     RETURN_WINDOW:           'Your order has been delivered! You have 7 days to request a return if needed.',
     RETURN_APPROVED:         'Your return request has been approved. We will schedule a pickup shortly.',
     RETURN_REJECTED:         `Your return request was not approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Please contact support for details.'}`,
@@ -180,6 +183,7 @@ function buildSmsMessage(eventType, order, metadata) {
     CANCEL_REJECTED:         `Cancellation for Order #${orderId} was not approved. ${metadata.reason || ''} — Sporekart`,
     SELF_CANCELLED:          `Order #${orderId} has been self-cancelled. Refund will be processed shortly. — Sporekart`,
     ADMIN_REJECTED:          `Order #${orderId} could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support.'} — Sporekart`,
+    ADMIN_CANCELLED:         `Order #${orderId} has been cancelled by admin. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support.'} — Sporekart`,
     RETURN_WINDOW:           `Order #${orderId} delivered! Return window is open for 7 days. — Sporekart`,
     RETURN_APPROVED:         `Return for Order #${orderId} has been approved. Pickup will be scheduled shortly. — Sporekart`,
     RETURN_REJECTED:         `Return for Order #${orderId} was not approved. ${metadata.reason || ''} — Sporekart`,
@@ -211,6 +215,7 @@ function buildWhatsAppMessage(eventType, order, metadata) {
     ORDER_DELIVERED:   `🎉 *Order Delivered!*\n\nOrder #${shortId} has been delivered. Thank you for choosing Sporekart! 🍄`,
     SELF_CANCELLED:    `✅ *Self Cancellation Confirmed*\n\nOrder #${shortId} has been self-cancelled. Refund of ${amountStr} will be processed shortly.`,
     ADMIN_REJECTED:    `❌ *Order Rejected*\n\nOrder #${shortId} could not be approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support.'}`,
+    ADMIN_CANCELLED:   `❌ *Order Cancelled by Admin*\n\nOrder #${shortId} has been cancelled by admin. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support for details.'}`,
     RETURN_WINDOW:     `📦 *Return Window Open*\n\nOrder #${shortId} delivered! You have 7 days to request a return. Log in to your account to start a return.`,
     RETURN_APPROVED:   `✅ *Return Approved*\n\nYour return for Order #${shortId} has been approved. We will schedule a pickup shortly.`,
     RETURN_REJECTED:   `❌ *Return Rejected*\n\nYour return for Order #${shortId} was not approved. ${metadata.reason ? `Reason: ${metadata.reason}` : 'Contact support for details.'}`,
@@ -233,6 +238,10 @@ async function sendEmail(toEmail, eventType, order, metadata) {
   if (!toEmail) return { success: false, error: 'No email address' };
   try {
     const transporter = getTransporter();
+    if (!transporter) {
+      logger.info(`[MOCK EMAIL] To: ${toEmail} | Subject: ${EMAIL_SUBJECTS[eventType] || 'Order Update — Sporekart'} | Event: ${eventType}`);
+      return { success: true, mock: true };
+    }
     const html = buildEmailHtml(eventType, order, metadata);
     const subject = EMAIL_SUBJECTS[eventType] || 'Order Update — Sporekart';
 
@@ -375,9 +384,9 @@ async function notify(eventType, order, user, metadata = {}) {
   if (FEATURE_FLAGS.NOTIFICATION_TRIGGERS) {
     const context = {
       orderId: order?.id || order?.order_id,
-      userId: user?.id,
+      userId: user?.id || user?.userId,
       email: user?.email || order?.customer_email,
-      phone: user?.phone || order?.delivery_phone,
+      phone: user?.phone || user?.whatsapp_number || order?.delivery_phone,
       whatsapp: user?.whatsapp_number || order?.delivery_phone,
       name: user?.name || user?.fullName || '',
       amount: order?.total || order?.amount || 0,
@@ -403,7 +412,7 @@ async function notify(eventType, order, user, metadata = {}) {
   }
 
   if (channels.sms) {
-    const smsPhone = user?.phone || order?.delivery_phone;
+    const smsPhone = user?.phone || user?.whatsapp_number || order?.delivery_phone;
     if (smsPhone) {
       promises.push(sendSms(smsPhone, eventType, order, metadata));
     }

@@ -114,9 +114,6 @@ class AuthService {
       throw new Error("Invalid OTP code.");
     }
 
-    // OTP verified successfully. Delete from store.
-    otpStore.delete(emailLower);
-
     const loginMethod = opts.loginMethod || record.loginMethod || null;
     // Prefer opts.whatsappNumber (frontend-supplied), fall back to phone saved during OTP request
     const rawWhatsapp = opts.whatsappNumber || record.phone || "";
@@ -214,6 +211,13 @@ const mockUsers = mockStore.users;
         }
       }
     }
+
+    if (!user) {
+      throw new Error("Failed to create or find user account. Please try again.");
+    }
+
+    // OTP verified and user confirmed. Delete from store.
+    otpStore.delete(emailLower);
 
     // Generate JWT token
     const token = jwt.sign(

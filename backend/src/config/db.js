@@ -423,6 +423,52 @@ const mockStore = {
       highlights: ['Pre-inoculated shiitake log', 'Produces multiple harvests', 'Outdoor cultivation'],
       certificates: [{ icon: 'fa-solid fa-certificate', label: 'Premium Quality' }],
     },
+    {
+      id: "prod-11",
+      created_at: "2026-07-05T10:00:00.000Z",
+      name: "Fresh Milky Mushrooms",
+      description: "Premium organic fresh Milky mushrooms (Calocybe indica). Harvested at peak freshness with a delicate texture and mild sweet flavor. Cold-chain packed for farm-to-table delivery within 24 hours.",
+      price: 160.0,
+      mrp_price: 220.0,
+      image_url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+      image_urls: [
+        "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=600",
+        "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600",
+        "https://images.unsplash.com/photo-1599599810769-bcde5a160d32?auto=format&fit=crop&q=80&w=600",
+      ],
+      category: "fresh",
+      difficulty: "beginner",
+      gst_rate: 5,
+      stock: 59,
+      low_stock_threshold: 10,
+      weight_pricing: [
+        { weight: 100, unit: "g", price: 160, mrp_price: 220, stock: 2 },
+        { weight: 200, unit: "g", price: 290, mrp_price: 399, stock: 7 },
+        { weight: 500, unit: "g", price: 650, mrp_price: 899, stock: 50 },
+      ],
+      storage_handling: 'Refrigerate immediately at 2-4\u00b0C. Consume within 5\u20137 days for best quality. Do not freeze.',
+      warranty_policy: '100% freshness guarantee \u2014 replacement issued if spoilage is reported within 24 hours of delivery.',
+      return_policy: 'Perishable goods are non-returnable. Quality-related replacements handled within 24 hours of delivery.',
+      shipping_info: 'Free shipping on orders above \u20b9499. Dispatched in insulated cold-boxes with gel ice packs.',
+      compliance_info: 'FSSAI licensed. Grown under Good Agricultural Practices (GAP) in a controlled environment. Pesticide-free certification available on request.',
+      highlights: [
+        'Hand-picked at peak freshness from our climate-controlled farm',
+        'Cold-chain maintained throughout transit \u2014 delivered fresh',
+        'Rich in vitamin D, B-vitamins, and beta-glucans',
+        'Authentic Indian variety \u2014 premium grade',
+        'Shelf life: 5\u20137 days under refrigeration',
+      ],
+      certificates: [
+        { icon: 'fa-solid fa-certificate', label: 'FSSAI Certified' },
+        { icon: 'fa-solid fa-leaf', label: 'Organic Produce' },
+        { icon: 'fa-solid fa-check-circle', label: 'Non-GMO Verified' },
+      ],
+      manufacturer_supplier: 'Shriyap Enterprises, Basavura Village Davangere',
+      scientific_name: 'Calocybe indica',
+      shelf_life: '5\u20137 days under refrigeration',
+      seo_title: 'Buy Fresh Milky Mushrooms Online | Premium Grade | Spore Kings',
+      seo_slug: 'fresh-milky-mushrooms',
+    },
   ],
 
   refunds: [],
@@ -1005,16 +1051,6 @@ mockStore.users.push({
   created_at: new Date().toISOString(),
 });
 
-// Seed Buyer User (no .com)
-mockStore.users.push({
-  id: "user-buyer-short",
-  email: "buyer@sporekart.com",
-  full_name: "John Buyer",
-  whatsapp_number: "9876543211",
-  role: "buyer", // Customer type: Buyer
-  created_at: new Date().toISOString(),
-});
-
 // Seed Cultivator User
 mockStore.users.push({
   id: "user-grower",
@@ -1028,17 +1064,6 @@ mockStore.users.push({
 // Seed Admin User
 mockStore.users.push({
   id: "user-admin",
-  email: "admin@sporekart.com",
-  password_hash: adminPasswordHash,
-  full_name: "Sporekart Admin",
-  whatsapp_number: "9876543210",
-  role: "admin", // Administrator
-  created_at: new Date().toISOString(),
-});
-
-// Seed Admin User (no .com)
-mockStore.users.push({
-  id: "user-admin-short",
   email: "admin@sporekart.com",
   password_hash: adminPasswordHash,
   full_name: "Sporekart Admin",

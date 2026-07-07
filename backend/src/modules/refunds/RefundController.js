@@ -292,26 +292,25 @@ router.get(
 
       // If filtering, fetch all (or more) for accurate filtered results
       if (status || search) {
-        // For filtered views, fetch up to 1000 records
         const allResult = await repo.listAllRefunds(1, 1000);
         refunds = allResult.data;
       }
 
-      const { data: users } = await db.from("users").select("id, email, full_name");
-      const { data: orders } = await db.from("orders").select("id, total, status, delivery_status, cancel_reason");
-
-      // Enrich refunds with order details & user details
+      // Batch enrich — only fetch referenced users and orders
+      const userIds = [...new Set((refunds || []).map(r => r.user_id).filter(Boolean))];
+      const orderIds = [...new Set((refunds || []).map(r => r.order_id).filter(Boolean))];
       const userMap = {};
-      (users || []).forEach(u => {
-        userMap[u.id] = { email: u.email, name: u.full_name };
-      });
-
       const orderMap = {};
-      (orders || []).forEach(o => {
-        orderMap[o.id] = o;
-      });
+      if (userIds.length > 0) {
+        const { data: users } = await db.from("users").select("id, email, full_name").in("id", userIds);
+        if (users) { for (const u of users) userMap[u.id] = { email: u.email, name: u.full_name }; }
+      }
+      if (orderIds.length > 0) {
+        const { data: orders } = await db.from("orders").select("id, total, status, delivery_status, cancel_reason").in("id", orderIds);
+        if (orders) { for (const o of orders) orderMap[o.id] = o; }
+      }
 
-      const enrichedRefunds = refunds.map(r => {
+      const enrichedRefunds = (refunds || []).map(r => {
         const user = r.user_id ? (userMap[r.user_id] || { email: "N/A", name: "Deleted User" }) : { email: "N/A", name: "Deleted User" };
         const order = orderMap[r.order_id] || { total: r.amount || r.refund_amount, status: "unknown" };
         return {
@@ -343,13 +342,12 @@ router.get(
         );
       }
 
-      // Compute statistics from all matching records
-      const { data: allRefunds } = await db.from("refunds").select("*");
-      const allRefundList = allRefunds || [];
+      // Compute statistics from the already-fetched refunds (no 4th full scan)
+      const statsRefunds = result.data || [];
       const stats = {
-        totalRefunded: allRefundList.filter(r => r.status === "processed" || r.status === "completed").reduce((acc, r) => acc + Number(r.amount || 0), 0),
-        pendingCount: allRefundList.filter(r => ["initiated", "pending", "processing"].includes(r.status)).length,
-        failedCount: allRefundList.filter(r => r.status === "failed").length,
+        totalRefunded: statsRefunds.filter(r => r.status === "processed" || r.status === "completed").reduce((acc, r) => acc + Number(r.amount || 0), 0),
+        pendingCount: statsRefunds.filter(r => ["initiated", "pending", "processing"].includes(r.status)).length,
+        failedCount: statsRefunds.filter(r => r.status === "failed").length,
         totalCount: totalCount
       };
 

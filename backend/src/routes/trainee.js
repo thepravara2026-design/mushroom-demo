@@ -9,8 +9,9 @@ const userRepo = require("../repositories/userRepository");
 const { JWT_SECRET, JWT_EXPIRES_IN } = require("../config/jwt");
 const { setAuthCookie } = require("../lib/authCookie");
 const logger = require("../utils/logger");
+const { isValidIndianPhone, normalizePhoneToE164, normalizePhoneTo10Digit } = require("../utils/phoneValidation");
 
-const PHONE_REGEX = /^(\+91)?[6-9]\d{9}$/;
+const PHONE_REGEX = /^(\+91|91|0)?[6-9]\d{9}$/;
 
 const traineeSignupSchema = Joi.object({
   fullName: Joi.string().trim().min(2).max(100).required().messages({
@@ -19,9 +20,10 @@ const traineeSignupSchema = Joi.object({
     "any.required": "Full name is required.",
   }),
   phone: Joi.string()
-    .pattern(/^(\+)?[\d\s-]{10,15}$/)
+    .pattern(PHONE_REGEX)
     .required()
     .messages({
+      "string.pattern.base": "Enter a valid Indian phone number (10 digits starting with 6-9).",
       "any.required": "Phone number is required.",
     }),
   email: Joi.string().email().required().messages({
@@ -44,9 +46,10 @@ const traineeSignupSchema = Joi.object({
 
 const traineePhoneRequestSchema = Joi.object({
   phone: Joi.string()
-    .pattern(/^(\+)?[\d\s-]{10,15}$/)
+    .pattern(PHONE_REGEX)
     .required()
     .messages({
+      "string.pattern.base": "Enter a valid Indian phone number (10 digits starting with 6-9).",
       "any.required": "Phone number is required.",
     }),
 });
@@ -88,8 +91,8 @@ router.post("/request-phone-otp", validateBody(traineePhoneRequestSchema), async
     }
 
     const authService = require("../services/authService");
-    const normalizedPhone = user.whatsapp_number.startsWith("+")
-      ? user.whatsapp_number
+    const normalizedPhone = user.whatsapp_number.includes('+') 
+      ? user.whatsapp_number 
       : `+91${user.whatsapp_number}`;
     const result = await authService.generateAndSendOTP(
       user.email,
@@ -229,7 +232,10 @@ router.post("/signup", validateBody(traineeSignupSchema), async (req, res) => {
       );
     }
 
-    const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
+    const cleanPhone = normalizePhoneTo10Digit(phone);
+    if (!cleanPhone) {
+      return respondError(res, "Invalid phone number format", 400);
+    }
     const { data: existingPhone } = await userRepo.findByPhone(cleanPhone);
     if (existingPhone) {
       return respondError(
@@ -239,7 +245,7 @@ router.post("/signup", validateBody(traineeSignupSchema), async (req, res) => {
       );
     }
 
-    const normalizedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+91${cleanPhone}`;
+    const normalizedPhone = normalizePhoneToE164(phone);
     const insertPayload = {
       email: emailLower,
       full_name: fullName.trim(),

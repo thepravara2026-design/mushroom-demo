@@ -1,8 +1,8 @@
 const Joi = require("joi");
 
 const cancelRequestSchema = Joi.object({
-  reason: Joi.string().min(5).max(255).required().messages({
-    "string.min": "Cancellation reason must be at least 5 characters",
+  reason: Joi.string().min(1).max(255).required().messages({
+    "string.min": "Cancellation reason is required",
     "string.max": "Cancellation reason must be at most 255 characters",
     "any.required": "Cancellation reason is required",
   }),

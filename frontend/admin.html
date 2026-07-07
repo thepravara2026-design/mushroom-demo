@@ -17,6 +17,10 @@
   <link rel="stylesheet" href="/admin-premium.css" />
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>" />
+  <script>
+    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
 </head>
 
 <body>
@@ -154,6 +158,10 @@
           <button class="admin-tab" data-tab="analytics">
             <i class="fa-solid fa-chart-line"></i> Analytics
           </button>
+          <button class="admin-tab" data-tab="communication" style="position:relative;">
+            <i class="fa-solid fa-tower-cell"></i> Communication
+            <span id="admin-comm-fail-badge" class="admin-nav-badge hidden" style="background:#dc2626;">!</span>
+          </button>
         </div>
 
         <div class="admin-tab-content active" id="admin-content-products">
@@ -171,6 +179,8 @@
                     class="fa-solid fa-tags"></i> Categories</button>
                 <button class="admin-capsule" data-capsule="inventory" type="button"><i
                     class="fa-solid fa-warehouse"></i> Inventory</button>
+                <button class="admin-capsule" data-capsule="bulk-import" type="button"><i
+                    class="fa-solid fa-upload"></i> Bulk Import</button>
               </div>
             </div>
             <div class="af-bar">
@@ -239,7 +249,7 @@
                   <div class="premium-form-section-title">
                     <i class="fa-solid fa-info-circle"></i>
                     <h3>Basic Information</h3>
-                    <span>Step 1 of 4</span>
+                    <span>Step 1 of 5</span>
                   </div>
                   <div class="premium-form-row">
                     <div class="premium-field">
@@ -271,6 +281,16 @@
                         placeholder="Product details, cultivation notes, taste profile..."
                         style="min-height: 80px;"></textarea>
                     </div>
+                    <div class="premium-field">
+                      <label>Scientific Name</label>
+                      <input type="text" id="admin-capsule-prod-sci-name"
+                        placeholder="e.g. Pleurotus ostreatus" />
+                    </div>
+                    <div class="premium-field">
+                      <label>Shelf Life</label>
+                      <input type="text" id="admin-capsule-prod-shelf-life"
+                        placeholder="e.g. 5–7 days under refrigeration" />
+                    </div>
                   </div>
                 </div>
 
@@ -279,7 +299,7 @@
                   <div class="premium-form-section-title">
                     <i class="fa-solid fa-cubes"></i>
                     <h3>Pricing &amp; Inventory</h3>
-                    <span>Step 2 of 4</span>
+                    <span>Step 2 of 5</span>
                   </div>
                   <div class="premium-weight-section">
                     <div class="pricing-type-toggle" style="margin-bottom:12px;">
@@ -349,7 +369,7 @@
                   <div class="premium-form-section-title">
                     <i class="fa-solid fa-image"></i>
                     <h3>Product Media</h3>
-                    <span>Step 3 of 4</span>
+                    <span>Step 3 of 5</span>
                   </div>
                   <div class="premium-form-row">
                     <div class="premium-field">
@@ -418,7 +438,7 @@
                   <div class="premium-form-section-title">
                     <i class="fa-solid fa-circle-info"></i>
                     <h3>Product Details</h3>
-                    <span>Step 4 of 4</span>
+                    <span>Step 4 of 5</span>
                   </div>
                   <div class="premium-form-row">
                     <div class="premium-field span-full">
@@ -461,6 +481,38 @@
                       <textarea id="admin-capsule-prod-certificates"
                         placeholder="FSSAI Certified&#10;fa-leaf:Organic Produce&#10;Non-GMO"
                         style="min-height:70px;"></textarea>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Section 5: Vendor & SEO -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-building"></i>
+                    <h3>Vendor &amp; SEO</h3>
+                    <span>Step 5 of 5</span>
+                  </div>
+                  <div class="premium-form-row">
+                    <div class="premium-field span-full">
+                      <label>Manufacturer / Supplier</label>
+                      <div style="position:relative;">
+                        <input type="text" id="admin-capsule-prod-manufacturer"
+                          value="Shriyap Enterprises, Basavura Village Davangere"
+                          placeholder="Manufacturer / Supplier name" />
+                        <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:0.7rem;color:#94a3b8;pointer-events:none;background:#fff;padding:0 4px;">
+                          <i class="fa-solid fa-check-circle" style="color:#16a34a;"></i>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="premium-field">
+                      <label>SEO Title</label>
+                      <input type="text" id="admin-capsule-prod-seo-title"
+                        placeholder="Auto-generated from product name" />
+                    </div>
+                    <div class="premium-field">
+                      <label>SEO Slug</label>
+                      <input type="text" id="admin-capsule-prod-seo-slug"
+                        placeholder="Auto-generated from product name" />
                     </div>
                   </div>
                 </div>
@@ -579,6 +631,74 @@
 
             <div id="admin-inventory-list">
               <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading inventory...</div>
+            </div>
+          </div>
+
+          <!-- ═══════════════════════════════════════════════════ -->
+          <!-- BULK IMPORT CAPSULE -->
+          <!-- ═══════════════════════════════════════════════════ -->
+          <div id="admin-capsule-bulk-import" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="bulk-import-wrap">
+              <div class="bulk-import-header">
+                <div class="bulk-import-header-icon">
+                  <i class="fa-solid fa-cloud-arrow-up"></i>
+                </div>
+                <div>
+                  <h2>Bulk Import</h2>
+                  <p>Upload an Excel (.xlsx) or CSV file to create or update multiple records at once</p>
+                </div>
+              </div>
+
+              <div class="bulk-import-entity-select">
+                <label>Select entity type to import</label>
+                <select id="bulk-import-entity">
+                  <option value="">— Choose entity —</option>
+                  <option value="products">Products</option>
+                  <option value="categories">Categories</option>
+                  <option value="blogs">Blogs</option>
+                  <option value="trainings">Training Courses</option>
+                  <option value="training-batches">Training Batches</option>
+                </select>
+              </div>
+
+              <div class="bulk-import-dropzone" id="bulk-import-dropzone">
+                <div class="bulk-import-dropzone-inner" id="bulk-import-dropzone-inner">
+                  <i class="fa-solid fa-file-arrow-up"></i>
+                  <span class="bulk-import-drop-text">Drop your file here, or <strong>browse</strong></span>
+                  <small>Supports .xlsx and .csv files up to 10 MB</small>
+                </div>
+                <input type="file" id="bulk-import-file-input" accept=".xlsx,.csv" class="hidden-file-input" />
+              </div>
+
+              <div class="bulk-import-actions">
+                <button type="button" class="btn-premium-reset" id="bulk-import-download-template">
+                  <i class="fa-solid fa-download"></i> Download Template
+                </button>
+                <button type="button" class="btn-premium-submit" id="bulk-import-upload-btn" disabled>
+                  <i class="fa-solid fa-cloud-arrow-up"></i> <span>Upload &amp; Import</span>
+                </button>
+              </div>
+
+              <div class="bulk-import-progress hidden" id="bulk-import-progress">
+                <div class="bulk-import-progress-bar-track">
+                  <div class="bulk-import-progress-bar-fill" id="bulk-import-progress-fill"></div>
+                </div>
+                <span class="bulk-import-progress-label" id="bulk-import-progress-label">Processing...</span>
+              </div>
+
+              <div class="bulk-import-feedback hidden" id="bulk-import-feedback"></div>
+
+              <div class="bulk-import-results hidden" id="bulk-import-results">
+                <div class="bulk-import-results-header">
+                  <span class="bulk-import-results-title">Import Results</span>
+                  <div class="bulk-import-results-stats">
+                    <span class="bulk-stat total" id="bi-stat-total">0</span>
+                    <span class="bulk-stat success" id="bi-stat-success">0</span>
+                    <span class="bulk-stat failed" id="bi-stat-failed">0</span>
+                  </div>
+                </div>
+                <div class="bulk-import-results-body" id="bulk-import-results-body"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -1149,6 +1269,116 @@
                     </div>
                   </div>
                 </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-communication">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-tower-cell"></i> Communication Management</h3>
+              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <span id="comm-provider-badge" class="badge badge-info" style="padding:4px 12px;border-radius:20px;font-size:0.75rem;background:#1e3a5f;color:#93c5fd;">Provider: mock</span>
+                <button type="button" class="btn btn-secondary" onclick="loadCommunicationTab()" style="white-space:nowrap;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:24px;">
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Total Messages</div>
+                <div class="refund-stat-value" id="comm-stat-total">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Sent</div>
+                <div class="refund-stat-value refund-stat-value--green" id="comm-stat-sent">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Delivered</div>
+                <div class="refund-stat-value refund-stat-value--green" id="comm-stat-delivered">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Failed</div>
+                <div class="refund-stat-value refund-stat-value--red" id="comm-stat-failed">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Queued</div>
+                <div class="refund-stat-value" id="comm-stat-queued">0</div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-chart-pie"></i> By Channel</div>
+                <div id="comm-channel-stats" style="padding:16px;display:flex;gap:16px;flex-wrap:wrap;">
+                  <span style="color:#94a3b8;">Loading...</span>
+                </div>
+              </div>
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-list-check"></i> Queue Status</div>
+                <div id="comm-queue-status" style="padding:16px;">
+                  <span style="color:#94a3b8;">Loading...</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="refund-section-card" style="margin-bottom:20px;">
+              <div class="refund-section-header">
+                <i class="fa-solid fa-filter"></i> Message History
+                <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;">
+                  <select id="comm-filter-channel" class="admin-search-input" style="width:auto;min-width:120px;">
+                    <option value="">All Channels</option>
+                    <option value="sms">SMS</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="email">Email</option>
+                    <option value="otp">OTP</option>
+                  </select>
+                  <select id="comm-filter-status" class="admin-search-input" style="width:auto;min-width:120px;">
+                    <option value="">All Status</option>
+                    <option value="queued">Queued</option>
+                    <option value="sent">Sent</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                  <input type="text" id="comm-search" class="admin-search-input" placeholder="Search by recipient..." style="width:auto;min-width:180px;" />
+                  <button type="button" class="btn btn-secondary" onclick="loadCommunicationTab()">
+                    <i class="fa-solid fa-search"></i> Search
+                  </button>
+                  <button type="button" class="btn btn-danger" onclick="retryAllFailedComm()" title="Retry all failed messages" style="background:#dc2626;border-color:#dc2626;">
+                    <i class="fa-solid fa-rotate"></i> Retry Failed
+                  </button>
+                </div>
+              </div>
+              <div id="comm-message-list" style="padding:12px;">
+                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading messages...</div>
+              </div>
+            </div>
+
+            <div class="refund-section-card">
+              <div class="refund-section-header">
+                <i class="fa-solid fa-book"></i> Templates Overview
+                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCommTemplates()">
+                  <i class="fa-solid fa-eye"></i> Toggle Templates
+                </button>
+              </div>
+              <div id="comm-templates-container" style="padding:12px;display:none;">
+                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading templates...</div>
+              </div>
+            </div>
+
+            <div id="comm-otp-dev-section" class="refund-section-card" style="margin-top:20px;display:none;">
+              <div class="refund-section-header">
+                <i class="fa-solid fa-key"></i> Development OTP Lookup
+                <span style="font-size:0.7rem;color:#f59e0b;margin-left:8px;">(Available in dev mode only)</span>
+              </div>
+              <div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <input type="text" id="comm-dev-otp-identifier" class="admin-search-input" placeholder="Phone or Email" style="width:auto;min-width:250px;" />
+                <button type="button" class="btn btn-secondary" onclick="lookupDevOtp()">
+                  <i class="fa-solid fa-key"></i> Lookup OTP
+                </button>
+                <span id="comm-dev-otp-result" style="color:#94a3b8;font-family:monospace;"></span>
               </div>
             </div>
           </div>

@@ -70,6 +70,11 @@ CREATE TABLE IF NOT EXISTS products (
   low_stock_threshold INTEGER DEFAULT 5,
   is_active          BOOLEAN DEFAULT TRUE,
   track_inventory    BOOLEAN DEFAULT TRUE,
+  manufacturer_supplier TEXT DEFAULT 'Shriyap Enterprises, Basavura Village Davangere',
+  scientific_name    TEXT,
+  shelf_life         TEXT,
+  seo_title          TEXT,
+  seo_slug           TEXT,
   version            INTEGER DEFAULT 1 NOT NULL,
   created_at         TIMESTAMPTZ DEFAULT NOW() NOT NULL,
 

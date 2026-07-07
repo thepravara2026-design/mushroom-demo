@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backup & Recovery — Sporekart Admin</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    :root {
+      --bkp-bg: #0f0f1a;
+      --bkp-card: #1a1a2e;
+      --bkp-card-hover: #222244;
+      --bkp-border: #2a2a4a;
+      --bkp-text: #e0e0ff;
+      --bkp-text-muted: #8888aa;
+      --bkp-primary: #7c3aed;
+      --bkp-primary-hover: #8b5cf6;
+      --bkp-success: #10b981;
+      --bkp-warning: #f59e0b;
+      --bkp-danger: #ef4444;
+      --bkp-info: #3b82f6;
+      --bkp-sidebar: #16162a;
+    }
+
+    .bkp-body {
+      background: var(--bkp-bg);
+      color: var(--bkp-text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+    }
+
+    .bkp-sidebar {
+      width: 260px;
+      background: var(--bkp-sidebar);
+      border-right: 1px solid var(--bkp-border);
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .bkp-sidebar-header {
+      padding: 24px 20px;
+      border-bottom: 1px solid var(--bkp-border);
+    }
+
+    .bkp-sidebar-header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .bkp-sidebar-header p {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: var(--bkp-text-muted);
+    }
+
+    .bkp-sidebar-nav {
+      flex: 1;
+      padding: 12px 0;
+    }
+
+    .bkp-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      cursor: pointer;
+      color: var(--bkp-text-muted);
+      transition: all 0.2s;
+      border-left: 3px solid transparent;
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    .bkp-nav-item:hover {
+      background: rgba(124, 58, 237, 0.1);
+      color: var(--bkp-text);
+    }
+
+    .bkp-nav-item.active {
+      background: rgba(124, 58, 237, 0.15);
+      color: var(--bkp-primary);
+      border-left-color: var(--bkp-primary);
+    }
+
+    .bkp-nav-item i {
+      width: 20px;
+      text-align: center;
+    }
+
+    .bkp-sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--bkp-border);
+      font-size: 12px;
+      color: var(--bkp-text-muted);
+    }
+
+    .bkp-main {
+      flex: 1;
+      padding: 32px;
+      overflow-y: auto;
+      max-height: 100vh;
+    }
+
+    .bkp-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+
+    .bkp-header h2 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .bkp-header-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .bkp-btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .bkp-btn-primary {
+      background: var(--bkp-primary);
+      color: white;
+    }
+
+    .bkp-btn-primary:hover {
+      background: var(--bkp-primary-hover);
+      transform: translateY(-1px);
+    }
+
+    .bkp-btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .bkp-btn-success {
+      background: var(--bkp-success);
+      color: white;
+    }
+
+    .bkp-btn-success:hover {
+      filter: brightness(1.1);
+    }
+
+    .bkp-btn-danger {
+      background: var(--bkp-danger);
+      color: white;
+    }
+
+    .bkp-btn-danger:hover {
+      filter: brightness(1.1);
+    }
+
+    .bkp-btn-outline {
+      background: transparent;
+      border: 1px solid var(--bkp-border);
+      color: var(--bkp-text);
+    }
+
+    .bkp-btn-outline:hover {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .bkp-btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .bkp-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .bkp-card {
+      background: var(--bkp-card);
+      border: 1px solid var(--bkp-border);
+      border-radius: 12px;
+      padding: 20px;
+      transition: all 0.2s;
+    }
+
+    .bkp-card:hover {
+      background: var(--bkp-card-hover);
+      border-color: var(--bkp-primary);
+    }
+
+    .bkp-card-label {
+      font-size: 12px;
+      color: var(--bkp-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .bkp-card-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .bkp-card-value.success { color: var(--bkp-success); }
+    .bkp-card-value.warning { color: var(--bkp-warning); }
+    .bkp-card-value.danger { color: var(--bkp-danger); }
+    .bkp-card-value.info { color: var(--bkp-info); }
+
+    .bkp-card-sub {
+      font-size: 12px;
+      color: var(--bkp-text-muted);
+      margin-top: 4px;
+    }
+
+    .bkp-section {
+      margin-bottom: 32px;
+    }
+
+    .bkp-section-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bkp-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .bkp-table th, .bkp-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--bkp-border);
+      font-size: 13px;
+    }
+
+    .bkp-table th {
+      color: var(--bkp-text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+
+    .bkp-table tr:hover td {
+      background: rgba(124, 58, 237, 0.05);
+    }
+
+    .bkp-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .bkp-badge-success { background: rgba(16, 185, 129, 0.15); color: var(--bkp-success); }
+    .bkp-badge-danger { background: rgba(239, 68, 68, 0.15); color: var(--bkp-danger); }
+    .bkp-badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--bkp-warning); }
+    .bkp-badge-info { background: rgba(59, 130, 246, 0.15); color: var(--bkp-info); }
+
+    .bkp-empty {
+      text-align: center;
+      padding: 48px;
+      color: var(--bkp-text-muted);
+    }
+
+    .bkp-empty i {
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.3;
+    }
+
+    .bkp-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .bkp-modal-overlay.active { display: flex; }
+
+    .bkp-modal {
+      background: var(--bkp-card);
+      border: 1px solid var(--bkp-border);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 500px;
+      width: 90%;
+    }
+
+    .bkp-modal h3 {
+      margin: 0 0 16px;
+      font-size: 20px;
+    }
+
+    .bkp-modal p {
+      color: var(--bkp-text-muted);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .bkp-modal-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .bkp-spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: bkp-spin 0.6s linear infinite;
+    }
+
+    @keyframes bkp-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .bkp-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 16px 24px;
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 2000;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s;
+    }
+
+    .bkp-toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .bkp-toast-success { background: var(--bkp-success); }
+    .bkp-toast-error { background: var(--bkp-danger); }
+    .bkp-toast-info { background: var(--bkp-info); }
+
+    .bkp-progress-bar {
+      height: 4px;
+      background: var(--bkp-border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 16px;
+    }
+
+    .bkp-progress-fill {
+      height: 100%;
+      background: var(--bkp-primary);
+      border-radius: 2px;
+      transition: width 0.5s ease;
+      width: 0%;
+    }
+
+    .bkp-running-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--bkp-warning);
+      font-size: 13px;
+    }
+
+    .bkp-log-entry {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--bkp-border);
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .bkp-log-entry:hover {
+      background: rgba(124, 58, 237, 0.05);
+    }
+
+    .bkp-log-time {
+      color: var(--bkp-text-muted);
+      margin-right: 12px;
+    }
+
+    .bkp-log-level {
+      display: inline-block;
+      width: 48px;
+      font-weight: 600;
+    }
+
+    .bkp-log-level-info { color: var(--bkp-info); }
+    .bkp-log-level-warn { color: var(--bkp-warning); }
+    .bkp-log-level-error { color: var(--bkp-danger); }
+
+    .bkp-tab-bar {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--bkp-border);
+    }
+
+    .bkp-tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      color: var(--bkp-text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .bkp-tab:hover {
+      color: var(--bkp-text);
+    }
+
+    .bkp-tab.active {
+      color: var(--bkp-primary);
+      border-bottom-color: var(--bkp-primary);
+    }
+
+    .bkp-panel { display: none; }
+    .bkp-panel.active { display: block; }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bkp-bg); }
+    ::-webkit-scrollbar-thumb { background: var(--bkp-border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--bkp-text-muted); }
+
+    @media (max-width: 768px) {
+      .bkp-body { flex-direction: column; }
+      .bkp-sidebar { width: 100%; flex-direction: row; overflow-x: auto; }
+      .bkp-sidebar-header, .bkp-sidebar-footer { display: none; }
+      .bkp-sidebar-nav { display: flex; padding: 0; }
+      .bkp-nav-item { white-space: nowrap; border-left: none; border-bottom: 2px solid transparent; }
+      .bkp-nav-item.active { border-bottom-color: var(--bkp-primary); }
+      .bkp-main { padding: 16px; }
+      .bkp-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body class="bkp-body">
+  <aside class="bkp-sidebar">
+    <div class="bkp-sidebar-header">
+      <h1><i class="fas fa-shield-alt" style="margin-right: 8px; color: var(--bkp-primary);"></i>Backup & Recovery</h1>
+      <p>Secure your data</p>
+    </div>
+    <nav class="bkp-sidebar-nav">
+      <div class="bkp-nav-item active" data-tab="dashboard"><i class="fas fa-chart-simple"></i> Dashboard</div>
+      <div class="bkp-nav-item" data-tab="history"><i class="fas fa-clock-rotate-left"></i> Backup History</div>
+      <div class="bkp-nav-item" data-tab="logs"><i class="fas fa-list"></i> Activity Logs</div>
+      <div class="bkp-nav-item" data-tab="restore"><i class="fas fa-rotate-left"></i> Restore</div>
+      <div class="bkp-nav-item" data-tab="config"><i class="fas fa-gear"></i> Configuration</div>
+    </nav>
+    <div class="bkp-sidebar-footer">
+      <div id="bkp-status-badge"><span class="bkp-badge bkp-badge-info"><i class="fas fa-circle"></i> Initializing...</span></div>
+    </div>
+  </aside>
+
+  <main class="bkp-main">
+    <div class="bkp-header">
+      <h2 id="bkp-page-title">Dashboard</h2>
+      <div class="bkp-header-actions">
+        <span id="bkp-running-indicator" style="display:none" class="bkp-running-indicator">
+          <span class="bkp-spinner"></span> Backup in progress...
+        </span>
+        <button class="bkp-btn bkp-btn-primary" id="bkp-run-now-btn" onclick="triggerBackup()">
+          <i class="fas fa-play"></i> Run Backup Now
+        </button>
+        <button class="bkp-btn bkp-btn-outline" onclick="refreshAll()">
+          <i class="fas fa-rotate"></i> Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Dashboard Panel -->
+    <div id="panel-dashboard" class="bkp-panel active">
+      <div class="bkp-grid" id="bkp-stats-grid">
+        <div class="bkp-card">
+          <div class="bkp-card-label">Health Score</div>
+          <div class="bkp-card-value info" id="bkp-health-score">-</div>
+          <div class="bkp-card-sub" id="bkp-health-status">Initializing...</div>
+        </div>
+        <div class="bkp-card">
+          <div class="bkp-card-label">Latest Backup</div>
+          <div class="bkp-card-value" id="bkp-latest-backup">-</div>
+          <div class="bkp-card-sub" id="bkp-latest-backup-time">No backups yet</div>
+        </div>
+        <div class="bkp-card">
+          <div class="bkp-card-label">Last 24h</div>
+          <div class="bkp-card-value" id="bkp-last-24h">-</div>
+          <div class="bkp-card-sub" id="bkp-last-24h-detail">Loading...</div>
+        </div>
+        <div class="bkp-card">
+          <div class="bkp-card-label">Total Backups</div>
+          <div class="bkp-card-value" id="bkp-total-backups">-</div>
+          <div class="bkp-card-sub" id="bkp-storage-info">Loading...</div>
+        </div>
+      </div>
+
+      <div class="bkp-section">
+        <div class="bkp-section-title"><i class="fas fa-clock-rotate-left"></i> Recent Backups</div>
+        <div class="bkp-card" style="overflow-x: auto;">
+          <table class="bkp-table" id="bkp-recent-table">
+            <thead>
+              <tr>
+                <th>Backup ID</th>
+                <th>Type</th>
+                <th>Date & Time</th>
+                <th>Status</th>
+                <th>Size</th>
+                <th>Duration</th>
+                <th>Files</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bkp-recent-body">
+              <tr><td colspan="8" class="bkp-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Panel -->
+    <div id="panel-history" class="bkp-panel">
+      <div class="bkp-section">
+        <div class="bkp-section-title"><i class="fas fa-clock-rotate-left"></i> All Backups</div>
+        <div class="bkp-card" style="overflow-x: auto;">
+          <table class="bkp-table" id="bkp-history-table">
+            <thead>
+              <tr>
+                <th>Backup ID</th>
+                <th>Type</th>
+                <th>Timestamp</th>
+                <th>Status</th>
+                <th>Size</th>
+                <th>Duration</th>
+                <th>Verification</th>
+                <th>Upload</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bkp-history-body">
+              <tr><td colspan="9" class="bkp-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs Panel -->
+    <div id="panel-logs" class="bkp-panel">
+      <div class="bkp-section">
+        <div class="bkp-section-title"><i class="fas fa-list"></i> Backup Activity Logs</div>
+        <div class="bkp-card" id="bkp-logs-container" style="max-height: 600px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+          <div class="bkp-empty">Loading logs...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Restore Panel -->
+    <div id="panel-restore" class="bkp-panel">
+      <div class="bkp-section">
+        <div class="bkp-section-title"><i class="fas fa-rotate-left"></i> Restore from Backup</div>
+        <div class="bkp-card">
+          <p style="color: var(--bkp-text-muted); margin-bottom: 16px;">
+            <i class="fas fa-triangle-exclamation" style="color: var(--bkp-warning);"></i>
+            Restore operations are destructive. Always preview before restoring to production.
+          </p>
+          <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+            <input type="text" id="bkp-restore-path" placeholder="Backup ID or path" style="flex:1; padding: 10px 16px; background: var(--bkp-bg); border: 1px solid var(--bkp-border); border-radius: 8px; color: var(--bkp-text); font-size: 14px;">
+            <button class="bkp-btn bkp-btn-outline" onclick="previewRestore()"><i class="fas fa-eye"></i> Preview</button>
+            <button class="bkp-btn bkp-btn-danger" onclick="executeRestore()"><i class="fas fa-rotate-left"></i> Restore</button>
+          </div>
+          <div id="bkp-restore-results" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config Panel -->
+    <div id="panel-config" class="bkp-panel">
+      <div class="bkp-section">
+        <div class="bkp-section-title"><i class="fas fa-gear"></i> Backup Configuration</div>
+        <div class="bkp-grid">
+          <div class="bkp-card">
+            <div class="bkp-card-label">Encryption</div>
+            <div class="bkp-card-value" style="font-size: 16px;" id="bkp-cfg-encryption">-</div>
+          </div>
+          <div class="bkp-card">
+            <div class="bkp-card-label">Storage Provider</div>
+            <div class="bkp-card-value" style="font-size: 16px;" id="bkp-cfg-provider">-</div>
+          </div>
+          <div class="bkp-card">
+            <div class="bkp-card-label">Storage Path</div>
+            <div class="bkp-card-value" style="font-size: 16px;" id="bkp-cfg-path">-</div>
+          </div>
+          <div class="bkp-card">
+            <div class="bkp-card-label">Google Drive</div>
+            <div class="bkp-card-value" style="font-size: 16px;" id="bkp-cfg-gdrive">-</div>
+          </div>
+        </div>
+        <div class="bkp-card" style="margin-top: 16px;">
+          <div class="bkp-section-title" style="font-size: 14px; margin-bottom: 12px;">Retention Policy</div>
+          <div id="bkp-retention-config"></div>
+        </div>
+        <div class="bkp-card" style="margin-top: 16px;">
+          <div class="bkp-section-title" style="font-size: 14px; margin-bottom: 12px;">Scheduler Schedule</div>
+          <div id="bkp-scheduler-config"></div>
+        </div>
+        <div class="bkp-card" style="margin-top: 16px;">
+          <div class="bkp-section-title" style="font-size: 14px; margin-bottom: 12px;">Generate Encryption Key</div>
+          <p style="color: var(--bkp-text-muted); font-size: 13px; margin-bottom: 12px;">
+            Generate a cryptographically secure 256-bit key for AES-256-GCM encryption.
+            Add it to your <code>.env</code> file as <code>BACKUP_ENCRYPTION_KEY</code>.
+          </p>
+          <button class="bkp-btn bkp-btn-primary" onclick="generateKey()"><i class="fas fa-key"></i> Generate Key</button>
+          <div id="bkp-generated-key" style="display:none; margin-top: 12px; padding: 12px; background: var(--bkp-bg); border-radius: 8px; word-break: break-all; font-family: monospace; font-size: 12px;"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Confirmation Modal -->
+  <div class="bkp-modal-overlay" id="bkp-modal">
+    <div class="bkp-modal">
+      <h3 id="bkp-modal-title">Confirm</h3>
+      <p id="bkp-modal-message">Are you sure?</p>
+      <div class="bkp-modal-actions">
+        <button class="bkp-btn bkp-btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="bkp-btn bkp-btn-danger" id="bkp-modal-confirm" onclick="closeModal()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="bkp-toast" id="bkp-toast"></div>
+
+  <script>
+    const API_BASE = '/api/admin/backup';
+    let currentTab = 'dashboard';
+    let refreshInterval = null;
+
+    async function api(path, options = {}) {
+      const url = `${API_BASE}${path}`;
+      const config = {
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        ...options,
+      };
+      if (options.body && typeof options.body === 'object') {
+        config.body = JSON.stringify(options.body);
+      }
+      const response = await fetch(url, config);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(err.error || `HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('bkp-toast');
+      toast.textContent = message;
+      toast.className = `bkp-toast bkp-toast-${type} show`;
+      setTimeout(() => toast.classList.remove('show'), 4000);
+    }
+
+    function showModal(title, message, confirmCallback) {
+      document.getElementById('bkp-modal-title').textContent = title;
+      document.getElementById('bkp-modal-message').textContent = message;
+      document.getElementById('bkp-modal').classList.add('active');
+      const confirmBtn = document.getElementById('bkp-modal-confirm');
+      confirmBtn.onclick = () => { closeModal(); if (confirmCallback) confirmCallback(); };
+    }
+
+    function closeModal() {
+      document.getElementById('bkp-modal').classList.remove('active');
+    }
+
+    function formatSize(bytes) {
+      if (!bytes || bytes === 0) return '-';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let i = 0;
+      let size = bytes;
+      while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+      return `${size.toFixed(1)} ${units[i]}`;
+    }
+
+    function formatDuration(ms) {
+      if (!ms) return '-';
+      if (ms < 1000) return `${ms}ms`;
+      if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+      return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return d.toLocaleString();
+    }
+
+    function getStatusBadge(status) {
+      const map = {
+        'completed': 'bkp-badge-success',
+        'completed_with_errors': 'bkp-badge-warning',
+        'failed': 'bkp-badge-danger',
+        'running': 'bkp-badge-info',
+        'passed': 'bkp-badge-success',
+        'pending': 'bkp-badge-info',
+      };
+      const cls = map[status] || 'bkp-badge-info';
+      return `<span class="bkp-badge ${cls}">${status}</span>`;
+    }
+
+    // Tab navigation
+    document.querySelectorAll('.bkp-nav-item').forEach(item => {
+      item.addEventListener('click', function() {
+        document.querySelectorAll('.bkp-nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll('.bkp-panel').forEach(p => p.classList.remove('active'));
+        this.classList.add('active');
+        currentTab = this.dataset.tab;
+        document.getElementById(`panel-${currentTab}`).classList.add('active');
+        document.getElementById('bkp-page-title').textContent = this.textContent.trim();
+        loadPanel(currentTab);
+      });
+    });
+
+    function loadPanel(tab) {
+      switch (tab) {
+        case 'dashboard': loadDashboard(); break;
+        case 'history': loadHistory(); break;
+        case 'logs': loadLogs(); break;
+        case 'config': loadConfig(); break;
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        const status = await api('/status');
+        updateStats(status);
+        const history = await api('/history?limit=10');
+        updateRecentTable(history.history || []);
+      } catch (err) {
+        showToast('Failed to load dashboard: ' + err.message, 'error');
+      }
+    }
+
+    function updateStats(status) {
+      const scoreEl = document.getElementById('bkp-health-score');
+      scoreEl.textContent = status.healthScore ?? '-';
+      scoreEl.className = 'bkp-card-value ' + (
+        (status.healthScore || 0) >= 80 ? 'success' :
+        (status.healthScore || 0) >= 50 ? 'warning' : 'danger'
+      );
+      document.getElementById('bkp-health-status').textContent = status.status || 'Unknown';
+
+      const latest = status.latestBackup;
+      if (latest) {
+        document.getElementById('bkp-latest-backup').textContent = latest.type || '-';
+        document.getElementById('bkp-latest-backup').className = 'bkp-card-value info';
+        document.getElementById('bkp-latest-backup-time').textContent = formatTime(latest.timestamp);
+      } else {
+        document.getElementById('bkp-latest-backup').textContent = 'None';
+        document.getElementById('bkp-latest-backup-time').textContent = 'No backups yet';
+      }
+
+      const stats = status.stats || {};
+      const s24 = stats.successfulLast24h || 0;
+      const f24 = stats.failedLast24h || 0;
+      document.getElementById('bkp-last-24h').textContent = `${s24 + f24}`;
+      document.getElementById('bkp-last-24h').className = 'bkp-card-value ' + (f24 > 0 ? 'warning' : 'success');
+      document.getElementById('bkp-last-24h-detail').textContent = `${s24} successful, ${f24} failed`;
+
+      document.getElementById('bkp-total-backups').textContent = stats.totalBackups || 0;
+      document.getElementById('bkp-storage-info').textContent = `Provider: ${status.storageProvider || 'local'}`;
+
+      if (status.backupInProgress) {
+        document.getElementById('bkp-running-indicator').style.display = 'inline-flex';
+        document.getElementById('bkp-run-now-btn').disabled = true;
+      } else {
+        document.getElementById('bkp-running-indicator').style.display = 'none';
+        document.getElementById('bkp-run-now-btn').disabled = false;
+      }
+
+      const badgeEl = document.getElementById('bkp-status-badge');
+      const isHealthy = (status.healthScore || 0) >= 80;
+      badgeEl.innerHTML = isHealthy
+        ? '<span class="bkp-badge bkp-badge-success"><i class="fas fa-circle"></i> System Healthy</span>'
+        : '<span class="bkp-badge bkp-badge-warning"><i class="fas fa-circle"></i> Needs Attention</span>';
+    }
+
+    function updateRecentTable(history) {
+      const tbody = document.getElementById('bkp-recent-body');
+      if (!history || history.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="bkp-empty"><i class="fas fa-database"></i><br>No backups yet. Click "Run Backup Now" to create your first backup.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = history.map(b => `
+        <tr>
+          <td style="font-family:monospace;font-size:11px;">${b.backupId || '-'}</td>
+          <td>${b.backupType || '-'}</td>
+          <td>${formatTime(b.timestamp)}</td>
+          <td>${getStatusBadge(b.status)}</td>
+          <td>${formatSize(b.totalSize)}</td>
+          <td>${formatDuration(b.duration)}</td>
+          <td>${b.fileCount || '-'}</td>
+          <td>
+            <button class="bkp-btn bkp-btn-sm bkp-btn-outline" onclick="viewBackup('${b.backupId}')" title="View Details"><i class="fas fa-eye"></i></button>
+            <button class="bkp-btn bkp-btn-sm bkp-btn-danger" onclick="deleteBackup('${b.backupId}')" title="Delete"><i class="fas fa-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadHistory() {
+      try {
+        const data = await api('/history?limit=100');
+        const tbody = document.getElementById('bkp-history-body');
+        const history = data.history || [];
+        if (history.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="9" class="bkp-empty"><i class="fas fa-database"></i><br>No backup history found.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = history.map(b => `
+          <tr>
+            <td style="font-family:monospace;font-size:11px;">${b.backupId || '-'}</td>
+            <td>${b.backupType || '-'}</td>
+            <td>${formatTime(b.timestamp)}</td>
+            <td>${getStatusBadge(b.status)}</td>
+            <td>${formatSize(b.totalSize)}</td>
+            <td>${formatDuration(b.duration)}</td>
+            <td>${getStatusBadge(b.verificationStatus || 'pending')}</td>
+            <td>${getStatusBadge(b.uploadStatus || 'pending')}</td>
+            <td>
+              <button class="bkp-btn bkp-btn-sm bkp-btn-outline" onclick="viewBackup('${b.backupId}')"><i class="fas fa-eye"></i></button>
+              <button class="bkp-btn bkp-btn-sm bkp-btn-success" onclick="downloadBackup('${b.backupId}')"><i class="fas fa-download"></i></button>
+              <button class="bkp-btn bkp-btn-sm bkp-btn-danger" onclick="deleteBackup('${b.backupId}')"><i class="fas fa-trash"></i></button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        document.getElementById('bkp-history-body').innerHTML = `<tr><td colspan="9" class="bkp-empty" style="color: var(--bkp-danger);">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    async function loadLogs() {
+      try {
+        const data = await api('/logs?limit=200');
+        const container = document.getElementById('bkp-logs-container');
+        const logs = data.logs || [];
+        if (logs.length === 0) {
+          container.innerHTML = '<div class="bkp-empty">No log entries found.</div>';
+          return;
+        }
+        container.innerHTML = logs.reverse().map(log => {
+          const level = log.level || 'info';
+          const time = log.timestamp ? formatTime(log.timestamp) : '';
+          const msg = log.message || (log.raw || '');
+          return `<div class="bkp-log-entry">
+            <span class="bkp-log-time">${time}</span>
+            <span class="bkp-log-level bkp-log-level-${level}">[${level.toUpperCase()}]</span>
+            <span>${escapeHtml(msg)}</span>
+          </div>`;
+        }).join('');
+        container.scrollTop = container.scrollHeight;
+      } catch (err) {
+        document.getElementById('bkp-logs-container').innerHTML = `<div class="bkp-empty" style="color: var(--bkp-danger);">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function loadConfig() {
+      try {
+        const cfg = await api('/config');
+        document.getElementById('bkp-cfg-encryption').textContent = cfg.encryptionConfigured ? '✅ Configured' : '❌ Not Configured';
+        document.getElementById('bkp-cfg-encryption').className = 'bkp-card-value ' + (cfg.encryptionConfigured ? 'success' : 'danger');
+        document.getElementById('bkp-cfg-encryption').style.fontSize = '16px';
+
+        document.getElementById('bkp-cfg-provider').textContent = cfg.storageProvider || 'local';
+        document.getElementById('bkp-cfg-path').textContent = cfg.storagePath || '-';
+        document.getElementById('bkp-cfg-gdrive').textContent = cfg.googleDriveConfigured ? '✅ Configured' : '❌ Not Configured';
+        document.getElementById('bkp-cfg-gdrive').className = 'bkp-card-value ' + (cfg.googleDriveConfigured ? 'success' : 'warning');
+        document.getElementById('bkp-cfg-gdrive').style.fontSize = '16px';
+
+        const retention = cfg.retention || {};
+        document.getElementById('bkp-retention-config').innerHTML = Object.entries(retention).map(([key, val]) =>
+          `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bkp-border);font-size:13px;">
+            <span style="text-transform:capitalize;">${key}</span>
+            <span>Keep last <strong>${val.keep}</strong> backups ${val.enabled ? '' : '(disabled)'}</span>
+          </div>`
+        ).join('');
+
+        const scheduler = cfg.scheduler || {};
+        document.getElementById('bkp-scheduler-config').innerHTML = Object.entries(scheduler).map(([key, val]) =>
+          `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bkp-border);font-size:13px;">
+            <span style="text-transform:capitalize;">${key}</span>
+            <span>${val.enabled !== false ? `${val.time || val.day || ''}` : 'Disabled'}</span>
+          </div>`
+        ).join('');
+
+      } catch (err) {
+        showToast('Failed to load config: ' + err.message, 'error');
+      }
+    }
+
+    async function triggerBackup() {
+      const types = ['daily', 'weekly', 'monthly'];
+      const type = types[0];
+      showModal('Run Backup', `Start a ${type} backup now? This may take a few minutes.`, async () => {
+        try {
+          document.getElementById('bkp-run-now-btn').disabled = true;
+          document.getElementById('bkp-run-now-btn').innerHTML = '<span class="bkp-spinner"></span> Running...';
+          const result = await api('/run', { method: 'POST', body: { type } });
+          showToast(`Backup ${result.backupId}: ${result.status}`, result.status === 'failed' ? 'error' : 'success');
+          if (result.errors && result.errors.length > 0) {
+            showToast('Backup completed with errors: ' + result.errors.join(', '), 'error');
+          }
+          refreshAll();
+        } catch (err) {
+          showToast('Backup failed: ' + err.message, 'error');
+        } finally {
+          document.getElementById('bkp-run-now-btn').disabled = false;
+          document.getElementById('bkp-run-now-btn').innerHTML = '<i class="fas fa-play"></i> Run Backup Now';
+        }
+      });
+    }
+
+    async function viewBackup(id) {
+      try {
+        const details = await api(`/history/${id}`);
+        const files = details.files || [];
+        let fileList = files.length > 0
+          ? files.map(f => `<div style="padding:4px 0;font-size:12px;font-family:monospace;">${f.filename || f.path} (${formatSize(f.size)})</div>`).join('')
+          : '<div style="color:var(--bkp-text-muted)">No file details available</div>';
+
+        showModal('Backup Details: ' + id.substring(0, 20) + '...',
+          `Status: ${details.status || 'N/A'}
+Type: ${details.backupType || 'N/A'}
+Time: ${formatTime(details.timestamp)}
+Size: ${formatSize(details.totalSize)}
+Duration: ${formatDuration(details.duration)}
+Files: ${details.fileCount || 0}
+Tables: ${details.totalTables || 0}
+Verification: ${details.verificationStatus || 'N/A'}
+Upload: ${details.uploadStatus || 'N/A'}
+Storage: ${details.storageProvider || 'N/A'}
+
+Files:
+${fileList}`
+        );
+      } catch (err) {
+        showToast('Failed to load details: ' + err.message, 'error');
+      }
+    }
+
+    async function deleteBackup(id) {
+      showModal('Delete Backup', `Permanently delete backup ${id}? This cannot be undone.`, async () => {
+        try {
+          await api(`/history/${id}`, { method: 'DELETE' });
+          showToast(`Backup ${id} deleted`, 'success');
+          refreshAll();
+        } catch (err) {
+          showToast('Failed to delete: ' + err.message, 'error');
+        }
+      });
+    }
+
+    async function downloadBackup(id) {
+      try {
+        const details = await api(`/history/${id}`);
+        const files = details.files || [];
+        const manifestFile = files.find(f => f.filename === 'manifest.json');
+        if (manifestFile) {
+          window.open(`${API_BASE}/download/${id}/manifest.json`, '_blank');
+        } else if (files.length > 0) {
+          window.open(`${API_BASE}/download/${id}/${files[0].filename}`, '_blank');
+        } else {
+          showToast('No files available for download', 'error');
+        }
+      } catch (err) {
+        showToast('Failed to download: ' + err.message, 'error');
+      }
+    }
+
+    async function previewRestore() {
+      const path = document.getElementById('bkp-restore-path').value.trim();
+      if (!path) { showToast('Enter a backup ID or path', 'error'); return; }
+
+      try {
+        const result = await api('/restore/preview', { method: 'POST', body: { backupId: path } });
+        const container = document.getElementById('bkp-restore-results');
+        container.style.display = 'block';
+        container.innerHTML = `
+          <div style="background: var(--bkp-bg); padding: 16px; border-radius: 8px; margin-top: 12px;">
+            <h4 style="margin: 0 0 12px;">Preview Results</h4>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px;">
+              <div>Can Restore: <strong>${result.canRestore ? '✅ Yes' : '❌ No'}</strong></div>
+              <div>Tables: <strong>${result.tablesToRestore || 0}</strong></div>
+              <div>Size: <strong>${formatSize(result.totalSize)}</strong></div>
+              <div>Backup ID: <strong>${result.backupId || '-'}</strong></div>
+              <div>Type: <strong>${result.backupType || '-'}</strong></div>
+              <div>Timestamp: <strong>${formatTime(result.manifestTimestamp)}</strong></div>
+            </div>
+            ${result.warnings && result.warnings.length > 0 ? `
+              <div style="margin-top: 12px; padding: 8px 12px; background: rgba(245,158,11,0.1); border-radius: 6px; font-size: 12px;">
+                <strong>Warnings:</strong><br>${result.warnings.join('<br>')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      } catch (err) {
+        showToast('Preview failed: ' + err.message, 'error');
+      }
+    }
+
+    async function executeRestore() {
+      const path = document.getElementById('bkp-restore-path').value.trim();
+      if (!path) { showToast('Enter a backup ID or path', 'error'); return; }
+
+      showModal(
+        '⚠️ Confirm Restore',
+        'This will overwrite current data with the backup. This operation is destructive. Are you absolutely sure?',
+        async () => {
+          try {
+            const result = await api('/restore/run', {
+              method: 'POST',
+              body: { backupId: path, confirm: true, force: true },
+            });
+            if (result.success) {
+              showToast(`Restore completed: ${result.results?.restored?.length || 0} tables restored`, 'success');
+            } else {
+              showToast('Restore failed: ' + (result.error || 'Unknown error'), 'error');
+            }
+          } catch (err) {
+            showToast('Restore failed: ' + err.message, 'error');
+          }
+        }
+      );
+    }
+
+    async function generateKey() {
+      try {
+        const result = await api('/generate-key', { method: 'POST' });
+        const div = document.getElementById('bkp-generated-key');
+        div.style.display = 'block';
+        div.innerHTML = `
+          <strong>Generated Key:</strong><br>
+          <code style="color: var(--bkp-success);">${result.key}</code><br><br>
+          <span style="color: var(--bkp-warning); font-size: 11px;">
+            <i class="fas fa-triangle-exclamation"></i>
+            ${result.message}
+          </span>
+          <br><br>
+          <button class="bkp-btn bkp-btn-sm bkp-btn-outline" onclick="copyKey('${result.key}')">
+            <i class="fas fa-copy"></i> Copy to Clipboard
+          </button>
+        `;
+        showToast('Encryption key generated', 'success');
+      } catch (err) {
+        showToast('Failed to generate key: ' + err.message, 'error');
+      }
+    }
+
+    function copyKey(key) {
+      navigator.clipboard.writeText(key).then(() => {
+        showToast('Key copied to clipboard', 'success');
+      }).catch(() => {
+        showToast('Failed to copy. Select and copy manually.', 'error');
+      });
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function refreshAll() {
+      loadPanel(currentTab);
+    }
+
+    // Auto-refresh dashboard every 10 seconds
+    setInterval(() => {
+      if (currentTab === 'dashboard') loadDashboard();
+    }, 10000);
+
+    // Initial load
+    loadDashboard();
+  </script>
+</body>
+</html>

@@ -16,6 +16,10 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>" />
+  <script>
+    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -293,7 +297,7 @@
           <span>Track Order</span>
         </a>
         <a href="#about" class="nav-link">About Spore</a>
-        <a href="#training-section" class="nav-link">Training and Courses</a>
+        <a href="#training-section" class="nav-link" id="btn-nav-training">Training and Courses</a>
         <a href="#faq-section" class="nav-link">FAQ</a>
         <a href="#blogs" class="nav-link">Blogs</a>
         <a href="#footer" class="nav-link">Contact Us</a>
@@ -474,7 +478,7 @@
                   <option value="+91">+91</option>
                   <option value="+1">+1</option>
                 </select>
-                <input type="tel" id="reg-phone" required placeholder="Mobile number" maxlength="16" />
+                <input type="tel" id="reg-phone" required placeholder="Mobile number" maxlength="15" inputmode="numeric" />
               </div>
             </div>
 
@@ -1989,7 +1993,7 @@
                   <option value="+44">🇬🇧 +44</option>
                   <option value="+61">🇦🇺 +61</option>
                 </select>
-                <input type="tel" id="auth-phone" required placeholder="9876543210" maxlength="16" style="flex: 1" />
+                <input type="tel" id="auth-phone" required placeholder="9876543210" maxlength="15" inputmode="numeric" style="flex: 1" />
               </div>
             </div>
             <div class="input-field" id="auth-phone-name-field" style="display: none">
@@ -2092,7 +2096,7 @@
                   <option value="+44">🇬🇧 +44</option>
                   <option value="+61">🇦🇺 +61</option>
                 </select>
-                <input type="tel" id="trainee-phone" required placeholder="9876543210" maxlength="16" style="flex:1;" />
+                <input type="tel" id="trainee-phone" required placeholder="9876543210" maxlength="15" inputmode="numeric" style="flex:1;" />
               </div>
             </div>
             <div class="auth-error-msg hidden" id="trainee-phone-error"></div>
@@ -2122,7 +2126,7 @@
             <div class="input-field">
               <label><i class="fa-solid fa-phone"></i> Phone Number *</label>
               <input type="tel" id="trainee-signup-phone" required placeholder="10-digit mobile number"
-                maxlength="16" />
+                maxlength="15" inputmode="numeric" />
             </div>
             <div class="input-field">
               <label><i class="fa-solid fa-envelope"></i> Email *</label>
@@ -2365,7 +2369,7 @@
 
         <div class="input-group">
           <label for="checkout-delivery-phone">Delivery phone</label>
-          <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="16" />
+          <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="15" inputmode="numeric" />
           <span class="input-error-msg" id="error-checkout-delivery-phone"></span>
         </div>
 

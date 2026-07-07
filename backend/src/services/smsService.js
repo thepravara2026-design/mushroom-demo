@@ -1,4 +1,3 @@
-const twilio = require('twilio');
 const logger = require('../utils/logger');
 
 function formatPhoneToE164(phone) {
@@ -27,6 +26,7 @@ async function sendSms({ to, message }) {
   }
 
   try {
+    const twilio = require('twilio');
     const client = twilio(sid, token);
     const formatted = formatPhoneToE164(to);
     await client.messages.create({ body: message, from, to: formatted });
@@ -53,6 +53,7 @@ async function sendOtpSms(toPhone, otp) {
   }
 
   try {
+    const twilio = require('twilio');
     const client = twilio(sid, token);
     const formatted = formatPhoneToE164(toPhone);
     await client.messages.create({ body: `Your Sporekart login OTP is ${otp}. Valid for 10 minutes.`, from, to: formatted });

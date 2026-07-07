@@ -8,9 +8,24 @@ function _computeStockStatus(stock) {
   return { label: "Out of Stock", variant: "out" };
 }
 
+function _computeVariantStockStatus(product) {
+  if (!product) return null;
+  if (Array.isArray(product.weight_pricing)) {
+    const stocks = product.weight_pricing
+      .map(v => v.stock)
+      .filter(s => s !== undefined && s !== null);
+    if (stocks.length > 0) {
+      const minStock = stocks.reduce((a, b) => Math.min(a, b));
+      return _computeStockStatus(minStock);
+    }
+  }
+  return null;
+}
+
 function _attachStockStatus(product) {
   if (!product) return product;
-  return { ...product, stock_status: _computeStockStatus(product.stock) };
+  const variantStatus = _computeVariantStockStatus(product);
+  return { ...product, stock_status: variantStatus || _computeStockStatus(product.stock) };
 }
 
 async function listProducts(filters = {}) {
@@ -113,6 +128,11 @@ async function createProduct(payload) {
     compliance_info,
     highlights,
     certificates,
+    manufacturer_supplier,
+    scientific_name,
+    shelf_life,
+    seo_title,
+    seo_slug,
   } = payload;
   if (!name || !description || !category) {
     const err = new Error(
@@ -279,6 +299,11 @@ async function createProduct(payload) {
     compliance_info: compliance_info || '',
     highlights: highlights || [],
     certificates: certificates || [],
+    manufacturer_supplier: manufacturer_supplier || 'Shriyap Enterprises, Basavura Village Davangere',
+    scientific_name: scientific_name || null,
+    shelf_life: shelf_life || null,
+    seo_title: seo_title || null,
+    seo_slug: seo_slug || null,
   };
 
   const { data: newProduct, error } = await productRepo.create(insertData);
@@ -353,6 +378,11 @@ async function updateProduct(productId, updates) {
   if (updates.compliance_info !== undefined) toUpdate.compliance_info = updates.compliance_info;
   if (updates.highlights !== undefined) toUpdate.highlights = updates.highlights;
   if (updates.certificates !== undefined) toUpdate.certificates = updates.certificates;
+  if (updates.manufacturer_supplier !== undefined) toUpdate.manufacturer_supplier = updates.manufacturer_supplier;
+  if (updates.scientific_name !== undefined) toUpdate.scientific_name = updates.scientific_name;
+  if (updates.shelf_life !== undefined) toUpdate.shelf_life = updates.shelf_life;
+  if (updates.seo_title !== undefined) toUpdate.seo_title = updates.seo_title;
+  if (updates.seo_slug !== undefined) toUpdate.seo_slug = updates.seo_slug;
 
   if (updates.weight_pricing !== undefined) {
     // Check for duplicate weight variants within this product

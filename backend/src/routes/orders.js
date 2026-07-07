@@ -7,6 +7,7 @@ const razorpay = require("../config/razorpay");
 const authMiddleware = require("../middleware/auth");
 const { validateBody, Joi } = require("../middleware/validate");
 const { validateCancelRequest } = require("../middleware/orderValidation");
+const { requireRole } = require("../middleware/roles");
 const { success, error: respondError } = require("../lib/response");
 const { validatePromoCode } = require("../services/promoService");
 const jwt = require("jsonwebtoken");
@@ -14,14 +15,15 @@ const { supabaseAdmin } = require("../config/supabase");
 const { sendInvoiceWhatsApp } = require("../services/notificationService");
 const { JWT_SECRET } = require("../config/jwt");
 const refundService = require("../modules/refunds/RefundService");
-const { OrderStates, assertCancellable, resolveState, selfCancel, getCancelWindow, adminReject, adminApprove, startReturnWindow, canSelfCancel } = require("../modules/orders/OrderStateService");
+const { OrderStates, assertCancellable, resolveState, selfCancel, getCancelWindow, adminReject, adminApprove, startReturnWindow } = require("../modules/orders/OrderStateService");
 const { logAuditAction, AUDIT_ACTIONS } = require("../services/AuditLogService");
 const { notify } = require("../services/notificationService");
 const logger = require("../utils/logger");
 const { sendSseEvent, addSseSubscriber } = require("../lib/sse");
 const FEATURE_FLAGS = require("../config/featureFlags");
 const inventoryService = require("../services/inventoryService");
-const { withTransaction, withRowLocks, optimisticUpdate } = require("../services/TransactionManager");
+const { withTransaction, withRowLocks } = require("../services/TransactionManager");
+const { isValidIndianPhone, normalizePhoneToE164 } = require("../utils/phoneValidation");
 
 function buildInvoiceData(order, user) {
   const gstSummary = {
@@ -96,9 +98,26 @@ function buildInvoiceData(order, user) {
   };
 }
 
+let _cachedShippingCharge = null;
+let _lastFetch = 0;
+const CACHE_TTL = 60000;
+
 async function getShippingCharge() {
-  // Delivery is always free
-  return 0;
+  if (_cachedShippingCharge !== null && Date.now() - _lastFetch < CACHE_TTL) {
+    return _cachedShippingCharge;
+  }
+  try {
+    const { data: setting } = await db
+      .from("settings")
+      .select("value")
+      .eq("key", "shipping_charge")
+      .single();
+    _cachedShippingCharge = setting ? Number(setting.value) : 0;
+    _lastFetch = Date.now();
+    return _cachedShippingCharge;
+  } catch {
+    return _cachedShippingCharge ?? 0;
+  }
 }
 
 const checkoutSchema = Joi.object({
@@ -120,7 +139,27 @@ const checkoutSchema = Joi.object({
   promoCode: Joi.string().allow("", null).optional(),
   customer_name: Joi.string().allow("").max(100).optional(),
   customer_email: Joi.string().email().allow("").optional(),
-  delivery_phone: Joi.string().allow("").optional(),
+  delivery_phone: Joi.string()
+    .allow("")
+    .optional()
+    .custom((value) => {
+      try {
+        if (value && String(value).trim()) {
+          if (!isValidIndianPhone(value)) {
+            throw new Error('Enter a valid Indian phone number (10 digits starting with 6-9).');
+          }
+        }
+      } catch (err) {
+        if (err.message && err.message.includes('phone')) {
+          throw err;
+        }
+        // Silently allow on unexpected errors to not break flow
+        return;
+      }
+    })
+    .messages({
+      "any.invalid": "Enter a valid Indian phone number (10 digits starting with 6-9).",
+    }),
   delivery_address: Joi.string().allow("").optional(),
   address_line1: Joi.string().allow("").optional(),
   address_line2: Joi.string().allow("").optional(),
@@ -150,6 +189,7 @@ const orderPreviewSchema = Joi.object({
 router.post(
   "/review",
   authMiddleware,
+  requireRole("buyer"),
   validateBody(orderPreviewSchema),
   async (req, res) => {
     try {
@@ -225,6 +265,7 @@ router.post(
 router.post(
   "/checkout",
   authMiddleware,
+  requireRole("buyer"),
   validateBody(checkoutSchema),
   async (req, res) => {
     try {
@@ -265,21 +306,18 @@ router.post(
       const rawPhone = String(
         delivery_phone || (req.user && req.user.whatsapp_number) || "",
       ).trim();
-      const sanitizedPhone = rawPhone.replace(/\D/g, "");
 
       // Do not require address/phone for checkout in mock/e2e flows; prefer user data if present.
       let deliveryPhone = "";
       if (rawPhone) {
-        if (sanitizedPhone.length < 10 || sanitizedPhone.length > 15) {
+        if (!isValidIndianPhone(rawPhone)) {
           return respondError(
             res,
-            "Valid delivery phone number is required.",
+            "Enter a valid Indian phone number (10 digits starting with 6-9).",
             400,
           );
         }
-        deliveryPhone = rawPhone.startsWith("+")
-          ? `+${sanitizedPhone}`
-          : sanitizedPhone;
+        deliveryPhone = normalizePhoneToE164(rawPhone);
       } else if (req.user && req.user.whatsapp_number) {
         deliveryPhone = req.user.whatsapp_number;
       }
@@ -317,21 +355,41 @@ router.post(
         const trackInventory = product.track_inventory !== false;
 
         if (trackInventory) {
-          // Fetch fresh stock data for this product
-          const { data: freshProduct } = await db
-            .from("products")
-            .select("stock, reserved_quantity")
-            .eq("id", product.id)
-            .single();
+          let currentStock;
+          let reservedQty = 0;
+          let resultWeight;
+          let resultUnit;
 
-          const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
-          const reservedQty = freshProduct ? (freshProduct.reserved_quantity || 0) : 0;
+          // Check per-variant stock if item has weight/unit and variant has stock
+          if (cartItem.weight !== undefined && cartItem.unit && Array.isArray(product.weight_pricing)) {
+            const variant = product.weight_pricing.find(
+              (v) => Number(v.weight) === Number(cartItem.weight) && v.unit === cartItem.unit
+            );
+            if (variant && variant.stock !== undefined && variant.stock !== null) {
+              currentStock = variant.stock;
+              resultWeight = Number(cartItem.weight);
+              resultUnit = cartItem.unit;
+            }
+          }
+
+          if (currentStock === undefined) {
+            // Fallback to top-level stock
+            const { data: freshProduct } = await db
+              .from("products")
+              .select("stock, reserved_quantity")
+              .eq("id", product.id)
+              .single();
+
+            currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
+            reservedQty = freshProduct ? (freshProduct.reserved_quantity || 0) : 0;
+          }
+
           const available = currentStock - reservedQty;
 
           if (quantity > available) {
             return respondError(
               res,
-              `Insufficient stock for ${product.name}. Only ${Math.max(0, available)} unit(s) available.`,
+              `Insufficient stock for ${product.name}${resultWeight ? ` (${resultWeight}${resultUnit})` : ''}. Only ${Math.max(0, available)} unit(s) available.`,
               400,
             );
           }
@@ -341,6 +399,7 @@ router.post(
             name: product.name,
             quantity,
             currentStock,
+            ...(resultWeight ? { weight: resultWeight, unit: resultUnit } : {}),
           });
         }
 
@@ -403,7 +462,7 @@ router.post(
         shipping_charge: parseFloat(shippingCharge.toFixed(2)),
         total: parseFloat(total.toFixed(2)),
         promo_code: promoCode || "",
-        status: "pending",
+        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.ORDER_CREATED : "pending",
         delivery_status: "placed",
         invoice_token: invoiceToken,
       };
@@ -456,7 +515,7 @@ router.post(
       if (FEATURE_FLAGS.ENABLE_TRANSACTIONS && !db.isMock) {
         try {
           await withTransaction(async (client) => {
-            const productIds = stockDeductions.map(sd => sd.productId);
+            const productIds = [...new Set(stockDeductions.map(sd => sd.productId))];
             const locked = await withRowLocks(client, "products", productIds, "UPDATE");
             const lockMap = {};
             for (const p of locked) lockMap[p.id] = p;
@@ -464,16 +523,52 @@ router.post(
             for (const sd of stockDeductions) {
               const product = lockMap[sd.productId];
               if (!product) throw new Error(`Product ${sd.productId} not found or locked`);
-              const newStock = (product.stock || 0) - sd.quantity;
-              if (newStock < 0) {
-                throw new Error(`Insufficient stock for ${sd.name}. Available: ${product.stock}, requested: ${sd.quantity}`);
-              }
-              const r = await client.query(
-                `UPDATE products SET stock = stock - $1, version = version + 1, updated_at = $2 WHERE id = $3 AND stock >= $1`,
-                [sd.quantity, new Date().toISOString(), sd.productId]
-              );
-              if (r.rowCount === 0) {
-                throw new Error(`Stock decrement failed for ${sd.name} — concurrent modification`);
+
+              if (sd.weight && sd.unit) {
+                // Variant-level stock decrement via JSONB
+                const variantIdx = (product.weight_pricing || []).findIndex(
+                  v => Number(v.weight) === sd.weight && v.unit === sd.unit && v.stock !== undefined
+                );
+                if (variantIdx === -1) continue; // no variant stock field — skip
+                const variantStock = (product.weight_pricing[variantIdx].stock || 0);
+                if (sd.quantity > variantStock) {
+                  throw new Error(`Insufficient variant stock for ${sd.name}`);
+                }
+                const r = await client.query(
+                  `UPDATE products SET weight_pricing = (
+                    SELECT jsonb_agg(
+                      CASE
+                        WHEN (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5 AND elem ? 'stock'
+                        THEN jsonb_set(elem, '{stock}', to_jsonb(COALESCE((elem->>'stock')::int, 0) - $2))
+                        ELSE elem
+                      END
+                    )
+                    FROM jsonb_array_elements(weight_pricing) AS elem
+                    WHERE id = $3
+                  ), version = version + 1, updated_at = $6
+                  WHERE id = $3 AND (
+                    SELECT COALESCE((elem->>'stock')::int, 0)
+                    FROM jsonb_array_elements(weight_pricing) AS elem
+                    WHERE (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5
+                    LIMIT 1
+                  ) >= $2`,
+                  [sd.quantity, sd.quantity, sd.productId, sd.weight, sd.unit, new Date().toISOString()]
+                );
+                if (r.rowCount === 0) {
+                  throw new Error(`Variant stock decrement failed for ${sd.name} — concurrent modification`);
+                }
+              } else {
+                const newStock = (product.stock || 0) - sd.quantity;
+                if (newStock < 0) {
+                  throw new Error(`Insufficient stock for ${sd.name}. Available: ${product.stock}, requested: ${sd.quantity}`);
+                }
+                const r = await client.query(
+                  `UPDATE products SET stock = stock - $1, version = version + 1, updated_at = $2 WHERE id = $3 AND stock >= $1`,
+                  [sd.quantity, new Date().toISOString(), sd.productId]
+                );
+                if (r.rowCount === 0) {
+                  throw new Error(`Stock decrement failed for ${sd.name} — concurrent modification`);
+                }
               }
               decrementedProducts.push(sd);
             }
@@ -486,7 +581,46 @@ router.post(
       } else {
         for (const sd of stockDeductions) {
           try {
-            if (!db.isMock) {
+            if (sd.weight && sd.unit) {
+              // Variant-level stock decrement
+              const { data: freshProduct } = await db
+                .from("products")
+                .select("weight_pricing, version")
+                .eq("id", sd.productId)
+                .single();
+              if (freshProduct && Array.isArray(freshProduct.weight_pricing)) {
+                const variant = freshProduct.weight_pricing.find(
+                  v => Number(v.weight) === sd.weight && v.unit === sd.unit && v.stock !== undefined
+                );
+                if (variant) {
+                  const newStock = variant.stock - sd.quantity;
+                  if (newStock < 0) throw new Error(`Insufficient variant stock for ${sd.name}`);
+                  const updatedWp = freshProduct.weight_pricing.map(v => {
+                    if (Number(v.weight) === sd.weight && v.unit === sd.unit && v.stock !== undefined) {
+                      return { ...v, stock: newStock };
+                    }
+                    return v;
+                  });
+                  await db.from("products").update({
+                    weight_pricing: updatedWp,
+                    ...(!db.isMock ? { version: (freshProduct.version || 0) + 1 } : {}),
+                    updated_at: new Date().toISOString(),
+                  }).eq("id", sd.productId);
+                } else {
+                  // Variant has no stock field — fallback to top-level stock decrement
+                  if (!db.isMock) {
+                    await supabaseAdmin.rpc("decrement_stock", {
+                      p_product_id: sd.productId,
+                      p_quantity: sd.quantity,
+                    });
+                  } else {
+                    const { data: fp } = await db.from("products").select("stock").eq("id", sd.productId).single();
+                    const cur = fp ? (fp.stock || 0) : 0;
+                    await db.from("products").update({ stock: cur - sd.quantity }).eq("id", sd.productId);
+                  }
+                }
+              }
+            } else if (!db.isMock) {
               await supabaseAdmin.rpc("decrement_stock", {
                 p_product_id: sd.productId,
                 p_quantity: sd.quantity,
@@ -509,11 +643,37 @@ router.post(
             for (const done of decrementedProducts) {
               try {
                 if (!db.isMock) {
-                  const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
-                  if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+                  if (done.weight && done.unit) {
+                    const { data: pf } = await db.from("products").select("weight_pricing").eq("id", done.productId).single();
+                    if (pf && Array.isArray(pf.weight_pricing)) {
+                      const restoredWp = pf.weight_pricing.map(v => {
+                        if (Number(v.weight) === done.weight && v.unit === done.unit && v.stock !== undefined) {
+                          return { ...v, stock: (v.stock || 0) + done.quantity };
+                        }
+                        return v;
+                      });
+                      await db.from("products").update({ weight_pricing: restoredWp }).eq("id", done.productId);
+                    }
+                  } else {
+                    const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
+                    if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+                  }
                 } else {
-                  const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
-                  if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+                  if (done.weight && done.unit) {
+                    const { data: pf } = await db.from("products").select("weight_pricing").eq("id", done.productId).single();
+                    if (pf && Array.isArray(pf.weight_pricing)) {
+                      const restoredWp = pf.weight_pricing.map(v => {
+                        if (Number(v.weight) === done.weight && v.unit === done.unit && v.stock !== undefined) {
+                          return { ...v, stock: (v.stock || 0) + done.quantity };
+                        }
+                        return v;
+                      });
+                      await db.from("products").update({ weight_pricing: restoredWp }).eq("id", done.productId);
+                    }
+                  } else {
+                    const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
+                    if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
+                  }
                 }
               } catch (rollbackErr) {
                 logger.error(`[checkout] Rollback failed for ${done.productId}: ${rollbackErr.message}`);
@@ -632,6 +792,7 @@ const verifyPaymentSchema = Joi.object({
 router.post(
   "/confirm-upi-payment",
   authMiddleware,
+  requireRole("buyer"),
   validateBody(
     Joi.object({
       razorpay_order_id: Joi.string().required(),
@@ -655,18 +816,23 @@ router.post(
       const invoiceToken =
         existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
 
+      const upiUpdatePayload = {
+        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid",
+        delivery_status: "placed",
+        admin_approval_status: "pending",
+        payment_method: "UPI QR",
+        razorpay_payment_id: paymentId,
+        transaction_id: transactionId,
+        invoice_token: invoiceToken,
+        updated_at: new Date().toISOString(),
+      };
+      if (FEATURE_FLAGS.SELF_CANCEL_WINDOW) {
+        upiUpdatePayload.cancel_window_expires = null;
+      }
+
       const { data: updatedOrder, error } = await db
         .from("orders")
-        .update({
-          status: "paid",
-          delivery_status: "placed",
-          admin_approval_status: "pending",
-          payment_method: "UPI QR",
-          razorpay_payment_id: paymentId,
-          transaction_id: transactionId,
-          invoice_token: invoiceToken,
-          updated_at: new Date().toISOString(),
-        })
+        .update(upiUpdatePayload)
         .eq("razorpay_order_id", razorpay_order_id)
         .single();
 
@@ -734,6 +900,7 @@ router.post(
 router.post(
   "/confirm-cod-payment",
   authMiddleware,
+  requireRole("buyer"),
   validateBody(
     Joi.object({
       razorpay_order_id: Joi.string().required(),
@@ -833,6 +1000,7 @@ router.post(
 router.post(
   "/verify-payment",
   authMiddleware,
+  requireRole("buyer"),
   validateBody(verifyPaymentSchema),
   async (req, res) => {
     try {
@@ -859,11 +1027,29 @@ router.post(
             if (qty <= 0 || !item.productId) continue;
             const { data: prod } = await db
               .from("products")
-              .select("stock, reserved_quantity")
+              .select("stock, reserved_quantity, weight_pricing")
               .eq("id", item.productId)
               .single();
+
             if (prod) {
-              const available = prod.stock - (prod.reserved_quantity || 0);
+              let available;
+              let labelSuffix = '';
+
+              // Check variant-level stock if item has weight/unit
+              if (item.weight !== undefined && item.unit !== undefined && Array.isArray(prod.weight_pricing)) {
+                const variant = prod.weight_pricing.find(
+                  v => Number(v.weight) === Number(item.weight) && v.unit === item.unit && v.stock !== undefined
+                );
+                if (variant) {
+                  available = variant.stock;
+                  labelSuffix = ` (${item.weight}${item.unit})`;
+                }
+              }
+
+              if (available === undefined) {
+                available = prod.stock - (prod.reserved_quantity || 0);
+              }
+
               if (available < qty) {
                 await db.from("orders").update({ status: "failed" }).eq("razorpay_order_id", razorpay_order_id);
                 try {
@@ -874,7 +1060,7 @@ router.post(
                 } catch (refundErr) {
                   logger.warn(`[verify-payment] Auto-refund failed for order ${pendingOrder.id}: ${refundErr.message}`);
                 }
-                return respondError(res, `Sorry, "${item.name || item.productId}" is now out of stock. Your payment will be refunded.`, 409);
+                return respondError(res, `Sorry, "${item.name || item.productId}${labelSuffix}" is now out of stock. Your payment will be refunded.`, 409);
               }
             }
           }
@@ -891,18 +1077,23 @@ router.post(
           existingOrder && existingOrder.invoice_token
             ? existingOrder.invoice_token
             : crypto.randomBytes(12).toString("hex");
+        const updatePayload = {
+          status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid",
+          delivery_status: "placed",
+          admin_approval_status: "pending",
+          payment_method: "Razorpay",
+          razorpay_payment_id,
+          transaction_id: transactionId,
+          invoice_token: invoiceToken,
+          updated_at: new Date().toISOString(),
+        };
+        if (FEATURE_FLAGS.SELF_CANCEL_WINDOW) {
+          updatePayload.cancel_window_expires = null;
+        }
+
         const { data: updatedOrder, error } = await db
           .from("orders")
-          .update({
-            status: "paid",
-            delivery_status: "placed",
-            admin_approval_status: "pending",
-            payment_method: "Razorpay",
-            razorpay_payment_id,
-            transaction_id: transactionId,
-            invoice_token: invoiceToken,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq("razorpay_order_id", razorpay_order_id)
           .single();
 
@@ -1057,12 +1248,8 @@ router.get("/shipping-settings", async (req, res) => {
 
 // PUT /api/orders/shipping-settings
 // Admin updates global shipping charge
-router.put("/shipping-settings", authMiddleware, async (req, res) => {
+router.put("/shipping-settings", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const shipping_charge = Number(req.body.shipping_charge);
     if (Number.isNaN(shipping_charge) || shipping_charge < 0) {
       return respondError(
@@ -1151,12 +1338,8 @@ router.get("/my-orders", authMiddleware, async (req, res) => {
 
 // GET /api/orders/all-orders
 // Fetch all orders in the system (admin only)
-router.get("/all-orders", authMiddleware, async (req, res) => {
+router.get("/all-orders", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { data: orders, error: ordersErr } = await db
       .from("orders")
       .select("*");
@@ -1203,18 +1386,14 @@ router.get("/all-orders", authMiddleware, async (req, res) => {
 
 // PUT /api/orders/:id/fulfillment
 // Update fulfillment status (admin only) — replaces manual delivery_status progression
-router.put("/:id/fulfillment", authMiddleware, async (req, res) => {
+router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { fulfillment_status } = req.body;
     if (!fulfillment_status) {
       return respondError(res, "Fulfillment status is required.", 400);
     }
 
-    const validStatuses = ['pending_fulfillment', 'packing_required', 'packed', 'awaiting_pickup', 'ready_to_ship', 'with_carrier', 'delivered'];
+    const validStatuses = ['pending_fulfillment', 'packing_required', 'packing', 'packed', 'awaiting_pickup', 'ready_to_ship', 'with_carrier', 'delivered', 'shipment_failed'];
     if (!validStatuses.includes(fulfillment_status)) {
       return respondError(res, `Invalid fulfillment status. Must be one of: ${validStatuses.join(', ')}`, 400);
     }
@@ -1528,12 +1707,8 @@ router.get("/:id/refund", authMiddleware, async (req, res) => {
 
 // GET /api/orders/admin/refunds
 // Admin: list all refunds across all orders
-router.get("/admin/refunds", authMiddleware, async (req, res) => {
+router.get("/admin/refunds", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { data: refunds, error } = await db
       .from("refunds")
       .select("*")
@@ -2073,7 +2248,7 @@ router.post(
       const { id } = req.params;
       const { rating, reviewText } = req.body;
 
-      const { data: order, error } = await db
+      const { data: order, error } = await req.db
         .from("orders")
         .select("*")
         .eq("id", id)
@@ -2091,7 +2266,7 @@ router.post(
         return respondError(res, "Only delivered orders can be reviewed", 400);
       }
 
-      await db
+      await req.db
         .from("orders")
         .update({
           rating,
@@ -2190,12 +2365,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
 // POST /api/orders/admin/approve/:id
 // Admin approves a PENDING_APPROVAL order → PLACED, triggers shipment creation
-router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
+router.post("/admin/approve/:id", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { adminNote } = req.body;
 
     const { data: order } = await db
@@ -2215,14 +2386,21 @@ router.post("/admin/approve/:id", authMiddleware, async (req, res) => {
     const { data: updatedOrder, error: updateError } = await db
       .from("orders")
       .update({
+        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.APPROVED : "paid",
         admin_approval_status: "approved",
         fulfillment_status: "pending_fulfillment",
+        version: (order.version || 0) + 1,
         updated_at: new Date().toISOString()
       })
       .eq("id", req.params.id)
+      .eq("version", order.version || 0)
+      .select()
       .single();
 
     if (updateError) {
+      if (updateError.code === "PGRST116") {
+        return respondError(res, "Order was modified by another admin. Please refresh and try again.", 409);
+      }
       return respondError(res, updateError.message || "Failed to approve order", 500);
     }
 
@@ -2286,12 +2464,8 @@ const rejectOrderSchema = Joi.object({
   adminNote: Joi.string().trim().max(500).optional()
 });
 
-router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema), async (req, res) => {
+router.post("/admin/reject/:id", authMiddleware, requireRole("admin"), validateBody(rejectOrderSchema), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { reason, adminNote } = req.body;
 
     const { data: order } = await db
@@ -2308,13 +2482,14 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
       return respondError(res, "Only orders pending approval can be rejected.", 400);
     }
 
-    const isPaid = order.status === "paid" && (order.razorpay_payment_id || order.payment_method === "UPI QR");
+    const paidStatuses = ["paid", OrderStates.PAYMENT_VERIFIED, OrderStates.APPROVED].filter(Boolean);
+    const isPaid = paidStatuses.includes(order.status) && (order.razorpay_payment_id || order.payment_method === "UPI QR");
 
     const { data: updatedOrder, error: updateError } = await db
       .from("orders")
       .update({
-        status: "cancelled",
-        delivery_status: "cancelled",
+        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.ADMIN_REJECTED : "cancelled",
+        delivery_status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? "rejected" : "cancelled",
         admin_approval_status: "rejected",
         cancel_reason: reason,
         cancelled_by: "admin",
@@ -2380,12 +2555,8 @@ router.post("/admin/reject/:id", authMiddleware, validateBody(rejectOrderSchema)
 
 // GET /api/orders/admin/:id/audit-logs
 // Admin: get audit logs for a specific order
-router.get("/admin/:id/audit-logs", authMiddleware, async (req, res) => {
+router.get("/admin/:id/audit-logs", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return respondError(res, "Access denied. Admins only.", 403);
-    }
-
     const { getAuditLogs } = require("../services/AuditLogService");
     const logs = await getAuditLogs(req.params.id);
     return success(res, logs || []);
@@ -2435,7 +2606,7 @@ router.post("/verify-cod-otp", authMiddleware, async (req, res) => {
 });
 
 // POST /api/orders/retry-payment — Retry with different payment method
-router.post("/retry-payment", authMiddleware, async (req, res) => {
+router.post("/retry-payment", authMiddleware, requireRole("buyer"), async (req, res) => {
   if (!FEATURE_FLAGS_PHASE3.PAYMENT_RETRY) return respondError(res, "Payment retry disabled", 404);
   try {
     const { orderId, method } = req.body;
@@ -2447,7 +2618,7 @@ router.post("/retry-payment", authMiddleware, async (req, res) => {
 
     // Mark old payment attempt as failed
     if (order.razorpay_order_id) {
-      await db.from("orders").update({ payment_status: "failed" }).eq("id", orderId);
+      await db.from("orders").update({ payment_status: OrderStates.FAILED }).eq("id", orderId);
     }
 
     if (method === "cod") {
@@ -2508,6 +2679,12 @@ router.post("/:id/self-cancel", authMiddleware, async (req, res) => {
 // GET /api/orders/:id/cancel-window — Check cancellation window status
 router.get("/:id/cancel-window", authMiddleware, async (req, res) => {
   try {
+    const { data: order } = await req.db.from("orders").select("user_id").eq("id", req.params.id).single();
+    if (!order) return respondError(res, "Order not found.", 404);
+    const isOwner = String(order.user_id) === String(req.user.userId || req.user.id);
+    const isAdmin = req.user.role === "admin";
+    if (!isOwner && !isAdmin) return respondError(res, "Access denied.", 403);
+
     const result = await getCancelWindow(req.params.id);
     return success(res, result);
   } catch (err) {
@@ -2524,11 +2701,19 @@ const orderRejectSchema = Joi.object({
   }),
 });
 
-router.post("/admin/order-reject/:id", authMiddleware, validateBody(orderRejectSchema), async (req, res) => {
+router.post("/admin/order-reject/:id", authMiddleware, requireRole("admin"), validateBody(orderRejectSchema), async (req, res) => {
   try {
-    if (req.user.role !== "admin") return respondError(res, "Access denied. Admins only.", 403);
-
     const result = await adminReject(req.params.id, req.body.reason, req.user);
+
+    await logAuditAction({
+      orderId: req.params.id,
+      action: AUDIT_ACTIONS.ORDER_STATUS_CHANGED,
+      performedBy: req.user,
+      previousState: "pending",
+      newState: "rejected",
+      metadata: { reason: req.body.reason, source: "v3_reject" }
+    }).catch(() => {});
+
     try {
       const { data: updated } = await db.from("orders").select("*").eq("id", req.params.id).single();
       if (updated) {
@@ -2543,11 +2728,26 @@ router.post("/admin/order-reject/:id", authMiddleware, validateBody(orderRejectS
 });
 
 // POST /api/orders/admin/order-approve/:id — Admin approves an order (v3)
-router.post("/admin/order-approve/:id", authMiddleware, async (req, res) => {
+router.post("/admin/order-approve/:id", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
-    if (req.user.role !== "admin") return respondError(res, "Access denied. Admins only.", 403);
-
     const result = await adminApprove(req.params.id);
+
+    await logAuditAction({
+      orderId: req.params.id,
+      action: AUDIT_ACTIONS.ORDER_STATUS_CHANGED,
+      performedBy: req.user,
+      previousState: "pending",
+      newState: "approved",
+      metadata: { source: "v3_approve" }
+    }).catch(() => {});
+
+    try {
+      const { data: user } = await db.from("users").select("*").eq("id", result.order.user_id).single();
+      if (user) {
+        notify("ORDER_APPROVED", result.order, user, {}).catch(() => {});
+      }
+    } catch (_) {}
+
     try {
       sendSseEvent("order:updated", { order: result.order },
         (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === result.order.user_id));
@@ -2555,6 +2755,34 @@ router.post("/admin/order-approve/:id", authMiddleware, async (req, res) => {
     return success(res, result);
   } catch (err) {
     return respondError(res, err.message, 400);
+  }
+});
+
+// POST /api/orders/:id/request-return — Customer requests a return for a delivered order
+router.post("/:id/request-return", authMiddleware, async (req, res) => {
+  try {
+    const { data: order } = await req.db.from("orders").select("user_id, status, delivery_status, return_window_expires").eq("id", req.params.id).single();
+    if (!order) return respondError(res, "Order not found.", 404);
+    const isOwner = String(order.user_id) === String(req.user.userId || req.user.id);
+    if (!isOwner) return respondError(res, "Access denied.", 403);
+    if (order.delivery_status !== "delivered" && order.status !== OrderStates.DELIVERED) {
+      return respondError(res, "Return can only be requested for delivered orders.", 400);
+    }
+    if (order.return_window_expires && new Date(order.return_window_expires) < new Date()) {
+      return respondError(res, "Return window has expired.", 400);
+    }
+    await db.from("orders").update({
+      status: OrderStates.RETURN_REQUESTED,
+      return_requested_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", req.params.id);
+    try {
+      sendSseEvent("order:updated", { order: { id: req.params.id, status: OrderStates.RETURN_REQUESTED } },
+        (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === order.user_id));
+    } catch (_) {}
+    return success(res, { message: "Return request submitted. Admin will review shortly." });
+  } catch (err) {
+    return respondError(res, err.message || "Failed to request return", 400);
   }
 });
 

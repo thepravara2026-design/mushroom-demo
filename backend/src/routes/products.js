@@ -103,6 +103,11 @@ router.post(
           label: Joi.string().required(),
         }),
       ).optional(),
+      manufacturer_supplier: Joi.string().optional().allow(''),
+      scientific_name: Joi.string().optional().allow(''),
+      shelf_life: Joi.string().optional().allow(''),
+      seo_title: Joi.string().optional().allow(''),
+      seo_slug: Joi.string().optional().allow(''),
     }),
   ),
   async (req, res) => {
@@ -151,6 +156,11 @@ const updateProductSchema = Joi.object({
       label: Joi.string().required(),
     }),
   ).optional(),
+  manufacturer_supplier: Joi.string().optional().allow(''),
+  scientific_name: Joi.string().optional().allow(''),
+  shelf_life: Joi.string().optional().allow(''),
+  seo_title: Joi.string().optional().allow(''),
+  seo_slug: Joi.string().optional().allow(''),
 });
 
 // ADMIN ONLY - PUT /api/products/:id

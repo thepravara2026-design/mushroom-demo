@@ -105,6 +105,26 @@
 **22. Admin-only routes intentionally left using imported `db` (service_role)** — bypass RLS for order management, product CRUD, etc.
 
 ### Tests
-- All **108 backend tests pass** with no regressions (8 suites, 108 tests)
+- All **113 backend tests pass** with no regressions (9 suites, 113 tests)
 - Frontend `app.js`, `admin.js`, and `AuthModal.js` pass `node --check` syntax validation
 - Backend `RefundService.js` and `notificationService.js` pass `require()` validation
+
+### Admin Flow Bug Fixes (Jul 4, 2026)
+
+**All 13 admin flow bugs fixed:**
+
+| Bug | Fix | Files |
+|-----|-----|-------|
+| AD-1 | Auth/role middleware on analytics routes (formerly public) | `backend/src/routes/analytics.js` |
+| AD-2 | `retryFailedRefund` accepts `orderId` not `refundId` | `backend/src/modules/refunds/RefundService.js` |
+| AD-3 | Terminal-state guard on `adminDirectCancellation` | `backend/src/modules/refunds/RefundService.js` |
+| AD-4 | Use `OrderStates.PAID` instead of `"paid"` | `backend/src/modules/refunds/RefundService.js` |
+| AD-5 | `cancelCarrierShipment` inside the transaction | `backend/src/modules/refunds/RefundService.js` |
+| AD-6 | Verified no double-restock bug (guard exists) | (no change needed) |
+| AD-7 | Audit logs + ORDER_APPROVED notification on v3 routes | `backend/src/routes/orders.js` |
+| AD-8 | Frontend calls v3 endpoints vs legacy | `frontend/src/admin.js` |
+| AD-9 | `cancelled_by` reflects admin identity, not hardcoded `"customer"` | `backend/src/modules/refunds/RefundService.js` |
+| AD-10 | 11 inline role checks → `requireRole("admin")` middleware | `backend/src/routes/orders.js`, `shipping.js` |
+| AD-11 | Fixed misleading docstring ("auto-triggers gateway" → "creates pending refund record") | `backend/src/modules/refunds/RefundService.js` |
+| AD-12 | Optimistic locking on legacy approve route (409 on version conflict) | `backend/src/routes/orders.js` |
+| AD-13 | N+1 → batch `in()` queries in shipping enrichment | `backend/src/routes/shipping.js` |

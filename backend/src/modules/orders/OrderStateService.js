@@ -35,11 +35,11 @@ const OrderStates = {
 // ── v3 State Machine (Phase 5) ───────────────────────────────────────────
 const V3_STATE_MACHINE = {
   [OrderStatus.ORDER_CREATED]: {
-    transitions: [OrderStatus.CANCELLATION_WINDOW, OrderStatus.FAILED],
+    transitions: [OrderStatus.CANCELLATION_WINDOW, OrderStatus.PAYMENT_VERIFIED, OrderStatus.FAILED],
     onEnter: 'setCancelWindow',
   },
   [OrderStatus.CANCELLATION_WINDOW]: {
-    transitions: [OrderStatus.SELF_CANCELLED, OrderStatus.WINDOW_CLOSED, OrderStatus.FAILED],
+    transitions: [OrderStatus.SELF_CANCELLED, OrderStatus.WINDOW_CLOSED, OrderStatus.PAYMENT_VERIFIED, OrderStatus.FAILED],
     timeout: 30 * 60 * 1000,
   },
   [OrderStatus.SELF_CANCELLED]: {
@@ -245,7 +245,7 @@ async function selfCancel(orderId, userId) {
     throw new Error("Unauthorized to cancel this order");
   }
 
-  if (order.status !== OrderStatus.CANCELLATION_WINDOW && order.status !== OrderStatus.ORDER_CREATED && order.status !== OrderStatus.PAYMENT_VERIFIED && order.status !== OrderStatus.ADMIN_PENDING) {
+  if (![OrderStatus.CANCELLATION_WINDOW, OrderStatus.ORDER_CREATED, OrderStatus.PAYMENT_VERIFIED, OrderStatus.ADMIN_PENDING, "pending", "paid", "placed"].includes(order.status)) {
     throw new Error("Order is not in a cancellable state");
   }
 
@@ -277,7 +277,12 @@ async function selfCancel(orderId, userId) {
   }
 
   if (refundFailed) {
-    return { success: true, message: "Order self-cancelled. Auto-refund failed — an admin will review and process the refund manually.", refundFailed: true };
+    try {
+      await restockOrderItems(order);
+    } catch (restockErr) {
+      logger.warn(`[OrderStateService] Restock failed for self-cancelled order ${orderId}: ${restockErr.message}`);
+    }
+    return { success: true, message: "Order self-cancelled. Auto-refund failed — stock will be restored and an admin will review.", refundFailed: true };
   }
 
   return { success: true, message: "Order self-cancelled and refund initiated successfully" };
@@ -347,7 +352,8 @@ async function adminApprove(orderId) {
     updated_at: new Date().toISOString(),
   });
 
-  return { success: true, message: "Order approved", order: { ...order, status: OrderStatus.APPROVED } };
+  const freshOrder = await atomicOrderFetch(orderId);
+  return { success: true, message: "Order approved", order: freshOrder || { ...order, status: OrderStatus.APPROVED } };
 }
 
 async function startReturnWindow(orderId) {
@@ -391,7 +397,7 @@ async function closeExpiredWindows() {
   const { data: expired } = await db.from("orders")
     .select("id, status, cancel_window_expires")
     .lt("cancel_window_expires", new Date().toISOString())
-    .in("status", [OrderStatus.ORDER_CREATED, OrderStatus.CANCELLATION_WINDOW]);
+    .in("status", [OrderStatus.ORDER_CREATED, OrderStatus.CANCELLATION_WINDOW, "pending"]);
 
   if (!expired || expired.length === 0) return { closed: 0 };
 
@@ -423,7 +429,7 @@ const NON_CANCELLABLE_FULFILLMENT = ['with_carrier', 'delivered'];
 
 function isWithCarrier(order) {
   if (NON_CANCELLABLE_FULFILLMENT.includes(order.fulfillment_status)) return true;
-  if (["shipped", "in_transit", "delivered"].includes(order.delivery_status)) return true;
+  if (["shipped", "in_transit", "delivered", "with_carrier", "out_for_delivery", "ndr"].includes(order.delivery_status)) return true;
   return false;
 }
 
@@ -444,9 +450,41 @@ async function restockOrderItems(order) {
 
   logger.info(`[OrderStateService] Restocking items for order ${order.id}`);
 
+  async function restockItem(productId, qty, weight, unit) {
+    if (!productId || qty <= 0) return;
+    if (weight !== undefined && weight !== null && unit) {
+      // Restore variant-level stock
+      const { data: product } = await db.from("products").select("weight_pricing, version").eq("id", productId).single();
+      if (product && Array.isArray(product.weight_pricing)) {
+        const variant = product.weight_pricing.find(
+          v => Number(v.weight) === Number(weight) && v.unit === unit && v.stock !== undefined
+        );
+        if (variant) {
+          const updatedWp = product.weight_pricing.map(v => {
+            if (Number(v.weight) === Number(weight) && v.unit === unit && v.stock !== undefined) {
+              return { ...v, stock: (v.stock || 0) + qty };
+            }
+            return v;
+          });
+          await db.from("products").update({
+            weight_pricing: updatedWp,
+            version: (product.version || 0) + 1,
+            updated_at: new Date().toISOString(),
+          }).eq("id", productId);
+          return;
+        }
+      }
+    }
+    // Fallback to top-level stock restoration
+    const { data: product } = await db.from("products").select("stock").eq("id", productId).single();
+    if (!product) { logger.warn(`[OrderStateService] Product ${productId} not found during restocking.`); return; }
+    const currentStock = product.stock || 0;
+    await db.from("products").update({ stock: currentStock + qty }).eq("id", productId);
+  }
+
   if (FEATURE_FLAGS.ENABLE_TRANSACTIONS && !FEATURE_FLAGS.INVENTORY_SERVICE) {
     await withTransaction(async (client) => {
-      const productIds = order.items.filter(i => i.productId).map(i => i.productId);
+      const productIds = [...new Set(order.items.filter(i => i.productId).map(i => i.productId))];
       const products = await withRowLocks(client, "products", productIds, "UPDATE");
 
       const productMap = {};
@@ -460,6 +498,30 @@ async function restockOrderItems(order) {
         if (!product) {
           logger.warn(`[OrderStateService] Product ${item.productId} not found during restocking.`);
           continue;
+        }
+
+        if (item.weight !== undefined && item.weight !== null && item.unit && Array.isArray(product.weight_pricing)) {
+          const variantIdx = product.weight_pricing.findIndex(
+            v => Number(v.weight) === Number(item.weight) && v.unit === item.unit && v.stock !== undefined
+          );
+          if (variantIdx !== -1) {
+            await client.query(
+              `UPDATE products SET weight_pricing = (
+                SELECT jsonb_agg(
+                  CASE
+                    WHEN (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5 AND elem ? 'stock'
+                    THEN jsonb_set(elem, '{stock}', to_jsonb(COALESCE((elem->>'stock')::int, 0) + $2))
+                    ELSE elem
+                  END
+                )
+                FROM jsonb_array_elements(weight_pricing) AS elem
+                WHERE id = $3
+              ), version = version + 1, updated_at = $6
+              WHERE id = $3`,
+              [qty, qty, item.productId, Number(item.weight), item.unit, new Date().toISOString()]
+            );
+            continue;
+          }
         }
         const newStock = (product.stock || 0) + qty;
         await optimisticUpdate(client, "products", item.productId, { stock: newStock }, product.version);
@@ -479,7 +541,11 @@ async function restockOrderItems(order) {
       try {
         const qty = parseInt(item.quantity, 10) || 0;
         if (qty <= 0) continue;
-        await inventoryService.restockStock(item.productId, qty, 'cancellation', order.id);
+        if (item.weight !== undefined && item.weight !== null && item.unit) {
+          await restockItem(item.productId, qty, item.weight, item.unit);
+        } else {
+          await inventoryService.restockStock(item.productId, qty, 'cancellation', order.id);
+        }
       } catch (err) {
         logger.error(`[OrderStateService] Failed to restock product ${item.productId}: ${err.message}`);
       }
@@ -488,11 +554,9 @@ async function restockOrderItems(order) {
     for (const item of order.items) {
       if (!item.productId) continue;
       try {
-        const { data: product } = await db.from("products").select("stock").eq("id", item.productId).single();
-        if (!product) { logger.warn(`[OrderStateService] Product ${item.productId} not found during restocking.`); continue; }
-        const currentStock = product.stock || 0;
-        const updatedStock = currentStock + (parseInt(item.quantity, 10) || 0);
-        await db.from("products").update({ stock: updatedStock }).eq("id", item.productId);
+        const qty = parseInt(item.quantity, 10) || 0;
+        if (qty <= 0) continue;
+        await restockItem(item.productId, qty, item.weight, item.unit);
       } catch (err) {
         logger.error(`[OrderStateService] Failed to restock product ${item.productId}: ${err.message}`);
       }

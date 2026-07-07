@@ -1,5 +1,5 @@
 import { authApi } from '../api/authApi.js';
-import { saveAuth, clearAuth, state } from '../utils/state.js';
+import { saveAuth, clearAuth, saveCart, state } from '../utils/state.js';
 import { showErrorToast, showSuccessToast, showPopupModal } from '../utils/notify.js';
 import { isValidIndianPhone, isValidEmail, isValidOtp, getFieldError } from '../utils/validation.js';
 
@@ -709,7 +709,15 @@ export class AuthModal {
     }
 
     try {
+      // Preserve cart through auth transition to avoid clearing on checkout
+      const _prevCart = state.cart ? [...state.cart] : [];
+      const _prevPromo = state.activePromo;
       clearAuth();
+      if (_prevCart.length) {
+        state.cart = _prevCart;
+        state.activePromo = _prevPromo;
+        saveCart();
+      }
       const data = await authApi.verifyOtp(contact, otpCode, {
         loginMethod: this.activeMethod,
         ...(this.activeMethod === 'phone' ? { whatsappNumber: this._lastPhone } : {}),
@@ -841,7 +849,15 @@ export class AuthModal {
     try {
       const data = await authApi.googleLogin(credential);
 
+      // Preserve cart through auth transition
+      const _prevCart = state.cart ? [...state.cart] : [];
+      const _prevPromo = state.activePromo;
       clearAuth();
+      if (_prevCart.length) {
+        state.cart = _prevCart;
+        state.activePromo = _prevPromo;
+        saveCart();
+      }
       saveAuth(data.token, data.user);
       this.close();
       if (this.onSuccessCallback) this.onSuccessCallback();

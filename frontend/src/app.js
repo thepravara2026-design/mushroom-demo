@@ -15,7 +15,7 @@ import { blogApi } from './api/blogApi.js';
 import { searchApi } from './api/searchApi.js';
 import { locationApi } from './api/locationApi.js';
 import { API_BASE, fetchWithAuth, getApiErrorMessage } from './api/client.js';
-import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal } from './utils/notify.js';
+import { showErrorToast, showSuccessToast, showInfoToast, showPopupModal, showRoleSwitchModal } from './utils/notify.js';
 import { isValidIndianPhone } from './utils/validation.js';
 import { createEventSourceWithAuth } from './utils/auth.js';
 import { renderReturnPage } from './components/ReturnPage.js';
@@ -416,9 +416,17 @@ function handleRouting(opts = {}) {
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   } else if (hash === '#checkout') {
-    if (state.user && (state.user.role === 'grower' || state.user.role === 'admin')) {
+    if (state.user && (state.user.role === 'grower' || state.user.role === 'trainee')) {
       if (heroSection) heroSection.classList.remove('hidden');
       window.location.hash = '#shop';
+      showRoleSwitchModal({
+        title: 'Shopping requires a Buyer account',
+        message: 'Your current account is registered as a <strong>Cultivator</strong>. The shop is available for Buyer accounts only. Create a new Buyer account to start shopping.',
+        targetRole: 'buyer',
+        targetHash: '#shop',
+        icon: '<i class="fa-solid fa-store" style="font-size:2rem;color:#2d6a4f;"></i>',
+        accentColor: '#2d6a4f',
+      });
       return;
     }
 
@@ -565,7 +573,6 @@ function handleRouting(opts = {}) {
       return;
     }
     if (hash === '#training-courses') {
-      // Require authentication for training courses - any authenticated user can access
       if (!state.token || !state.user) {
         if (regSection) regSection.style.display = 'none';
         if (coursesSection) coursesSection.style.display = 'none';
@@ -574,6 +581,23 @@ function handleRouting(opts = {}) {
         if (heroSection) heroSection.classList.remove('hidden');
         traineeAuthModal.open(() => {
           window.location.hash = '#training-courses';
+        });
+        return;
+      }
+      // Block buyers from training — they need a grower/trainee account
+      if (state.user.role === 'buyer') {
+        if (regSection) regSection.style.display = 'none';
+        if (coursesSection) coursesSection.style.display = 'none';
+        if (shopSection) shopSection.style.display = 'block';
+        if (productsSection) productsSection.style.display = 'block';
+        if (heroSection) heroSection.classList.remove('hidden');
+        showRoleSwitchModal({
+          title: 'Training access requires a Cultivator account',
+          message: 'Your current account is registered as a <strong>Buyer</strong>. Training programs are available for Cultivator and Trainee accounts. Create a new Cultivator account to enroll in courses.',
+          targetRole: 'grower',
+          targetHash: '#training-courses',
+          icon: '<i class="fa-solid fa-graduation-cap" style="font-size:2rem;color:#8b5cf6;"></i>',
+          accentColor: '#8b5cf6',
         });
         return;
       }
@@ -1231,22 +1255,46 @@ function updateAuthHeaderUI() {
       ?.addEventListener('click', logout);
 
     // Toggle navigation visibilities
-    navTrack.style.display = 'inline-flex';
-    if (state.user.role === 'admin') {
+    const isBuyer = state.user.role === 'buyer';
+    const isGrower = state.user.role === 'grower' || state.user.role === 'trainee';
+    const isAdmin = state.user.role === 'admin';
+
+    // Training link — buyers should not see it
+    const navTraining = document.getElementById('btn-nav-training');
+    if (navTraining) navTraining.style.display = isBuyer ? 'none' : '';
+    // Also update mobile nav
+    const mobileNavContainer = document.getElementById('mobile-nav-links');
+    if (mobileNavContainer) {
+      const mobileTraining = mobileNavContainer.querySelector('[href="#training-section"]');
+      if (mobileTraining) mobileTraining.style.display = isBuyer ? 'none' : '';
+    }
+
+    // Track order — only for buyers and admins
+    navTrack.style.display = (isBuyer || isAdmin) ? 'inline-flex' : 'none';
+    const navTrackRight = document.getElementById('btn-nav-track-right');
+    if (navTrackRight) navTrackRight.style.display = (isBuyer || isAdmin) ? '' : 'none';
+
+    // Cart — only for buyers
+    const cartTrigger = document.getElementById('btn-open-cart');
+    const mobileCart = document.getElementById('btn-mobile-cart');
+    if (isAdmin) {
+      if (cartTrigger) cartTrigger.style.display = 'none';
+      if (mobileCart) mobileCart.style.display = 'none';
+    } else if (isGrower) {
+      if (cartTrigger) cartTrigger.style.display = 'none';
+      if (mobileCart) mobileCart.style.display = 'none';
+    } else {
+      if (cartTrigger) cartTrigger.style.display = '';
+      if (mobileCart) mobileCart.style.display = '';
+    }
+
+    // Admin console
+    if (isAdmin) {
       navAdmin.style.display = 'inline-flex';
       if (navAdminEntry) navAdminEntry.style.display = 'none';
-      // Hide cart for admins
-      const cartTrigger = document.getElementById('btn-open-cart');
-      if (cartTrigger) cartTrigger.style.display = 'none';
-      const mobileCart = document.getElementById('btn-mobile-cart');
-      if (mobileCart) mobileCart.style.display = 'none';
     } else {
       navAdmin.style.display = 'none';
       if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
-      const cartTrigger = document.getElementById('btn-open-cart');
-      if (cartTrigger) cartTrigger.style.display = '';
-      const mobileCart = document.getElementById('btn-mobile-cart');
-      if (mobileCart) mobileCart.style.display = '';
     }
   } else {
     profileSection.innerHTML = '';
@@ -1396,7 +1444,7 @@ function renderProducts() {
                 ` : ''}
               </div>
               <div class="product-badges-overlay">
-                <span class="tag tag-stock tag-stock-${stockMeta.variant}">${stockMeta.label}</span>
+                <span class="tag tag-stock tag-stock-${stockMeta.variant}" data-prod-id="${prod.id}">${stockMeta.label}</span>
                 <span class="product-gst-badge">${prod.gst_rate}% GST</span>
               </div>
               ${hasMrp ? `
@@ -1420,9 +1468,11 @@ function renderProducts() {
                     ${prod.weight_pricing.map(w => {
         const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
         const isDefault = w === defaultWeight;
+        const ws = w.stock !== undefined ? w.stock : prod.stock;
+        const wStockMeta = ws >= 10 ? 'available' : ws > 0 ? 'limited' : 'out';
         return `
-                        <button type="button" class="weight-chip ${isDefault ? 'active' : ''}" 
-                          data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}" 
+                        <button type="button" class="weight-chip ${isDefault ? 'active' : ''} chip-stock-${wStockMeta}" 
+                          data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}_${ws}" 
                           data-prod-id="${prod.id}">
                           ${label}
                         </button>
@@ -1582,7 +1632,7 @@ function renderProducts() {
       if (activeChip) {
         const parts = activeChip.getAttribute('data-value').split('_');
         if (parts.length >= 4) {
-          weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
+          weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined, stock: parts[4] !== undefined ? parseInt(parts[4], 10) : undefined };
         }
       }
       addToCart(id, weightInfo);
@@ -1609,10 +1659,12 @@ function renderProducts() {
       if (parts.length < 4) return;
       const price = parseFloat(parts[2]);
       const mrp = parts[3] ? parseFloat(parts[3]) : null;
+      const variantStock = parts[4] !== undefined ? parseInt(parts[4], 10) : null;
 
       const priceEl = grid.querySelector(`.product-price[data-prod-id="${prodId}"]`);
       const mrpEl = grid.querySelector(`.product-mrp[data-prod-id="${prodId}"]`);
       const discountEl = grid.querySelector(`.product-discount-badge[data-prod-id="${prodId}"]`);
+      const stockBadgeEl = grid.querySelector(`.tag-stock[data-prod-id="${prodId}"]`);
 
       if (priceEl) priceEl.textContent = _formatCurrency(price);
       if (mrpEl) {
@@ -1632,6 +1684,12 @@ function renderProducts() {
         } else {
           discountEl.style.display = 'none';
         }
+      }
+
+      if (stockBadgeEl && variantStock !== null) {
+        const meta = variantStock >= 10 ? { label: 'Available', variant: 'available' } : variantStock > 0 ? { label: 'Limited Stock', variant: 'limited' } : { label: 'Out of Stock', variant: 'out' };
+        stockBadgeEl.textContent = meta.label;
+        stockBadgeEl.className = `tag tag-stock tag-stock-${meta.variant}`;
       }
     });
   });
@@ -1910,11 +1968,17 @@ function showPremiumProductModal(productId) {
     compliance: product.compliance_info || defaultInfo.compliance,
   };
 
+  const defVS = defVar && defVar.stock !== undefined ? defVar.stock : product.stock;
+  const stockMeta = defVS >= 10 ? { label: 'Available', variant: 'available' } : defVS > 0 ? { label: 'Limited Stock', variant: 'limited' } : { label: 'Out of Stock', variant: 'out' };
+
   const varHTML = varOpts ? `
     <div class="ppm-variants">
       <label class="ppm-section-label">Select Variant</label>
       <div class="ppm-chips" id="ppm-chips">
-        ${varOpts.map((v, i) => `<button class="ppm-chip${i === 0 ? ' active' : ''}" data-idx="${i}" data-w="${v.weight}" data-u="${v.unit}" data-p="${v.price}" data-m="${v.mrp_price || ''}">${v.weight} ${v.unit === 'kg' ? 'kg' : v.unit === 'l' ? 'L' : v.unit === 'ml' ? 'ml' : 'g'}</button>`).join('')}
+        ${varOpts.map((v, i) => {
+    const vs = v.stock !== undefined ? v.stock : product.stock;
+    return `<button class="ppm-chip${i === 0 ? ' active' : ''} ${vs < 10 ? 'chip-stock-limited' : ''}" data-idx="${i}" data-w="${v.weight}" data-u="${v.unit}" data-p="${v.price}" data-m="${v.mrp_price || ''}" data-s="${vs}" ${vs <= 0 ? 'disabled' : ''}>${v.weight} ${v.unit === 'kg' ? 'kg' : v.unit === 'l' ? 'L' : v.unit === 'ml' ? 'ml' : 'g'}</button>`;
+  }).join('')}
       </div>
     </div>` : '';
 
@@ -1935,9 +1999,12 @@ function showPremiumProductModal(productId) {
           <span class="ppm-cat"><i class="fa-solid fa-tag"></i> ${catName}</span>
           ${discount > 0 ? `<span class="ppm-badge" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">${discount}% OFF</span>` : ''}
           <span class="ppm-gst">GST ${product.gst_rate || 0}%</span>
+          <span class="tag tag-stock tag-stock-${stockMeta.variant}" id="ppm-stock-badge">${stockMeta.label}</span>
+          ${product.shelf_life ? `<span class="ppm-shelf-life-badge"><i class="fa-regular fa-clock"></i> ${product.shelf_life}</span>` : ''}
         </div>
 
         <h1 class="ppm-title scroll-reveal" style="transition-delay: 60ms">${product.name}</h1>
+        ${product.scientific_name ? `<div class="ppm-sci-name scroll-reveal" style="transition-delay: 80ms"><i class="fa-solid fa-microscope"></i> <em>${product.scientific_name}</em></div>` : ''}
 
         <div class="ppm-price-row scroll-reveal" style="transition-delay: 120ms">
           <span class="ppm-price" id="ppm-price">₹${curPrice}</span>
@@ -1990,12 +2057,20 @@ function showPremiumProductModal(productId) {
           <div class="ppm-pol"><i class="fa-solid fa-shield-halved"></i><div><strong>Warranty</strong><span>${info.warranty}</span></div></div>
           <div class="ppm-pol"><i class="fa-solid fa-rotate-left"></i><div><strong>Returns</strong><span>${info.returnPolicy}</span></div></div>
           <div class="ppm-pol"><i class="fa-solid fa-truck"></i><div><strong>Shipping</strong><span>${info.shipping}</span></div></div>
+          ${product.manufacturer_supplier ? `<div class="ppm-pol"><i class="fa-solid fa-building"></i><div><strong>Manufactured by</strong><span>${product.manufacturer_supplier}</span></div></div>` : ''}
         </div>
       </div>
     </div>`;
 
   modal.classList.add('active');
   document.body.style.overflow = 'hidden';
+
+  // ── Dynamic SEO: update page title from product data ──
+  if (product.seo_title) {
+    document.title = product.seo_title + ' | Spore Kings';
+  } else {
+    document.title = product.name + ' | Spore Kings';
+  }
 
   // ── Scroll-reveal: observe info children within their scroll container ──
   const ppmInfo = document.querySelector('.ppm-info');
@@ -2073,14 +2148,51 @@ function showPremiumProductModal(productId) {
       }
       const s = document.querySelector('.ppm-save');
       if (s) { s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash'); }
+      // Update stock badge
+      const vs = c.dataset.s !== undefined ? parseInt(c.dataset.s, 10) : null;
+      const badge = document.getElementById('ppm-stock-badge');
+      if (badge && vs !== null) {
+        const meta = vs >= 10 ? { label: 'Available', variant: 'available' } : vs > 0 ? { label: 'Limited Stock', variant: 'limited' } : { label: 'Out of Stock', variant: 'out' };
+        badge.textContent = meta.label;
+        badge.className = `tag tag-stock tag-stock-${meta.variant}`;
+      }
+      // Update add-to-cart button state
+      const addBtn = document.getElementById('ppm-add-cart');
+      const buyBtn = document.getElementById('ppm-buy-now');
+      if (vs !== null && vs <= 0) {
+        if (addBtn) { addBtn.disabled = true; addBtn.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Out of Stock'; }
+        if (buyBtn) buyBtn.style.display = 'none';
+      } else {
+        if (addBtn) { addBtn.disabled = false; addBtn.innerHTML = '<i class="fa-solid fa-bag-shopping"></i> Add to Cart'; }
+        if (buyBtn) buyBtn.style.display = '';
+      }
+      // Reset qty to 1 when switching variant
+      qty = 1;
+      if (qv) qv.textContent = qty;
     });
   });
+
+  // ── Init button stock state ──
+  const initBtn = document.querySelector('.ppm-chip.active');
+  if (initBtn) {
+    const initVS = initBtn.dataset.s !== undefined ? parseInt(initBtn.dataset.s, 10) : null;
+    const addBtn = document.getElementById('ppm-add-cart');
+    const buyBtn = document.getElementById('ppm-buy-now');
+    if (initVS !== null && initVS <= 0) {
+      if (addBtn) { addBtn.disabled = true; addBtn.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Out of Stock'; }
+      if (buyBtn) buyBtn.style.display = 'none';
+    }
+  }
 
   // ── Init quantity ──
   let qty = 1;
   const qv = document.getElementById('ppm-qty-v');
   const popQty = () => { qv.classList.remove('pop'); void qv.offsetWidth; qv.classList.add('pop'); };
-  document.getElementById('ppm-qty-p')?.addEventListener('click', () => { qty = Math.min(qty + 1, 99); qv.textContent = qty; popQty(); });
+  function getActiveStock() {
+    const c = document.querySelector('.ppm-chip.active');
+    return c ? parseInt(c.dataset.s, 10) : 99;
+  }
+  document.getElementById('ppm-qty-p')?.addEventListener('click', () => { qty = Math.min(qty + 1, getActiveStock(), 99); qv.textContent = qty; popQty(); });
   document.getElementById('ppm-qty-m')?.addEventListener('click', () => { qty = Math.max(qty - 1, 1); qv.textContent = qty; popQty(); });
 
   // ── Init accordion ──
@@ -2099,15 +2211,23 @@ function showPremiumProductModal(productId) {
   // ── Init add to cart ──
   document.getElementById('ppm-add-cart')?.addEventListener('click', () => {
     const chip = document.querySelector('.ppm-chip.active');
+    if (!chip) return;
+    const vs = parseInt(chip.dataset.s, 10);
+    if (vs <= 0) return;
+    const addQty = Math.min(qty, vs);
+    if (addQty < qty) showInfoToast(`Only ${vs} unit(s) available. Adding ${addQty} to cart.`);
     let wi = null;
     if (chip) wi = { weight: parseInt(chip.dataset.w, 10), unit: chip.dataset.u, price: parseFloat(chip.dataset.p), mrp_price: chip.dataset.m ? parseFloat(chip.dataset.m) : undefined };
-    for (let i = 0; i < qty; i++) addToCart(product.id, wi);
-    showSuccessToast(`${qty} × ${product.name} added to cart!`);
+    for (let i = 0; i < addQty; i++) addToCart(product.id, wi);
+    showSuccessToast(`${addQty} × ${product.name} added to cart!`);
   });
 
   // ── Init buy now ──
   document.getElementById('ppm-buy-now')?.addEventListener('click', () => {
     const chip = document.querySelector('.ppm-chip.active');
+    if (!chip) return;
+    const vs = parseInt(chip.dataset.s, 10);
+    if (vs <= 0) return;
     let wi = null;
     if (chip) wi = { weight: parseInt(chip.dataset.w, 10), unit: chip.dataset.u, price: parseFloat(chip.dataset.p), mrp_price: chip.dataset.m ? parseFloat(chip.dataset.m) : undefined };
     addToCart(product.id, wi);
@@ -2170,6 +2290,8 @@ function showQuickAddModal(productId) {
   const displayPrice = defaultWeight ? defaultWeight.price : fallbackP;
   const displayMrp = defaultWeight && defaultWeight.mrp_price && defaultWeight.mrp_price > defaultWeight.price
     ? defaultWeight.mrp_price : (product.mrp_price && product.mrp_price > fallbackP ? product.mrp_price : null);
+  const defStockVal = defaultWeight && defaultWeight.stock !== undefined ? defaultWeight.stock : product.stock;
+  const stockMeta = defStockVal >= 10 ? { label: 'Available', variant: 'available' } : defStockVal > 0 ? { label: 'Limited Stock', variant: 'limited' } : { label: 'Out of Stock', variant: 'out' };
 
   let qty = 1;
 
@@ -2183,18 +2305,22 @@ function showQuickAddModal(productId) {
           <span class="quick-add-product-price" id="quick-add-price">₹${displayPrice.toFixed(2)}</span>
           ${displayMrp ? `<span class="quick-add-product-mrp">₹${displayMrp.toFixed(2)}</span>` : ''}
         </div>
+        <div style="margin-top:4px">
+          <span class="tag tag-stock tag-stock-${stockMeta.variant}" id="quick-add-stock-badge">${stockMeta.label}</span>
+        </div>
       </div>
     </div>
     ${hasWeights ? `
       <div class="quick-add-weight">
         <span class="quick-add-weight-label">Select Variant</span>
-        <div class="weight-chips-container">
-          ${product.weight_pricing.map(w => {
+            <div class="weight-chips-container">
+              ${product.weight_pricing.map(w => {
     const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
     const isDefault = w === defaultWeight;
-    return `<button type="button" class="weight-chip ${isDefault ? 'active' : ''}" data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}">${label}</button>`;
+    const ws = w.stock !== undefined ? w.stock : product.stock;
+    return `<button type="button" class="weight-chip ${isDefault ? 'active' : ''} ${ws < 10 ? 'chip-stock-limited' : ''}" data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}_${ws}" ${ws <= 0 ? 'disabled' : ''}>${label}</button>`;
   }).join('')}
-        </div>
+            </div>
       </div>
     ` : ''}
     <div class="quick-add-qty">
@@ -2225,8 +2351,26 @@ function showQuickAddModal(productId) {
         document.getElementById('quick-add-price').textContent = `₹${price.toFixed(2)}`;
         document.getElementById('quick-add-total').textContent = `₹${(price * qty).toFixed(2)}`;
       }
+      // Update stock badge
+      const vs = parts.length >= 5 && parts[4] !== undefined && parts[4] !== '' ? parseInt(parts[4], 10) : null;
+      const badge = document.getElementById('quick-add-stock-badge');
+      if (badge && vs !== null) {
+        const meta = vs >= 10 ? { label: 'Available', variant: 'available' } : vs > 0 ? { label: 'Limited Stock', variant: 'limited' } : { label: 'Out of Stock', variant: 'out' };
+        badge.textContent = meta.label;
+        badge.className = `tag tag-stock tag-stock-${meta.variant}`;
+      }
+      // Reset qty to 1 when switching variant
+      qty = 1;
+      updateQuickAddTotal();
     });
   });
+
+  function getActiveStock() {
+    const c = body.querySelector('.weight-chip.active');
+    if (!c) return 99;
+    const parts = c.getAttribute('data-value').split('_');
+    return parts.length >= 5 && parts[4] !== undefined && parts[4] !== '' ? parseInt(parts[4], 10) : 99;
+  }
 
   // Qty handlers
   document.getElementById('quick-add-qty-minus').addEventListener('click', () => {
@@ -2237,7 +2381,7 @@ function showQuickAddModal(productId) {
   });
 
   document.getElementById('quick-add-qty-plus').addEventListener('click', () => {
-    qty += 1;
+    qty = Math.min(qty + 1, getActiveStock(), 99);
     updateQuickAddTotal();
   });
 
@@ -2269,13 +2413,18 @@ function showQuickAddModal(productId) {
   document.getElementById('quick-add-submit').addEventListener('click', () => {
     const activeChip = body.querySelector('.weight-chip.active');
     let weightInfo = null;
+    let maxStock = 99;
     if (activeChip) {
       const parts = activeChip.getAttribute('data-value').split('_');
       if (parts.length >= 4) {
-        weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
+        const stockVal = parts[4] !== undefined ? parseInt(parts[4], 10) : undefined;
+        weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined, stock: stockVal };
+        if (stockVal !== undefined && !isNaN(stockVal)) maxStock = stockVal;
       }
     }
-    for (let i = 0; i < qty; i++) {
+    const addQty = Math.min(qty, maxStock);
+    if (addQty < qty) showInfoToast(`Only ${maxStock} unit(s) available. Adding ${addQty} to cart.`);
+    for (let i = 0; i < addQty; i++) {
       addToCart(product.id, weightInfo);
     }
     closeQuickAdd();
@@ -2303,7 +2452,34 @@ async function openProductDetails(id) {
 
     const product = await res.json();
 
+    const hasWeights = Array.isArray(product.weight_pricing) && product.weight_pricing.length > 0;
+    const defaultW = hasWeights ? product.weight_pricing[0] : null;
+    const displayPrice = defaultW ? defaultW.price : (product.price || 0);
+
     let metaHTML = '';
+    // Build new-fields inline display
+    let newFieldsHTML = '';
+    if (product.scientific_name || product.shelf_life || product.manufacturer_supplier) {
+      newFieldsHTML = `
+        <div class="growth-stats-table" style="margin-top:12px;">
+          ${product.scientific_name ? `
+          <div class="stat-row">
+            <span class="stat-lbl"><i class="fa-solid fa-microscope"></i> Scientific Name</span>
+            <span class="stat-val"><em>${product.scientific_name}</em></span>
+          </div>` : ''}
+          ${product.shelf_life ? `
+          <div class="stat-row">
+            <span class="stat-lbl"><i class="fa-regular fa-clock"></i> Shelf Life</span>
+            <span class="stat-val">${product.shelf_life}</span>
+          </div>` : ''}
+          ${product.manufacturer_supplier ? `
+          <div class="stat-row">
+            <span class="stat-lbl"><i class="fa-solid fa-building"></i> Manufacturer</span>
+            <span class="stat-val">${product.manufacturer_supplier}</span>
+          </div>` : ''}
+        </div>`;
+    }
+
     if (product.growthMetadata && Object.keys(product.growthMetadata).length) {
       const meta = product.growthMetadata;
       metaHTML = `
@@ -2331,6 +2507,7 @@ async function openProductDetails(id) {
         </div>
       `;
     } else {
+      const defaultStockVal = defaultW && defaultW.stock !== undefined ? defaultW.stock : (product.stock || 0);
       metaHTML = `
         <div class="growth-stats-table">
           <div class="stat-row">
@@ -2339,7 +2516,7 @@ async function openProductDetails(id) {
           </div>
           <div class="stat-row">
             <span class="stat-lbl"><i class="fa-solid fa-circle-check"></i> Stock Status</span>
-            <span class="stat-val">${product.stock > 0 ? 'In Stock' : 'Out of Stock'}</span>
+            <span class="stat-val" id="detail-stock-status">${defaultStockVal > 0 ? (defaultStockVal < 10 ? `Limited (${defaultStockVal} left)` : 'In Stock') : 'Out of Stock'}</span>
           </div>
           <div class="stat-row">
             <span class="stat-lbl"><i class="fa-solid fa-percent"></i> Tax Rate</span>
@@ -2348,10 +2525,6 @@ async function openProductDetails(id) {
         </div>
       `;
     }
-
-    const hasWeights = Array.isArray(product.weight_pricing) && product.weight_pricing.length > 0;
-    const defaultW = hasWeights ? product.weight_pricing[0] : null;
-    const displayPrice = defaultW ? defaultW.price : (product.price || 0);
 
     const displayMrp = defaultW && defaultW.mrp_price && defaultW.mrp_price > defaultW.price ? defaultW.mrp_price : (product.mrp_price && product.price && product.mrp_price > product.price ? product.mrp_price : null);
     const detailImages = (product.image_urls && product.image_urls.length > 0) ? product.image_urls : [product.image_url];
@@ -2385,9 +2558,11 @@ async function openProductDetails(id) {
               ${product.weight_pricing.map((w, wIdx) => {
       const label = w.unit === 'kg' ? `${w.weight} kg` : w.unit === 'l' ? `${w.weight} l` : w.unit === 'ml' ? `${w.weight} ml` : `${w.weight} g`;
       const isDefault = wIdx === 0;
+      const ws = w.stock !== undefined ? w.stock : product.stock;
       return `
-                  <button type="button" class="detail-weight-chip ${isDefault ? 'active' : ''}" 
-                    data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}">
+                  <button type="button" class="detail-weight-chip ${isDefault ? 'active' : ''} ${ws < 10 ? 'chip-stock-limited' : ''}" 
+                    data-value="${w.weight}_${w.unit}_${w.price}_${w.mrp_price || ''}_${ws}"
+                    ${ws <= 0 ? 'disabled' : ''}>
                     ${label}
                   </button>
                 `;
@@ -2403,6 +2578,7 @@ async function openProductDetails(id) {
         <p style="font-size: 0.95rem; color: var(--color-text-muted); line-height: 1.6;">${product.description}</p>
         
         ${metaHTML}
+        ${newFieldsHTML}
 
         <div id="pincode-check-detail" style="margin-top: 1rem;"></div>
 
@@ -2410,7 +2586,7 @@ async function openProductDetails(id) {
           <div style="margin-top: 1rem; padding: 0.75rem; background: var(--color-bg-muted, #f5f5f5); border-radius: 8px; text-align: center; color: var(--color-text-muted);">
             <i class="fa-solid fa-eye"></i> Admin — View Only
           </div>
-        ` : product.stock > 0 ? `
+        ` : (defaultW && defaultW.stock !== undefined ? defaultW.stock : product.stock) > 0 ? `
           <button class="btn btn-primary" id="btn-modal-add" style="margin-top: 1rem;">
             <i class="fa-solid fa-basket-shopping"></i> Add to Basket
           </button>
@@ -2434,9 +2610,11 @@ async function openProductDetails(id) {
         if (parts.length < 4) return;
         const p = parseFloat(parts[2]);
         const m = parts[3] ? parseFloat(parts[3]) : null;
+        const vs = parts[4] !== undefined ? parseInt(parts[4], 10) : null;
         const priceDisplay = document.getElementById('detail-price-display');
         const mrpDisplay = document.getElementById('detail-mrp-display');
         const discountDisplay = document.getElementById('detail-discount-display');
+        const stockStatusEl = document.getElementById('detail-stock-status');
         if (priceDisplay) priceDisplay.textContent = `₹${p.toFixed(2)}`;
         if (mrpDisplay) {
           if (m && m > p) {
@@ -2454,6 +2632,9 @@ async function openProductDetails(id) {
             discountDisplay.style.display = 'none';
           }
         }
+        if (stockStatusEl && vs !== null) {
+          stockStatusEl.textContent = vs > 0 ? (vs < 10 ? `Limited (${vs} left)` : 'In Stock') : 'Out of Stock';
+        }
       });
     });
 
@@ -2463,7 +2644,7 @@ async function openProductDetails(id) {
       if (activeDetailChip) {
         const parts = activeDetailChip.getAttribute('data-value').split('_');
         if (parts.length >= 4) {
-          weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined };
+          weightInfo = { weight: parseInt(parts[0], 10), unit: parts[1], price: parseFloat(parts[2]), mrp_price: parts[3] ? parseFloat(parts[3]) : undefined, stock: parts[4] !== undefined ? parseInt(parts[4], 10) : undefined };
         }
       }
       addToCart(product.id, weightInfo);
@@ -2556,6 +2737,17 @@ function addToCart(productId, weightInfo) {
     showInfoToast('Admins cannot purchase products. Use a buyer account to shop.');
     return;
   }
+  if (state.user && (state.user.role === 'grower' || state.user.role === 'trainee')) {
+    showRoleSwitchModal({
+      title: 'Shopping requires a Buyer account',
+      message: 'Your current account is registered as a <strong>Cultivator</strong>. The shop is available for Buyer accounts only. Create a new Buyer account to start shopping.',
+      targetRole: 'buyer',
+      targetHash: '#shop',
+      icon: '<i class="fa-solid fa-store" style="font-size:2rem;color:#2d6a4f;"></i>',
+      accentColor: '#2d6a4f',
+    });
+    return;
+  }
 
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
@@ -2570,17 +2762,26 @@ function addToCart(productId, weightInfo) {
   const existing = state.cart.find((item) => item._cartId === cartId || (item.id === productId && !weightInfo && !item._cartId));
   let addedItem;
 
-  const productStock = product.stock || 0;
+  // Determine effective stock: variant-level if weightInfo has stock, else top-level
+  let effectiveStock;
+  if (weightInfo && weightInfo.stock !== undefined) {
+    effectiveStock = weightInfo.stock;
+  } else if (weightInfo && product.weight_pricing) {
+    const v = product.weight_pricing.find(w => Number(w.weight) === Number(weightInfo.weight) && w.unit === weightInfo.unit);
+    effectiveStock = (v && v.stock !== undefined) ? v.stock : (product.stock || 0);
+  } else {
+    effectiveStock = product.stock || 0;
+  }
 
   if (existing) {
-    if (productStock > 0 && existing.quantity + 1 > productStock) {
-      showErrorToast(`Only ${productStock} unit(s) of "${product.name}" available.`);
+    if (effectiveStock > 0 && existing.quantity + 1 > effectiveStock) {
+      showErrorToast(`Only ${effectiveStock} unit(s) of "${product.name}${weightLabel ? ` (${weightLabel})` : ''}" available.`);
       return;
     }
     existing.quantity += 1;
     addedItem = existing;
   } else {
-    if (productStock > 0 && 1 > productStock) {
+    if (effectiveStock <= 0) {
       showErrorToast(`"${product.name}" is out of stock.`);
       return;
     }
@@ -2593,7 +2794,7 @@ function addToCart(productId, weightInfo) {
       gst_rate: product.gst_rate,
       quantity: 1,
       weightInfo: weightInfo || null,
-      _stock: productStock,
+      _stock: effectiveStock,
       _reservedAt: Date.now(),
     };
     state.cart.push(newItem);
@@ -3009,8 +3210,16 @@ async function renderTrainingCourses() {
     if (state.user) {
       try {
         const enrollments = await trainingApi.getMyEnrollments();
-        if (Array.isArray(enrollments)) {
-          enrolledIds = new Set(enrollments.map(e => e.training_id));
+        if (enrollments && typeof enrollments === 'object') {
+          const allEnrollments = [
+            ...(enrollments.legacy || []),
+            ...(enrollments.v2 || []),
+          ];
+          enrolledIds = new Set(
+            allEnrollments
+              .map(e => e.training_id || (e.batch && e.batch.training_id))
+              .filter(Boolean)
+          );
         }
       } catch (e) {
         /* non-critical */
@@ -3848,9 +4057,11 @@ async function handleCheckoutInitiation() {
   const warning = document.getElementById('cart-auth-warning');
   if (warning) warning.classList.add('hidden');
 
-  if (state.user && state.user.role === 'grower') {
+  if (state.user && (state.user.role === 'grower' || state.user.role === 'trainee')) {
     if (warning) {
-      warning.textContent = '⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.';
+      warning.textContent = state.user.role === 'grower'
+        ? '⚠️ Cultivator profiles are read-only. Please create a Buyer account to purchase spawn.'
+        : '⚠️ Trainee profiles are read-only. Please create a Buyer account to purchase spawn.';
       warning.classList.remove('hidden');
     }
     return;
@@ -3986,7 +4197,7 @@ function renderCheckoutLoginSection() {
         <div id="co-step-phone">
           <div class="co-input-row">
             <div class="co-country-badge">🇮🇳 +91</div>
-            <input type="tel" id="co-auth-phone" inputmode="numeric" maxlength="16"
+            <input type="tel" id="co-auth-phone" inputmode="numeric" maxlength="15"
               placeholder="10-digit mobile number"
               class="co-phone-input" autocomplete="tel-national" />
           </div>
@@ -4291,7 +4502,7 @@ function renderCheckoutDeliveryForm() {
 
     <div class="input-group">
       <label for="checkout-delivery-phone">Mobile Number</label>
-      <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="16"
+      <input type="tel" id="checkout-delivery-phone" placeholder="Enter phone number" maxlength="15" inputmode="numeric"
         value="${uPhone}" ${lockPhoneAttr} />
       <span class="input-error-msg" id="error-checkout-delivery-phone"></span>
     </div>
@@ -4636,7 +4847,11 @@ async function handlePaymentContinue() {
   for (const cartItem of state.cart) {
     const product = state.products.find(p => p.id === cartItem.id);
     if (product) {
-      const available = product.stock || 0;
+      let available = product.stock || 0;
+      if (cartItem.weightInfo && Array.isArray(product.weight_pricing)) {
+        const v = product.weight_pricing.find(w => Number(w.weight) === Number(cartItem.weightInfo.weight) && w.unit === cartItem.weightInfo.unit);
+        if (v && v.stock !== undefined) available = v.stock;
+      }
       if (available > 0 && cartItem.quantity > available) {
         showErrorToast(`"${cartItem.name}" — only ${available} unit(s) available. Reduce quantity and try again.`);
         if (feedback) { feedback.textContent = `"${cartItem.name}" has only ${available} unit(s) in stock. Please reduce quantity.`; feedback.classList.remove('hidden'); }
@@ -7094,7 +7309,16 @@ async function selfCancelOrder(orderId) {
 window.selfCancelOrder = selfCancelOrder;
 
 /* ── Cancel / Return Window Timer Initialization (Phase 5) ── */
+let _windowTimerIntervals = [];
+
+function clearWindowTimers() {
+  _windowTimerIntervals.forEach(id => clearInterval(id));
+  _windowTimerIntervals = [];
+}
+
 function initWindowTimers() {
+  clearWindowTimers();
+
   document.querySelectorAll('[id^="cancel-window-timer-"]').forEach(el => {
     const expires = el.getAttribute('data-expires');
     if (!expires) return;
@@ -7111,7 +7335,7 @@ function initWindowTimers() {
       el.querySelector('.cancel-window-countdown').textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
     tick();
-    setInterval(tick, 1000);
+    _windowTimerIntervals.push(setInterval(tick, 1000));
   });
 
   document.querySelectorAll('[id^="return-window-timer-"]').forEach(el => {
@@ -7131,7 +7355,7 @@ function initWindowTimers() {
       el.querySelector('.return-window-countdown').textContent = `${days}d ${hours}h ${mins}m`;
     }
     tick();
-    setInterval(tick, 60000);
+    _windowTimerIntervals.push(setInterval(tick, 60000));
   });
 }
 

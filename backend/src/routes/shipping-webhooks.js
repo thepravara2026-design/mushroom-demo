@@ -109,7 +109,7 @@ router.post('/webhooks/:providerKey', async (req, res) => {
       logger.info(`[shipping-webhook] NDR raised for Order ${shipment.order_id}, AWB ${payload.awbCode}`);
 
       try {
-        const { sendSseEvent } = require('../../lib/sse');
+        const { sendSseEvent } = require('../lib/sse');
         sendSseEvent('order:ndr', {
           orderId: shipment.order_id,
           shipmentId: shipment.id,
@@ -187,7 +187,7 @@ router.post('/webhooks/:providerKey', async (req, res) => {
     logger.info(`[shipping-webhook] ${providerKey}: Order ${shipment.order_id} → ${newStatus}`);
 
     try {
-      const { sendSseEvent } = require('../../lib/sse');
+      const { sendSseEvent } = require('../lib/sse');
       sendSseEvent('order:updated', { orderId: shipment.order_id, delivery_status: newStatus });
     } catch (e) { /* ignore */ }
 
