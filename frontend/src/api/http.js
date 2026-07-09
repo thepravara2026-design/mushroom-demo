@@ -1,6 +1,14 @@
 import { state, clearAuth } from '../utils/state.js';
 
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+const _rawBase = import.meta.env.VITE_API_BASE_URL || '';
+// Normalize configured backend base so both of these are accepted:
+//  - https://example.railway.app
+//  - https://example.railway.app/ (with trailing slash)
+//  - https://example.railway.app/api
+// Resulting API_BASE always ends with '/api' (or is '/api' fallback)
+export const API_BASE = (_rawBase && !_rawBase.endsWith('/api'))
+  ? _rawBase.replace(/\/+$/,'') + '/api'
+  : (_rawBase || '/api');
 
 if (import.meta.env.DEV) {
   console.log("VITE_API_BASE_URL =", import.meta.env.VITE_API_BASE_URL);
