@@ -7203,26 +7203,6 @@ button {
   margin-top: 8px;
 }
 
-.auth-admin-caution {
-  font-size: 0.68rem;
-  color: var(--text-soft);
-  text-align: center;
-  margin-top: 16px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.auth-admin-caution a {
-  color: var(--text-soft);
-  text-decoration: none;
-  transition: color var(--transition);
-  font-weight: 500;
-}
-
-.auth-admin-caution a:hover {
-  color: var(--green-dark);
-}
-
 /* Google OAuth Processing State */
 .auth-google-processing {
   display: flex;

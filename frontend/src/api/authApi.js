@@ -97,4 +97,34 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ credential }),
   }),
+
+  // ── 2FA (two-step verification) ─────────────────────────────────────────
+  adminVerify2fa: async (token, method = 'totp') => {
+    return fetchWithAuth('/auth/admin/verify-2fa', {
+      method: 'POST',
+      body: JSON.stringify({ token, method }),
+    });
+  },
+
+  adminGet2faStatus: async () => {
+    return fetchWithAuth('/auth/admin/2fa/status');
+  },
+
+  adminSetup2fa: async () => {
+    return fetchWithAuth('/auth/admin/2fa/setup', { method: 'POST' });
+  },
+
+  adminVerifySetup2fa: async (token) => {
+    return fetchWithAuth('/auth/admin/2fa/verify-setup', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
+
+  adminDisable2fa: async (token) => {
+    return fetchWithAuth('/auth/admin/2fa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
 };

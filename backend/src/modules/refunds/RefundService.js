@@ -1,5 +1,5 @@
 const repo = require("./RefundRepository");
-const { OrderStates, isValidTransition, restockOrderItems, isWithCarrier } = require("../orders/OrderStateService");
+const { OrderStates, isValidTransition, restockOrderItems, isWithCarrier, STATE_DIMENSION_MAP, REFUND_STATES, coherentOrderUpdate } = require("../orders/OrderStateService");
 const { generateRefundIdempotencyKey, initiateRazorpayRefund } = require("../payments/PaymentService");
 const { logRefundAction } = require("./RefundAuditService");
 const { sendWhatsAppMessage } = require("../../services/notificationService");
@@ -145,8 +145,9 @@ async function requestCustomerCancellation(orderId, userId, reason) {
     throw new Error("Unauthorized to cancel this order");
   }
 
-  if (order.status !== "paid" && order.status !== "pending") {
-    throw new Error("Only unpaid or paid orders can be cancelled");
+  const CANCELLABLE_STATUSES = ["paid", "pending", OrderStates.PAYMENT_VERIFIED, OrderStates.ADMIN_PENDING, OrderStates.ORDER_CREATED, OrderStates.CANCELLATION_WINDOW];
+  if (!CANCELLABLE_STATUSES.includes(order.status)) {
+    throw new Error("Order is not in a cancellable state");
   }
 
   if (isWithCarrier(order)) {
@@ -486,9 +487,10 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
       const lockedOrder = await withRowLock(client, "orders", orderId);
       if (!lockedOrder) throw new Error("Order not found");
 
+      const cancelledDims = STATE_DIMENSION_MAP[OrderStates.CANCELLED] || { delivery_status: "cancelled", fulfillment_status: null };
       await client.query(
         `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, refund_status = $4, cancelled_by = $5, cancelled_at = $6, version = version + 1, updated_at = $7 WHERE id = $8 AND version = $9`,
-        [OrderStates.CANCELLED, "cancelled", null, "pending", cancelledByIdentity, new Date().toISOString(), new Date().toISOString(), orderId, lockedOrder.version]
+        [OrderStates.CANCELLED, cancelledDims.delivery_status, cancelledDims.fulfillment_status, "pending", cancelledByIdentity, new Date().toISOString(), new Date().toISOString(), orderId, lockedOrder.version]
       );
 
       refundRecord = await repo.createRefund({
@@ -504,10 +506,11 @@ async function approveCancellation(orderId, adminNote = "", adminUser = null) {
       });
     });
   } else {
+    const cancelledDims = STATE_DIMENSION_MAP[OrderStates.CANCELLED] || { delivery_status: "cancelled", fulfillment_status: null };
     await repo.updateOrder(orderId, {
       status: OrderStates.CANCELLED,
-      delivery_status: "cancelled",
-      fulfillment_status: null,
+      delivery_status: cancelledDims.delivery_status,
+      fulfillment_status: cancelledDims.fulfillment_status,
       refund_status: "pending",
       cancelled_by: cancelledByIdentity,
       cancelled_at: new Date().toISOString()
@@ -560,10 +563,12 @@ async function rejectCancellation(orderId, reason = "", adminUser = null) {
     throw new Error(`Invalid transition from ${order.status} to CANCEL_REJECTED`);
   }
 
-  // Return order back to paid status and processing delivery status
+  // Return order back to paid status with canonical dimensions
+  const dims = STATE_DIMENSION_MAP[OrderStates.PAID] || { delivery_status: "placed", fulfillment_status: null };
   const updatedOrder = await repo.updateOrder(orderId, {
     status: OrderStates.PAID,
-    delivery_status: "processing",
+    delivery_status: dims.delivery_status,
+    fulfillment_status: dims.fulfillment_status,
     cancel_reason: null
   });
 
@@ -585,6 +590,7 @@ async function rejectCancellation(orderId, reason = "", adminUser = null) {
  */
 const TERMINAL_STATES = new Set([
   OrderStates.COMPLETED, OrderStates.REFUND_COMPLETED, OrderStates.CANCELLED,
+  OrderStates.SELF_CANCELLED, OrderStates.ADMIN_REJECTED,
   "cancelled", "delivered",
 ]);
 
@@ -596,11 +602,12 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
     throw new Error("Order cannot be cancelled after it has been handed to the carrier. Use RTO flow instead.");
   }
 
-  if (TERMINAL_STATES.has(order.status) || order.delivery_status === "delivered") {
+  if (TERMINAL_STATES.has(order.status) || order.delivery_status === "delivered" || order.fulfillment_status === "delivered") {
     throw new Error("Cannot cancel an order that is already completed, delivered, or cancelled.");
   }
 
-  const isPaid = order.status === OrderStates.PAID && order.razorpay_payment_id;
+  const PAID_STATUSES = [OrderStates.PAID, OrderStates.PAYMENT_VERIFIED, "paid"];
+  const isPaid = PAID_STATUSES.includes(order.status) && order.razorpay_payment_id;
   const auditPerformer = adminUser || "ADMIN";
 
   if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
@@ -608,18 +615,20 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
       const lockedOrder = await withRowLock(client, "orders", orderId);
       if (!lockedOrder) throw new Error("Order not found");
 
+      const cancelledDims = STATE_DIMENSION_MAP[OrderStates.CANCELLED] || { delivery_status: "cancelled", fulfillment_status: null };
       await client.query(
         `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, cancel_reason = $4, cancelled_by = $5, cancelled_at = $6, refund_status = $7, version = version + 1, updated_at = $8 WHERE id = $9 AND version = $10`,
-        [OrderStates.CANCELLED, "cancelled", null, reason, "admin", new Date().toISOString(), isPaid ? "pending" : "none", new Date().toISOString(), orderId, lockedOrder.version]
+        [OrderStates.CANCELLED, cancelledDims.delivery_status, cancelledDims.fulfillment_status, reason, "admin", new Date().toISOString(), isPaid ? "pending" : "none", new Date().toISOString(), orderId, lockedOrder.version]
       );
 
       await cancelCarrierShipment(orderId, reason);
     });
   } else {
+    const cancelledDims = STATE_DIMENSION_MAP[OrderStates.CANCELLED] || { delivery_status: "cancelled", fulfillment_status: null };
     await repo.updateOrder(orderId, {
       status: OrderStates.CANCELLED,
-      delivery_status: "cancelled",
-      fulfillment_status: null,
+      delivery_status: cancelledDims.delivery_status,
+      fulfillment_status: cancelledDims.fulfillment_status,
       cancel_reason: reason,
       cancelled_by: "admin",
       cancelled_at: new Date().toISOString(),
@@ -643,33 +652,40 @@ async function adminDirectCancellation(orderId, reason, adminNote = "", adminUse
   let refundRecord = null;
   if (isPaid) {
     try {
-      const refundResult = await executeRefundProcess(order, order.total, "admin", reason, adminNote, auditPerformer);
+      const refundResult = await executeRefundProcess(cancelledOrder, cancelledOrder.total, "admin", reason, adminNote, auditPerformer);
       refundRecord = refundResult.refund;
     } catch (refundErr) {
       logger.error(`[RefundService] Auto-refund failed for admin-cancelled order ${order.id}: ${refundErr.message}`);
-      refundRecord = await repo.createRefund({
-        order_id: order.id,
-        user_id: order.user_id,
-        razorpay_payment_id: order.razorpay_payment_id || null,
-        razorpay_refund_id: null,
-        amount: order.total,
-        refund_reason: reason,
-        status: "pending",
-        cancelled_by: "admin",
-        admin_note: adminNote
-      });
+      // Avoid duplicate refund record — check if executeRefundProcess already created one
+      const existingRefunds = await repo.findRefundsByOrderId(cancelledOrder.id);
+      if (existingRefunds && existingRefunds.length > 0) {
+        refundRecord = existingRefunds[0];
+        logger.info(`[RefundService] Using existing refund record ${refundRecord.id} for order ${cancelledOrder.id}`);
+      } else {
+        refundRecord = await repo.createRefund({
+          order_id: cancelledOrder.id,
+          user_id: cancelledOrder.user_id,
+          razorpay_payment_id: cancelledOrder.razorpay_payment_id || null,
+          razorpay_refund_id: null,
+          amount: cancelledOrder.total,
+          refund_reason: reason,
+          status: "pending",
+          cancelled_by: "admin",
+          admin_note: adminNote
+        });
+      }
       await logRefundAction({
-        orderId: order.id,
+        orderId: cancelledOrder.id,
         action: "MANUAL_REFUND_PENDING",
         performedBy: auditPerformer,
-        metadata: { refundRecordId: refundRecord.id, reason, amount: order.total }
+        metadata: { refundRecordId: refundRecord.id, reason, amount: cancelledOrder.total }
       });
     }
-  } else if (order.items && order.items.length > 0) {
+  } else if (cancelledOrder.items && cancelledOrder.items.length > 0) {
     try {
-      await restockOrderItems(order);
+      await restockOrderItems(cancelledOrder);
     } catch (restockErr) {
-      logger.warn(`[RefundService] Restock failed for cancelled order ${order.id}: ${restockErr.message}`);
+      logger.warn(`[RefundService] Restock failed for cancelled order ${cancelledOrder.id}: ${restockErr.message}`);
     }
   }
 
@@ -782,10 +798,12 @@ async function runAutoRefundSweep() {
           // Notify customer
           await sendRefundNotification(order, "TECHNICAL_RECOVERY", { amount: order.total });
 
-          // Cancel the order first
+          // Cancel the order first — use CANCELLED (canonical status)
+          const canDims = STATE_DIMENSION_MAP[OrderStates.CANCELLED] || { delivery_status: "cancelled", fulfillment_status: null };
           await repo.updateOrder(order.id, {
-            status: OrderStates.CANCEL_APPROVED,
-            delivery_status: "cancelled",
+            status: OrderStates.CANCELLED,
+            delivery_status: canDims.delivery_status,
+            fulfillment_status: canDims.fulfillment_status,
             cancel_reason: "Technical checkout recovery - orphaned payment",
             cancelled_by: "system",
             cancelled_at: new Date().toISOString()

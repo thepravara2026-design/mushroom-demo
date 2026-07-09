@@ -50,10 +50,10 @@ const V3_STATE_MACHINE = {
     transitions: [OrderStatus.PAYMENT_VERIFIED, OrderStatus.FAILED],
   },
   [OrderStatus.PAYMENT_VERIFIED]: {
-    transitions: [OrderStatus.ADMIN_PENDING],
+    transitions: [OrderStatus.ADMIN_PENDING, OrderStates.CANCEL_REQUESTED],
   },
   [OrderStatus.ADMIN_PENDING]: {
-    transitions: [OrderStatus.APPROVED, OrderStatus.ADMIN_REJECTED],
+    transitions: [OrderStatus.APPROVED, OrderStatus.ADMIN_REJECTED, OrderStates.CANCEL_REQUESTED],
   },
   [OrderStatus.ADMIN_REJECTED]: {
     transitions: [OrderStatus.REFUND_PENDING],
@@ -69,6 +69,9 @@ const V3_STATE_MACHINE = {
     transitions: [OrderStatus.READY_TO_SHIP, OrderStatus.SHIPMENT_FAILED],
   },
   [OrderStatus.READY_TO_SHIP]: {
+    transitions: [OrderStatus.PENDING_DISPATCH, OrderStatus.SHIPMENT_FAILED],
+  },
+  [OrderStatus.PENDING_DISPATCH]: {
     transitions: [OrderStatus.WITH_CARRIER, OrderStatus.SHIPMENT_FAILED],
   },
   [OrderStatus.SHIPMENT_FAILED]: {
@@ -176,15 +179,19 @@ function getStateMachine() {
 function isValidTransition(currentStatus, nextStatus) {
   if (currentStatus === nextStatus) return true;
 
-  if (FEATURE_FLAGS.ENABLE_NEW_STATE_MACHINE) {
-    const node = V3_STATE_MACHINE[currentStatus];
-    if (!node) return false;
-    return node.transitions.includes(nextStatus);
-  }
+  // Try the primary machine first; fall back to the other machine if the
+  // status doesn't exist in the primary one.  This lets callers mix v3 and
+  // legacy states regardless of ENABLE_NEW_STATE_MACHINE.
+  const primary = FEATURE_FLAGS.ENABLE_NEW_STATE_MACHINE ? V3_STATE_MACHINE : LEGACY_VALID_TRANSITIONS;
+  const fallback = FEATURE_FLAGS.ENABLE_NEW_STATE_MACHINE ? LEGACY_VALID_TRANSITIONS : V3_STATE_MACHINE;
 
-  const allowed = LEGACY_VALID_TRANSITIONS[currentStatus];
-  if (!allowed) return false;
-  return allowed.includes(nextStatus);
+  let node = primary[currentStatus];
+  if (!node) node = fallback[currentStatus];
+  if (!node) return false;
+
+  // node.transitions could be an array (v3 node) or an array (legacy map value)
+  const transitions = Array.isArray(node) ? node : (node.transitions || []);
+  return transitions.includes(nextStatus);
 }
 
 // ── Atomic State Transition (optimistic locking + optional transaction) ────
@@ -257,14 +264,11 @@ async function selfCancel(orderId, userId) {
     throw new Error("Order has been handed to carrier and cannot be self-cancelled");
   }
 
-  await atomicStateTransition(orderId, order.version, {
+  await coherentOrderUpdate(orderId, order.version, {
     status: OrderStatus.SELF_CANCELLED,
-    delivery_status: "cancelled",
-    fulfillment_status: null,
     cancel_reason: "Self-cancelled within window",
     cancelled_by: "customer",
     cancelled_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   });
 
   let refundFailed = false;
@@ -302,13 +306,11 @@ async function adminReject(orderId, reason, adminUser = null) {
     throw new Error("Order has been handed to carrier and cannot be rejected");
   }
 
-  await atomicStateTransition(orderId, order.version, {
+  await coherentOrderUpdate(orderId, order.version, {
     status: OrderStatus.ADMIN_REJECTED,
-    delivery_status: "rejected",
     rejection_reason: reason.trim(),
     cancelled_by: "admin",
     cancelled_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   });
 
   let refundFailed = false;
@@ -345,11 +347,9 @@ async function adminApprove(orderId) {
     throw new Error(`Order cannot be approved in status: ${order.status}`);
   }
 
-  await atomicStateTransition(orderId, order.version, {
+  await coherentOrderUpdate(orderId, order.version, {
     status: OrderStatus.APPROVED,
-    fulfillment_status: "pending_fulfillment",
     admin_approval_status: "approved",
-    updated_at: new Date().toISOString(),
   });
 
   const freshOrder = await atomicOrderFetch(orderId);
@@ -362,10 +362,11 @@ async function startReturnWindow(orderId) {
   if (order.return_window_expires) return { success: true, message: "Return window already set" };
 
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  await atomicStateTransition(orderId, order.version, {
+  // Use order.version for optimistic locking if available
+  const version = order.version;
+  await coherentOrderUpdate(orderId, version, {
     return_window_expires: expires,
     status: OrderStatus.RETURN_WINDOW,
-    updated_at: new Date().toISOString(),
   });
   return { success: true, returnWindowExpires: expires };
 }
@@ -403,18 +404,21 @@ async function closeExpiredWindows() {
 
   const ids = expired.map(o => o.id);
 
+  const dims = STATE_DIMENSION_MAP[OrderStatus.WINDOW_CLOSED];
   if (FEATURE_FLAGS.ENABLE_TRANSACTIONS) {
     await withTransaction(async (client) => {
       const locked = await withRowLocks(client, "orders", ids);
       if (locked.length === 0) return;
       await client.query(
-        `UPDATE orders SET status = $1, updated_at = $2 WHERE id = ANY($3::text[])`,
-        [OrderStatus.WINDOW_CLOSED, new Date().toISOString(), ids]
+        `UPDATE orders SET status = $1, delivery_status = $2, fulfillment_status = $3, updated_at = $4 WHERE id = ANY($5::text[])`,
+        [OrderStatus.WINDOW_CLOSED, dims.delivery_status, dims.fulfillment_status, new Date().toISOString(), ids]
       );
     });
   } else {
     await db.from("orders").update({
       status: OrderStatus.WINDOW_CLOSED,
+      delivery_status: dims.delivery_status,
+      fulfillment_status: dims.fulfillment_status,
       updated_at: new Date().toISOString(),
     }).in("id", ids);
   }
@@ -428,13 +432,27 @@ async function closeExpiredWindows() {
 const NON_CANCELLABLE_FULFILLMENT = ['with_carrier', 'delivered'];
 
 function isWithCarrier(order) {
+  if (!order) return false;
+  // Primary: check status (source of truth)
+  if (NON_CANCELLABLE_STATUSES.has(order.status)) return true;
+  // Legacy fallback for orders still using the old dimension-only approach
   if (NON_CANCELLABLE_FULFILLMENT.includes(order.fulfillment_status)) return true;
   if (["shipped", "in_transit", "delivered", "with_carrier", "out_for_delivery", "ndr"].includes(order.delivery_status)) return true;
   return false;
 }
 
+/**
+ * Determine if an order was paid (stock was deducted, not just reserved).
+ */
+function wasOrderPaid(order) {
+  if (!order) return false;
+  const PAID_STATUSES = new Set(["paid", OrderStates.PAID, OrderStates.PAYMENT_VERIFIED, OrderStates.APPROVED]);
+  return !!(order.razorpay_payment_id && PAID_STATUSES.has(order.status));
+}
+
 async function restockOrderItems(order) {
   if (!order || !Array.isArray(order.items)) return;
+  const wasPaid = wasOrderPaid(order);
 
   if (order.restocked) {
     logger.info(`[OrderStateService] Order ${order.id} already restocked (in-memory) — skipping.`);
@@ -448,21 +466,23 @@ async function restockOrderItems(order) {
     }
   } catch (_) { }
 
-  logger.info(`[OrderStateService] Restocking items for order ${order.id}`);
+  logger.info(`[OrderStateService} Restocking items for order ${order.id} (wasPaid=${wasPaid})`);
 
   async function restockItem(productId, qty, weight, unit) {
     if (!productId || qty <= 0) return;
     if (weight !== undefined && weight !== null && unit) {
-      // Restore variant-level stock
       const { data: product } = await db.from("products").select("weight_pricing, version").eq("id", productId).single();
       if (product && Array.isArray(product.weight_pricing)) {
         const variant = product.weight_pricing.find(
-          v => Number(v.weight) === Number(weight) && v.unit === unit && v.stock !== undefined
+          v => Number(v.weight) === Number(weight) && v.unit === unit
         );
         if (variant) {
           const updatedWp = product.weight_pricing.map(v => {
-            if (Number(v.weight) === Number(weight) && v.unit === unit && v.stock !== undefined) {
-              return { ...v, stock: (v.stock || 0) + qty };
+            if (Number(v.weight) === Number(weight) && v.unit === unit) {
+              const update = { ...v };
+              if (wasPaid && v.stock !== undefined) update.stock = (v.stock || 0) + qty;
+              if (v.reserved_quantity !== undefined) update.reserved_quantity = Math.max(0, (v.reserved_quantity || 0) - qty);
+              return update;
             }
             return v;
           });
@@ -475,11 +495,12 @@ async function restockOrderItems(order) {
         }
       }
     }
-    // Fallback to top-level stock restoration
-    const { data: product } = await db.from("products").select("stock").eq("id", productId).single();
+    // Top-level stock
+    const { data: product } = await db.from("products").select("stock, reserved_quantity").eq("id", productId).single();
     if (!product) { logger.warn(`[OrderStateService] Product ${productId} not found during restocking.`); return; }
-    const currentStock = product.stock || 0;
-    await db.from("products").update({ stock: currentStock + qty }).eq("id", productId);
+    const updateFields = { reserved_quantity: Math.max(0, (product.reserved_quantity || 0) - qty) };
+    if (wasPaid) updateFields.stock = (product.stock || 0) + qty;
+    await db.from("products").update(updateFields).eq("id", productId);
   }
 
   if (FEATURE_FLAGS.ENABLE_TRANSACTIONS && !FEATURE_FLAGS.INVENTORY_SERVICE) {
@@ -502,15 +523,17 @@ async function restockOrderItems(order) {
 
         if (item.weight !== undefined && item.weight !== null && item.unit && Array.isArray(product.weight_pricing)) {
           const variantIdx = product.weight_pricing.findIndex(
-            v => Number(v.weight) === Number(item.weight) && v.unit === item.unit && v.stock !== undefined
+            v => Number(v.weight) === Number(item.weight) && v.unit === item.unit
           );
           if (variantIdx !== -1) {
+            // Release reserved_quantity; only restore stock if was paid
+            const stockExpr = wasPaid ? `jsonb_set(elem, '{stock}', to_jsonb(COALESCE((elem->>'stock')::int, 0) + $2))` : 'elem';
             await client.query(
               `UPDATE products SET weight_pricing = (
                 SELECT jsonb_agg(
                   CASE
-                    WHEN (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5 AND elem ? 'stock'
-                    THEN jsonb_set(elem, '{stock}', to_jsonb(COALESCE((elem->>'stock')::int, 0) + $2))
+                    WHEN (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5
+                    THEN jsonb_set(${stockExpr}, '{reserved_quantity}', to_jsonb(GREATEST(0, COALESCE((elem->>'reserved_quantity')::int, 0) - $2)))
                     ELSE elem
                   END
                 )
@@ -523,8 +546,10 @@ async function restockOrderItems(order) {
             continue;
           }
         }
-        const newStock = (product.stock || 0) + qty;
-        await optimisticUpdate(client, "products", item.productId, { stock: newStock }, product.version);
+        const newReserved = Math.max(0, (product.reserved_quantity || 0) - qty);
+        const updates = { reserved_quantity: newReserved };
+        if (wasPaid) updates.stock = (product.stock || 0) + qty;
+        await optimisticUpdate(client, "products", item.productId, updates, product.version);
       }
 
       await optimisticUpdate(client, "orders", order.id,
@@ -570,6 +595,8 @@ async function restockOrderItems(order) {
   }
 }
 
+
+
 function resolveState(order) {
   if (!order) return "unknown";
   const { status, delivery_status, admin_approval_status, fulfillment_status } = order;
@@ -583,10 +610,22 @@ function resolveState(order) {
   if (status === OrderStatus.ADMIN_REJECTED) return "Admin Rejected";
   if (status === OrderStatus.APPROVED) return "Approved";
   if (status === OrderStatus.PACKING) return "Packing";
+  if (status === OrderStatus.PACKED) return "Packed";
+  if (status === OrderStatus.READY_TO_SHIP) return "Ready to Ship";
+  if (status === OrderStatus.PENDING_DISPATCH) return "Pending Dispatch";
+  if (status === OrderStatus.SHIPMENT_FAILED) return "Shipment Failed";
+  if (status === OrderStatus.WITH_CARRIER) return "With Carrier";
+  if (status === OrderStatus.OUT_FOR_DELIVERY) return "Out for Delivery";
+  if (status === OrderStatus.NDR) return "Non-Delivery Report";
+  if (status === OrderStatus.RTO) return "Return to Origin";
+  if (status === OrderStatus.DELIVERED) return "Delivered";
   if (status === OrderStatus.RETURN_WINDOW) return "Return Window";
   if (status === OrderStatus.RETURN_REQUESTED) return "Return Requested";
   if (status === OrderStatus.RETURN_APPROVED) return "Return Approved";
   if (status === OrderStatus.RETURN_REJECTED) return "Return Rejected";
+  if (status === OrderStatus.RETURN_PICKUP) return "Return Pickup";
+  if (status === OrderStatus.RETURN_RECEIVED) return "Return Received";
+  if (status === OrderStatus.QUALITY_CHECK) return "Quality Check";
   if (status === OrderStatus.COMPLETED) return "Completed";
 
   if (status === "CANCEL_REQUESTED") return "Cancellation Requested";
@@ -636,7 +675,8 @@ function assertCancellable(order) {
   if (!order) throw new Error("Order not found");
   const { delivery_status, status, fulfillment_status } = order;
   if (isWithCarrier(order)) throw new Error("Order cannot be cancelled after it has been handed to the carrier.");
-  if (["cancelled", "REFUND_COMPLETED", "REFUND_FAILED"].includes(status)) throw new Error("Order is already cancelled or has a completed refund.");
+  const TERMINAL_STATES = new Set(["cancelled", OrderStatus.SELF_CANCELLED, OrderStatus.ADMIN_REJECTED, OrderStatus.COMPLETED, OrderStatus.RETURN_REJECTED, "REFUND_COMPLETED", "REFUND_FAILED"]);
+  if (TERMINAL_STATES.has(status)) throw new Error("Order is already cancelled or has a completed refund.");
   return true;
 }
 
@@ -655,10 +695,245 @@ async function setCancelWindow(orderId, minutes = 30) {
   return expires;
 }
 
+async function buildTrackingData(order, trackDb) {
+  const { data: shipment } = await trackDb
+    .from("shipments")
+    .select("*, shipping_provider_id")
+    .eq("order_id", order.id)
+    .single();
+
+  let events = [];
+  const timeline = [
+    {
+      status: "placed",
+      label: "Order Placed",
+      done: true,
+      time: order.created_at,
+    },
+  ];
+
+  if (shipment) {
+    const { data: trackingEvents } = await trackDb
+      .from("shipment_tracking_events")
+      .select("*")
+      .eq("shipment_id", shipment.id)
+      .order("occurred_at", { ascending: true });
+    events = trackingEvents || [];
+
+    for (const ev of events) {
+      timeline.push({
+        status: ev.status,
+        label: ev.description || ev.status,
+        done: true,
+        time: ev.occurred_at,
+        location: ev.location,
+      });
+    }
+  }
+
+  return { shipment, events, timeline };
+}
+
+// ── State Dimension Synchronization ──────────────────────────────────────
+// Maps every status to its canonical delivery_status and fulfillment_status.
+// This is the SINGLE SOURCE OF TRUTH for all three dimensions.
+
+const STATE_DIMENSION_MAP = {
+  // v3 states
+  [OrderStatus.ORDER_CREATED]:      { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStatus.CANCELLATION_WINDOW]: { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStatus.SELF_CANCELLED]:     { delivery_status: "cancelled",   fulfillment_status: null },
+  [OrderStatus.WINDOW_CLOSED]:      { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStatus.PAYMENT_VERIFIED]:   { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStatus.ADMIN_PENDING]:      { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStatus.ADMIN_REJECTED]:     { delivery_status: "rejected",    fulfillment_status: null },
+  [OrderStatus.APPROVED]:           { delivery_status: "placed",      fulfillment_status: "pending_fulfillment" },
+  [OrderStatus.PACKING]:            { delivery_status: "processing",  fulfillment_status: "packing_required" },
+  [OrderStatus.PACKED]:             { delivery_status: "processing",  fulfillment_status: "packed" },
+  [OrderStatus.READY_TO_SHIP]:      { delivery_status: "processing",  fulfillment_status: "ready_to_ship" },
+  [OrderStatus.PENDING_DISPATCH]:   { delivery_status: "processing",  fulfillment_status: "pending_dispatch" },
+  [OrderStatus.SHIPMENT_FAILED]:    { delivery_status: "failed",      fulfillment_status: null },
+  [OrderStatus.WITH_CARRIER]:       { delivery_status: "shipped",     fulfillment_status: "with_carrier" },
+  [OrderStatus.OUT_FOR_DELIVERY]:   { delivery_status: "out_for_delivery", fulfillment_status: "with_carrier" },
+  [OrderStatus.NDR]:                { delivery_status: "ndr",         fulfillment_status: "with_carrier" },
+  [OrderStatus.RTO]:                { delivery_status: "cancelled",   fulfillment_status: null },
+  [OrderStatus.DELIVERED]:          { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.RETURN_WINDOW]:      { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.RETURN_REQUESTED]:   { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.RETURN_APPROVED]:    { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.RETURN_PICKUP]:      { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.RETURN_RECEIVED]:    { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.QUALITY_CHECK]:      { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.RETURN_REJECTED]:    { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.COMPLETED]:          { delivery_status: "delivered",   fulfillment_status: "delivered" },
+  [OrderStatus.FAILED]:             { delivery_status: "placed",      fulfillment_status: null },
+
+  // Legacy states
+  [OrderStates.PENDING]:            { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStates.PAID]:               { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStates.CANCEL_REQUESTED]:   { delivery_status: "placed",      fulfillment_status: null },
+  [OrderStates.CANCEL_REJECTED]:    { delivery_status: "processing",  fulfillment_status: null },
+  [OrderStates.CANCELLED]:          { delivery_status: "cancelled",   fulfillment_status: null },
+};
+
+// Reverse map: fulfillment_status → canonical status + delivery_status
+const FULFILLMENT_STATUS_MAP = {
+  "pending_fulfillment":  { status: OrderStatus.APPROVED,       delivery_status: "placed" },
+  "packing_required":     { status: OrderStatus.PACKING,        delivery_status: "processing" },
+  "packed":               { status: OrderStatus.PACKED,         delivery_status: "processing" },
+  "ready_to_ship":        { status: OrderStatus.READY_TO_SHIP,     delivery_status: "processing" },
+  "pending_dispatch":     { status: OrderStatus.PENDING_DISPATCH, delivery_status: "processing" },
+  "with_carrier":         { status: OrderStatus.WITH_CARRIER,     delivery_status: "shipped" },
+  "delivered":            { status: OrderStatus.DELIVERED,      delivery_status: "delivered" },
+};
+
+// Webhook shipment status → v3 order status
+const WEBHOOK_STATUS_MAP = {
+  "shipped":          OrderStatus.WITH_CARRIER,
+  "in_transit":       OrderStatus.WITH_CARRIER,
+  "out_for_delivery": OrderStatus.OUT_FOR_DELIVERY,
+  "delivered":        OrderStatus.DELIVERED,
+  "cancelled":        OrderStatus.RTO,
+  "returned":         OrderStatus.RTO,
+  "ndr":              OrderStatus.NDR,
+};
+
+const REFUND_STATES = new Set([
+  OrderStatus.REFUND_PENDING, OrderStatus.REFUND_INITIATED,
+  OrderStatus.REFUND_PROCESSING, OrderStatus.REFUND_COMPLETED, OrderStatus.REFUND_FAILED,
+  OrderStates.REFUND_PENDING, OrderStates.REFUND_INITIATED,
+  OrderStates.REFUND_PROCESSING, OrderStates.REFUND_COMPLETED, OrderStates.REFUND_FAILED,
+]);
+
+const NON_CANCELLABLE_STATUSES = new Set([
+  OrderStatus.PENDING_DISPATCH, OrderStatus.WITH_CARRIER, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.NDR,
+  OrderStatus.DELIVERED, OrderStatus.RETURN_WINDOW, OrderStatus.RETURN_REQUESTED,
+  OrderStatus.RETURN_APPROVED, OrderStatus.RETURN_PICKUP, OrderStatus.RETURN_RECEIVED,
+  OrderStatus.QUALITY_CHECK, OrderStatus.RETURN_REJECTED, OrderStatus.COMPLETED,
+]);
+
+/**
+ * Atomically updates order state with all three dimensions synchronized.
+ * - When `status` is set, fills in canonical `delivery_status` and `fulfillment_status`
+ * - When only `fulfillment_status` is set, derives canonical `status` and `delivery_status`
+ * - For refund states, preserves existing dimension values
+ */
+async function coherentOrderUpdate(orderId, expectedVersion, updates) {
+  const newStatus = updates.status;
+
+  if (newStatus && REFUND_STATES.has(newStatus)) {
+    const current = await atomicOrderFetch(orderId);
+    if (current) {
+      if (updates.delivery_status === undefined) updates.delivery_status = current.delivery_status;
+      if (updates.fulfillment_status === undefined) updates.fulfillment_status = current.fulfillment_status;
+    }
+  } else if (updates.fulfillment_status && !newStatus) {
+    const mapped = FULFILLMENT_STATUS_MAP[updates.fulfillment_status];
+    if (mapped) {
+      updates.status = mapped.status;
+      if (updates.delivery_status === undefined) updates.delivery_status = mapped.delivery_status;
+    }
+  } else if (newStatus) {
+    const dims = STATE_DIMENSION_MAP[newStatus];
+    if (dims) {
+      if (updates.delivery_status === undefined) updates.delivery_status = dims.delivery_status;
+      if (updates.fulfillment_status === undefined) updates.fulfillment_status = dims.fulfillment_status;
+    }
+  }
+
+  updates.updated_at = new Date().toISOString();
+  await atomicStateTransition(orderId, expectedVersion, updates);
+}
+
+/**
+ * Read-time reconciliation: given an order object, return its canonical state dimensions.
+ * `status` is the source of truth; delivery_status and fulfillment_status are advisory.
+ */
+function reconcileDimensions(order) {
+  if (!order) return { status: null, delivery_status: null, fulfillment_status: null };
+  const canonical = STATE_DIMENSION_MAP[order.status];
+  if (canonical) {
+    return { status: order.status, delivery_status: canonical.delivery_status, fulfillment_status: canonical.fulfillment_status };
+  }
+  // Refund states — preserve DB values
+  if (REFUND_STATES.has(order.status)) {
+    return { status: order.status, delivery_status: order.delivery_status, fulfillment_status: order.fulfillment_status };
+  }
+  // Unknown state — return as-is
+  return { status: order.status, delivery_status: order.delivery_status, fulfillment_status: order.fulfillment_status };
+}
+
+// ── Missing Transition Cron Jobs ─────────────────────────────────────────
+
+/**
+ * Transition REFUND_COMPLETED orders to COMPLETED.
+ * Preserves existing delivery/fulfillment dimensions (e.g., cancelled/refunded
+ * orders keep "cancelled" delivery_status rather than "delivered").
+ */
+async function completeRefundedOrders() {
+  const { data: orders } = await db
+    .from("orders")
+    .select("id, status, delivery_status, fulfillment_status, version")
+    .in("status", [OrderStatus.REFUND_COMPLETED, OrderStates.REFUND_COMPLETED]);
+
+  if (!orders || orders.length === 0) return { completed: 0 };
+
+  let count = 0;
+  for (const order of orders) {
+    try {
+      // Preserve dimensions — don't overwrite with COMPLETED canonical values
+      await atomicStateTransition(order.id, order.version, {
+        status: OrderStatus.COMPLETED,
+        updated_at: new Date().toISOString(),
+      });
+      count++;
+    } catch (err) {
+      logger.warn(`[OrderStateService] Failed to complete refunded order ${order.id}: ${err.message}`);
+    }
+  }
+
+  logger.info(`[OrderStateService] Completed ${count} refunded orders`);
+  return { completed: count };
+}
+
+/**
+ * Transition expired RETURN_WINDOW orders to COMPLETED.
+ * Uses canonical dimensions for delivered orders.
+ */
+async function closeCompletedWindows() {
+  const { data: orders } = await db
+    .from("orders")
+    .select("id, version")
+    .eq("status", OrderStatus.RETURN_WINDOW)
+    .lt("return_window_expires", new Date().toISOString());
+
+  if (!orders || orders.length === 0) return { closed: 0 };
+
+  const dims = STATE_DIMENSION_MAP[OrderStatus.COMPLETED] || { delivery_status: "delivered", fulfillment_status: "delivered" };
+  let count = 0;
+  for (const order of orders) {
+    try {
+      await atomicStateTransition(order.id, order.version, {
+        status: OrderStatus.COMPLETED,
+        delivery_status: dims.delivery_status,
+        fulfillment_status: dims.fulfillment_status,
+        updated_at: new Date().toISOString(),
+      });
+      count++;
+    } catch (err) {
+      logger.warn(`[OrderStateService] Failed to close window for order ${order.id}: ${err.message}`);
+    }
+  }
+
+  logger.info(`[OrderStateService] Closed ${count} expired return windows`);
+  return { closed: count };
+}
+
 module.exports = {
   OrderStates,
   isValidTransition,
   getStateMachine,
+  wasOrderPaid,
   restockOrderItems,
   resolveState,
   assertForwardOnly,
@@ -674,4 +949,14 @@ module.exports = {
   closeExpiredWindows,
   atomicStateTransition,
   atomicOrderFetch,
+  buildTrackingData,
+  coherentOrderUpdate,
+  reconcileDimensions,
+  completeRefundedOrders,
+  closeCompletedWindows,
+  STATE_DIMENSION_MAP,
+  FULFILLMENT_STATUS_MAP,
+  WEBHOOK_STATUS_MAP,
+  REFUND_STATES,
+  NON_CANCELLABLE_STATUSES,
 };

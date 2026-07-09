@@ -31,7 +31,7 @@ async function verifyCodOtp(orderId, otp) {
       .eq("order_id", orderId)
       .eq("used", false)
       .order("created_at", { ascending: false })
-      .limit(1)
+      .range(0, 0)
       .single();
 
     if (!record) return { error: { message: "No OTP found for this order" } };

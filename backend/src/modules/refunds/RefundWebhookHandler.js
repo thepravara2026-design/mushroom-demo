@@ -1,5 +1,5 @@
 const repo = require("./RefundRepository");
-const { OrderStates, restockOrderItems } = require("../orders/OrderStateService");
+const { OrderStates, restockOrderItems, STATE_DIMENSION_MAP } = require("../orders/OrderStateService");
 const { verifyWebhookSignature } = require("../payments/PaymentService");
 const { logRefundAction } = require("./RefundAuditService");
 const { sendRefundNotification } = require("./RefundService");
@@ -246,7 +246,7 @@ async function handleWebhookEvent(event) {
       const rzpOrderId = entity.order_id;
       const rzpPaymentId = entity.id;
 
-      // Scan for orphaned order: order exists as 'pending' but payment captured on gateway
+      // ── Orphaned shop order recovery ──
       const orphanedOrders = await repo.findPotentialOrphanedOrders();
       const order = (orphanedOrders || []).find(o => o.razorpay_order_id === rzpOrderId);
 
@@ -269,10 +269,12 @@ async function handleWebhookEvent(event) {
         });
 
         order.razorpay_payment_id = rzpPaymentId;
+        const cancelledDims = STATE_DIMENSION_MAP[OrderStates.CANCELLED] || { delivery_status: "cancelled", fulfillment_status: null };
         await repo.updateOrder(order.id, {
           razorpay_payment_id: rzpPaymentId,
-          status: OrderStates.CANCEL_APPROVED,
-          delivery_status: "cancelled",
+          status: OrderStates.CANCELLED,
+          delivery_status: cancelledDims.delivery_status,
+          fulfillment_status: cancelledDims.fulfillment_status,
           cancel_reason: "Technical checkout recovery - orphaned payment webhook",
           cancelled_by: "system",
           cancelled_at: new Date().toISOString()
@@ -290,6 +292,60 @@ async function handleWebhookEvent(event) {
           logger.info(`[RefundWebhookHandler] Technical recovery refund processed for order ${order.id}`);
         } catch (err) {
           logger.error(`[RefundWebhookHandler] Technical recovery refund execution failed for order ${order.id}: ${err.message}`);
+        }
+      }
+
+      // ── Orphaned training payment recovery ──
+      if (!order) {
+        try {
+          const trainingPaymentRows = await db
+            .from("training_payments")
+            .select("*, training_enrollments!inner(*)")
+            .eq("razorpay_order_id", rzpOrderId)
+            .eq("status", "pending")
+            .then(r => r.data || r);
+          const trainingPayment = Array.isArray(trainingPaymentRows) ? trainingPaymentRows[0] : null;
+          if (trainingPayment) {
+            logger.warn(`[RefundWebhookHandler] ORPHAN TRAINING PAYMENT via Webhook: Payment ${rzpPaymentId} captured but enrollment ${trainingPayment.enrollment_id} still pending_payment`);
+            // Update payment to paid
+            await db
+              .from("training_payments")
+              .eq("id", trainingPayment.id)
+              .update({ razorpay_payment_id: rzpPaymentId, status: "paid" })
+              .then(r => r.data || r);
+            // Update enrollment to confirmed
+            await db
+              .from("training_enrollments")
+              .eq("id", trainingPayment.enrollment_id)
+              .update({ status: "confirmed" })
+              .then(r => r.data || r);
+            // Increment seats
+            const enrollRow = await db
+              .from("training_enrollments")
+              .select("batch_id")
+              .eq("id", trainingPayment.enrollment_id)
+              .then(r => r.data || r);
+            if (enrollRow && enrollRow.length > 0) {
+              const bRows = await db
+                .from("training_batches")
+                .select("seats_taken")
+                .eq("id", enrollRow[0].batch_id)
+                .then(r => r.data || r);
+              if (bRows && bRows.length > 0) {
+                await db
+                  .from("training_batches")
+                  .eq("id", enrollRow[0].batch_id)
+                  .update({ seats_taken: (bRows[0].seats_taken || 0) + 1 })
+                  .then(r => r.data || r);
+              }
+            }
+            sendSseEvent("training_enrollment:updated", {
+              enrollment_id: trainingPayment.enrollment_id,
+              status: "confirmed",
+            });
+          }
+        } catch (trainErr) {
+          logger.error(`[RefundWebhookHandler] Orphaned training payment recovery failed: ${trainErr.message}`);
         }
       }
       break;

@@ -7,20 +7,41 @@ const logger = require("../utils/logger");
 const { sendOtpEmail } = require('./emailService');
 const { sendOtpSms } = require('./smsService');
 
-// In-memory OTP store for simulation (email -> { otp, expiresAt, role, fullName })
+// In-memory OTP store — supports multiple pending OTPs per email (array-based)
+// Uses Map<email, Array<{ otp, expiresAt, ... }>>
 const otpStore = new Map();
 const OTP_TTL_MS = parseInt(process.env.OTP_TTL_MS, 10) || 10 * 60 * 1000;
 
-// Admin OTP store (email -> { otp, expiresAt, phone })
+// Admin OTP store — same array-based structure
 const adminOtpStore = new Map();
+
+const MAX_PENDING_OTPS = 5;
+
+function pushOtp(store, key, record) {
+  if (!store.has(key)) store.set(key, []);
+  const list = store.get(key);
+  // Cap pending OTPs to prevent abuse
+  if (list.length >= MAX_PENDING_OTPS) list.shift();
+  list.push(record);
+}
+
+function removeOtp(store, key, matcher) {
+  const list = store.get(key);
+  if (!list) return false;
+  const idx = list.findIndex(matcher);
+  if (idx === -1) return false;
+  list.splice(idx, 1);
+  if (list.length === 0) store.delete(key);
+  return true;
+}
 
 // Periodic cleanup of expired OTPs every 5 minutes
 function cleanupStore(store) {
   const now = Date.now();
-  for (const [key, record] of store) {
-    if (now > record.expiresAt) {
-      store.delete(key);
-    }
+  for (const [key, list] of store) {
+    const active = list.filter(r => now <= r.expiresAt);
+    if (active.length === 0) store.delete(key);
+    else store.set(key, active);
   }
 }
 setInterval(() => cleanupStore(otpStore), 5 * 60 * 1000).unref();
@@ -63,7 +84,7 @@ class AuthService {
     }
     const expiresAt = Date.now() + OTP_TTL_MS;
 
-    otpStore.set(emailLower, {
+    pushOtp(otpStore, emailLower, {
       otp: generatedOtp,
       expiresAt,
       role: resolvedRole,
@@ -97,22 +118,35 @@ class AuthService {
    */
   async verifyOTP(email, otpCode, opts = {}) {
     const emailLower = email.toLowerCase();
-    const record = otpStore.get(emailLower);
+    const list = otpStore.get(emailLower);
 
-    if (!record) {
+    if (!list || list.length === 0) {
       throw new Error(
         "No OTP request found for this email. Please request a new OTP.",
       );
     }
 
-    if (Date.now() > record.expiresAt) {
-      otpStore.delete(emailLower);
-      throw new Error("OTP has expired. Please request a new one.");
-    }
+    const now = Date.now();
+    // Prune expired records while searching
+    const idx = list.findIndex(r => now <= r.expiresAt && r.otp === otpCode);
+    if (idx === -1) {
+      // Check if any valid OTP exists (so we can give a better error message)
+      const hasValid = list.some(r => now <= r.expiresAt);
+      // Remove all expired
+      const active = list.filter(r => now <= r.expiresAt);
+      if (active.length === 0) otpStore.delete(emailLower);
+      else otpStore.set(emailLower, active);
 
-    if (record.otp !== otpCode) {
+      if (!hasValid) {
+        throw new Error("OTP has expired. Please request a new one.");
+      }
       throw new Error("Invalid OTP code.");
     }
+
+    const record = list[idx];
+    // Remove the consumed OTP from the array
+    list.splice(idx, 1);
+    if (list.length === 0) otpStore.delete(emailLower);
 
     const loginMethod = opts.loginMethod || record.loginMethod || null;
     // Prefer opts.whatsappNumber (frontend-supplied), fall back to phone saved during OTP request
@@ -216,9 +250,6 @@ const mockUsers = mockStore.users;
       throw new Error("Failed to create or find user account. Please try again.");
     }
 
-    // OTP verified and user confirmed. Delete from store.
-    otpStore.delete(emailLower);
-
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role, fullName: user.full_name },
@@ -278,7 +309,7 @@ const mockUsers = mockStore.users;
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000;
 
-    adminOtpStore.set(emailLower, {
+    pushOtp(adminOtpStore, emailLower, {
       otp: generatedOtp,
       expiresAt,
       phone: adminPhone,
@@ -302,28 +333,38 @@ const mockUsers = mockStore.users;
 
   async adminVerifyOTP(email, otpCode) {
     const emailLower = String(email).toLowerCase();
-    const record = adminOtpStore.get(emailLower);
+    const list = adminOtpStore.get(emailLower);
 
-    if (!record) {
+    if (!list || list.length === 0) {
       const err = new Error("No OTP request found. Please request a new OTP.");
       err.status = 400;
       throw err;
     }
 
-    if (Date.now() > record.expiresAt) {
-      adminOtpStore.delete(emailLower);
-      const err = new Error("OTP has expired. Please request a new one.");
-      err.status = 400;
-      throw err;
-    }
+    const now = Date.now();
+    const idx = list.findIndex(r => now <= r.expiresAt && r.otp === otpCode);
+    if (idx === -1) {
+      // Check if any valid OTP exists
+      const hasValid = list.some(r => now <= r.expiresAt);
+      // Remove all expired
+      const active = list.filter(r => now <= r.expiresAt);
+      if (active.length === 0) adminOtpStore.delete(emailLower);
+      else adminOtpStore.set(emailLower, active);
 
-    if (record.otp !== otpCode) {
+      if (!hasValid) {
+        const err = new Error("OTP has expired. Please request a new one.");
+        err.status = 400;
+        throw err;
+      }
       const err = new Error("Invalid OTP code.");
       err.status = 400;
       throw err;
     }
 
-    adminOtpStore.delete(emailLower);
+    const record = list[idx];
+    // Remove the consumed OTP from the array
+    list.splice(idx, 1);
+    if (list.length === 0) adminOtpStore.delete(emailLower);
 
     // Try live DB first, fall back to mock store
     let user = null;

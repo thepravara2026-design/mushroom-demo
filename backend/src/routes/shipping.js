@@ -7,6 +7,7 @@ const { success, error: respondError } = require('../lib/response');
 const logger = require('../utils/logger');
 const selectBestProvider = require('../services/shipping/selectBestProvider');
 const { getProvider, getDefaultProvider } = require('../services/shipping/ProviderRegistry');
+const { buildTrackingData, FULFILLMENT_STATUS_MAP, STATE_DIMENSION_MAP } = require('../modules/orders/OrderStateService');
 
 // GET /api/shipping/all
 // Admin: fetch all shipments with order info
@@ -182,14 +183,17 @@ router.post('/create', authMiddleware, async (req, res) => {
       })
       .single();
 
-    // Link shipment to order
+    // Link shipment to order with all dimensions synced
     if (shipment) {
+      const fulfillDims = FULFILLMENT_STATUS_MAP['with_carrier'];
       await req.db.from('orders').update({
         shipment_id: shipment.id,
         shipment_awb: awbResult?.awb_code || null,
         shipment_courier: awbResult?.courier_name || null,
         shipment_status: 'pending',
-        fulfillment_status: 'with_carrier',
+        status: fulfillDims?.status || "with_carrier",
+        delivery_status: fulfillDims?.delivery_status || "shipped",
+        fulfillment_status: fulfillDims?.fulfillment_status || 'with_carrier',
         updated_at: new Date().toISOString(),
       }).eq('id', order.id);
     }
@@ -225,27 +229,13 @@ router.get('/track/:orderId', authMiddleware, async (req, res) => {
     }
 
     const trackDb = isAdmin ? db : req.db;
-
-    const { data: shipment } = await trackDb
-      .from('shipments')
-      .select('*, shipping_provider_id')
-      .eq('order_id', orderId)
-      .single();
+    const { shipment, events, timeline: baseTimeline } = await buildTrackingData(order, trackDb);
 
     if (!shipment) {
       return success(res, { hasShipment: false, message: 'No shipment record found for this order' });
     }
 
-    let trackingEvents = [];
     let awbTracking = null;
-
-    const { data: events } = await trackDb
-      .from('shipment_tracking_events')
-      .select('*')
-      .eq('shipment_id', shipment.id)
-      .order('occurred_at', { ascending: false });
-
-    trackingEvents = events || [];
 
     if (shipment.awb_code) {
       try {
@@ -258,7 +248,7 @@ router.get('/track/:orderId', authMiddleware, async (req, res) => {
       }
     }
 
-    const timeline = buildTimeline(trackingEvents, awbTracking, order);
+    const timeline = buildTimeline(baseTimeline, awbTracking);
 
     return success(res, {
       hasShipment: true,
@@ -283,28 +273,8 @@ router.get('/track/:orderId', authMiddleware, async (req, res) => {
   }
 });
 
-function buildTimeline(events, awbTracking, order) {
-  const timeline = [];
-
-  timeline.push({
-    status: 'placed',
-    label: 'Order Placed',
-    done: true,
-    time: order.created_at,
-  });
-
-  if (events.length > 0) {
-    const sorted = [...events].sort((a, b) => new Date(a.occurred_at) - new Date(b.occurred_at));
-    for (const ev of sorted) {
-      timeline.push({
-        status: ev.status,
-        label: ev.description || ev.status,
-        done: true,
-        time: ev.occurred_at,
-        location: ev.location,
-      });
-    }
-  }
+function buildTimeline(baseTimeline, awbTracking) {
+  const timeline = [...baseTimeline];
 
   if (awbTracking?.tracking_data?.timeline) {
     for (const entry of awbTracking.tracking_data.timeline) {

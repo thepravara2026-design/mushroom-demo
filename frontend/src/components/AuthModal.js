@@ -1,6 +1,6 @@
 import { authApi } from '../api/authApi.js';
 import { saveAuth, clearAuth, saveCart, state } from '../utils/state.js';
-import { showErrorToast, showSuccessToast, showPopupModal } from '../utils/notify.js';
+import { showErrorToast, showPopupModal } from '../utils/notify.js';
 import { isValidIndianPhone, isValidEmail, isValidOtp, getFieldError } from '../utils/validation.js';
 
 export class AuthModal {
@@ -12,15 +12,10 @@ export class AuthModal {
     this.phoneView = document.getElementById('auth-phone-view');
     this.requestView = document.getElementById('auth-request-view');
     this.verifyView = document.getElementById('auth-verify-view');
-    this.adminPasswordView = document.getElementById(
-      'auth-admin-password-view',
-    );
-
     // Forms
     this.formRequest = document.getElementById('form-request-otp');
     this.formVerify = document.getElementById('form-verify-otp');
     this.formPhoneRequest = document.getElementById('form-request-phone-otp');
-    this.formAdminLogin = document.getElementById('form-admin-login');
 
     // Inputs
     this.emailInput = document.getElementById('auth-email');
@@ -30,14 +25,11 @@ export class AuthModal {
     this.phoneInput = document.getElementById('auth-phone');
     this.phoneCountry = document.getElementById('auth-phone-country');
     this.phoneNameField = document.getElementById('auth-phone-name-field');
-    this.adminEmailInput = document.getElementById('admin-email');
-    this.adminOtpInput = document.getElementById('admin-otp');
 
     // Error containers
     this.requestError = document.getElementById('request-error');
     this.verifyError = document.getElementById('verify-error');
     this.phoneError = document.getElementById('phone-request-error');
-    this.adminLoginError = document.getElementById('admin-login-error');
 
     // Gating state
     this.currentRole = 'buyer';
@@ -64,36 +56,6 @@ export class AuthModal {
     document
       .getElementById('btn-auth-email')
       ?.addEventListener('click', () => this.showEmailView());
-
-    // Admin password login
-    document
-      .getElementById('link-admin-password')
-      ?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.showAdminPasswordView();
-      });
-
-    document
-      .getElementById('link-back-admin')
-      ?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.showMethodView();
-      });
-
-    document
-      .getElementById('admin-change-email')
-      ?.addEventListener('click', (e) => {
-        e.preventDefault();
-        const otpField = document.getElementById('admin-otp-field');
-        const emailField = document.getElementById('admin-email-field');
-        const subtitleEl = document.getElementById('admin-subtitle');
-        const btn = document.getElementById('admin-login-btn');
-        if (otpField) otpField.classList.add('hidden');
-        if (emailField) emailField.classList.remove('hidden');
-        if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
-        if (btn) btn.textContent = 'Send OTP';
-        this.adminLoginError?.classList.add('hidden');
-      });
 
     // Back navigation
     document
@@ -136,41 +98,11 @@ export class AuthModal {
       await this.handleRequestPhoneOtp();
     });
 
-    // Admin password form
-    this.formAdminLogin?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await this.handleAdminPasswordLogin();
-    });
-
     // Verify OTP form (shared)
     this.formVerify?.addEventListener('submit', async (e) => {
       e.preventDefault();
       await this.handleVerifyOtp();
     });
-
-    // Image URL preview on admin form
-    const imgInput = document.getElementById('admin-prod-image');
-    if (imgInput) {
-      imgInput.addEventListener('input', () => {
-        const preview = document.getElementById('admin-img-preview');
-        if (preview) {
-          if (imgInput.value) {
-            preview.innerHTML = '';
-            const img = document.createElement('img');
-            img.src = imgInput.value;
-            img.alt = 'Preview';
-            img.style.maxWidth = '100%';
-            img.style.maxHeight = '200px';
-            img.onerror = function () {
-              preview.innerHTML = '<i class="fa-solid fa-image"></i><span>Invalid image URL</span>';
-            };
-            preview.appendChild(img);
-          } else {
-            preview.innerHTML = '';
-          }
-        }
-      });
-    }
 
     // Real-time field validation on blur
     if (this.emailInput) {
@@ -212,36 +144,18 @@ export class AuthModal {
       });
     }
 
-    if (this.adminEmailInput) {
-      this.adminEmailInput.addEventListener('blur', () => {
-        const err = getFieldError('email', this.adminEmailInput.value);
-        if (this.adminLoginError) {
-          this.adminLoginError.textContent = err;
-          this.adminLoginError.classList.toggle('hidden', !err);
-        }
-      });
-    }
-
-    if (this.adminOtpInput) {
-      this.adminOtpInput.addEventListener('blur', () => {
-        const err = getFieldError('otp', this.adminOtpInput.value);
-        if (this.adminLoginError) {
-          this.adminLoginError.textContent = err;
-          this.adminLoginError.classList.toggle('hidden', !err);
-        }
-      });
-    }
   }
 
   /**
    * Opens the auth modal.
-   * @param {string} role 'buyer' or 'grower' (admin login is accessed via the "Staff? Use admin login" link)
+   * @param {string} role 'buyer' or 'grower'
    * @param {function} onSuccess Callback on success
    */
   open(role = 'buyer', onSuccess = null) {
     // If already authenticated, call success immediately
     if (state.token && state.user) {
       if (state.user.role === role || role === 'buyer') {
+        this.close();
         if (onSuccess) onSuccess();
         return;
       }
@@ -270,34 +184,7 @@ export class AuthModal {
       backBtnPhone.classList.remove('hidden');
     }
 
-    const backRequestBtn = document.getElementById('link-back-request');
-    if (backRequestBtn) {
-      if (role === 'admin') {
-        backRequestBtn.textContent = '← Use a different method';
-      }
-    }
-
-    if (role === 'admin') {
-      titleEl.textContent = 'Admin Portal Access';
-    } else if (role === 'grower') {
-      titleEl.textContent = 'Grower Portal Access';
-    }
-
-    // Hide admin login link for buyer role
-    const adminLink = document.getElementById('link-admin-password');
-    const adminCaution = document.querySelector('.auth-admin-caution');
-    if (adminLink) {
-      adminLink.style.display = role === 'buyer' ? 'none' : '';
-    }
-    if (adminCaution) {
-      adminCaution.style.display = role === 'buyer' ? 'none' : '';
-    }
-
-    if (role === 'admin') {
-      this.showAdminPasswordView();
-    } else {
-      this.showMethodView();
-    }
+    this.showMethodView();
     this.modal.classList.add('open');
   }
 
@@ -310,28 +197,16 @@ export class AuthModal {
     this.formRequest?.reset();
     this.formVerify?.reset();
     this.formPhoneRequest?.reset();
-    this.formAdminLogin?.reset();
     this.requestError?.classList.add('hidden');
     this.verifyError?.classList.add('hidden');
     this.phoneError?.classList.add('hidden');
-    this.adminLoginError?.classList.add('hidden');
-
-    const emailField = document.getElementById('admin-email-field');
-    const otpField = document.getElementById('admin-otp-field');
-    const subtitleEl = document.getElementById('admin-subtitle');
-    const btn = document.getElementById('admin-login-btn');
-    if (emailField) emailField.classList.remove('hidden');
-    if (otpField) otpField.classList.add('hidden');
-    if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
-    if (btn) btn.textContent = 'Send OTP';
-    if (this.adminOtpInput) this.adminOtpInput.value = '';
+    window.dispatchEvent(new CustomEvent('auth:modal-closed'));
   }
 
   showMethodView() {
     this._hide(this.phoneView);
     this._hide(this.requestView);
     this._hide(this.verifyView);
-    this._hide(this.adminPasswordView);
     this._show(this.methodView);
 
     const titleEl = document.getElementById('auth-modal-title');
@@ -339,18 +214,6 @@ export class AuthModal {
       if (this.currentRole === 'grower') titleEl.textContent = 'Grower Portal Access';
       else titleEl.textContent = 'Welcome to Sporekart';
     }
-
-    const emailField = document.getElementById('admin-email-field');
-    const otpField = document.getElementById('admin-otp-field');
-    const subtitleEl = document.getElementById('admin-subtitle');
-    const btn = document.getElementById('admin-login-btn');
-    if (emailField) emailField.classList.remove('hidden');
-    if (otpField) otpField.classList.add('hidden');
-    if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
-    if (btn) btn.textContent = 'Send OTP';
-    if (this.adminOtpInput) this.adminOtpInput.value = '';
-    this.adminLoginError?.classList.add('hidden');
-    this.formAdminLogin?.reset();
   }
 
   showPhoneView() {
@@ -379,7 +242,6 @@ export class AuthModal {
     this._hide(this.methodView);
     this._hide(this.phoneView);
     this._hide(this.requestView);
-    this._hide(this.adminPasswordView);
     this._show(this.verifyView);
 
     const subtitle = document.getElementById('verify-subtitle');
@@ -460,27 +322,6 @@ export class AuthModal {
     } finally {
       if (link) { link.textContent = 'Resend OTP'; link.style.pointerEvents = ''; }
     }
-  }
-
-  showAdminPasswordView() {
-    this._hide(this.methodView);
-    this._hide(this.phoneView);
-    this._hide(this.requestView);
-    this._hide(this.verifyView);
-    this._show(this.adminPasswordView);
-
-    const emailField = document.getElementById('admin-email-field');
-    const otpField = document.getElementById('admin-otp-field');
-    const subtitleEl = document.getElementById('admin-subtitle');
-    const btn = document.getElementById('admin-login-btn');
-    if (emailField) emailField.classList.remove('hidden');
-    if (otpField) otpField.classList.add('hidden');
-    if (subtitleEl) subtitleEl.textContent = 'Enter your admin email to receive OTP';
-    if (btn) btn.textContent = 'Send OTP';
-
-    this.adminLoginError?.classList.add('hidden');
-    this.adminEmailInput?.focus();
-    if (this.adminOtpInput) this.adminOtpInput.value = '';
   }
 
   async handleRequestPhoneOtp() {
@@ -587,104 +428,6 @@ export class AuthModal {
     }
   }
 
-  async handleAdminPasswordLogin() {
-    const email = this.adminEmailInput?.value.trim();
-
-    const emailErr = getFieldError('email', email);
-    if (emailErr) {
-      if (this.adminLoginError) {
-        this.adminLoginError.textContent = emailErr;
-        this.adminLoginError.classList.remove('hidden');
-      }
-      return;
-    }
-
-    const btn = document.getElementById('admin-login-btn');
-    const otpField = document.getElementById('admin-otp-field');
-    const emailField = document.getElementById('admin-email-field');
-    const subtitleEl = document.getElementById('admin-subtitle');
-    const sentToEl = document.getElementById('admin-otp-sent-to');
-
-    // Check if we are in the OTP verification step
-    if (otpField && !otpField.classList.contains('hidden')) {
-      const otpCode = this.adminOtpInput?.value.trim();
-      const otpErr = getFieldError('otp', otpCode);
-      if (otpErr) {
-        if (this.adminLoginError) {
-          this.adminLoginError.textContent = otpErr;
-          this.adminLoginError.classList.remove('hidden');
-        }
-        return;
-      }
-
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Verifying…';
-      }
-
-      try {
-        clearAuth();
-        const data = await authApi.adminVerifyOtp(email, otpCode);
-        this.adminLoginError?.classList.add('hidden');
-        this.close();
-        saveAuth(data.token, data.user);
-        window.location.href = '/admin.html';
-      } catch (err) {
-        if (this.adminLoginError) {
-          this.adminLoginError.textContent = err.message || 'OTP verification failed.';
-          this.adminLoginError.classList.remove('hidden');
-        }
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = 'Verify & Login';
-        }
-      }
-      return;
-    }
-
-    // Step 1: Send OTP
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Sending OTP…';
-    }
-
-    try {
-      const result = await authApi.adminLogin(email);
-      this.adminLoginError?.classList.add('hidden');
-
-      // Switch to OTP step
-      if (emailField) emailField.classList.add('hidden');
-      if (otpField) otpField.classList.remove('hidden');
-      if (subtitleEl) subtitleEl.textContent = 'Enter the 6-digit OTP sent to your registered mobile';
-      if (btn) btn.textContent = 'Verify & Login';
-      showSuccessToast('OTP sent to registered mobile');
-
-      if (result && result.otp) {
-        if (sentToEl) sentToEl.textContent = `Demo OTP: ${result.otp}`;
-        if (this.adminOtpInput) this.adminOtpInput.value = result.otp;
-        // Auto-submit OTP verification
-        setTimeout(() => {
-          this.handleAdminPasswordLogin();
-        }, 300);
-      } else if (sentToEl) {
-        sentToEl.textContent = 'OTP sent to registered mobile';
-      }
-
-      this.adminOtpInput?.focus();
-      this.adminOtpInput?.select();
-    } catch (err) {
-      if (this.adminLoginError) {
-        this.adminLoginError.textContent = err.message || 'Failed to send OTP.';
-        this.adminLoginError.classList.remove('hidden');
-      }
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-      }
-    }
-  }
-
   async handleVerifyOtp() {
     const otpCode = this.otpInput?.value.trim();
 
@@ -778,7 +521,6 @@ export class AuthModal {
     this._hide(this.phoneView);
     this._hide(this.requestView);
     this._hide(this.verifyView);
-    this._hide(this.adminPasswordView);
     this._hide(this.methodView);
 
     const container = this.methodView.parentElement;

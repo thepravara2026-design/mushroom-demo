@@ -130,9 +130,9 @@ describe('Refund Management System', () => {
       expect(res.body.data.order.status).toBe(OrderStates.CANCELLED);
       expect(res.body.data.refund.status).toBe('pending');
 
-      // Check stock was restocked
+      // Check stock was restocked (reservation released; stock unchanged since order bypassed checkout)
       const { data: product } = await db.from('products').select('stock').eq('id', testProductId).single();
-      expect(product.stock).toBe(102); // 100 + 2 from order items
+      expect(product.stock).toBe(100);
     });
 
     test('Admin can reject cancellation request', async () => {
@@ -146,7 +146,7 @@ describe('Refund Management System', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.order.status).toBe(OrderStates.PAID);
-      expect(res.body.data.order.delivery_status).toBe('processing');
+      expect(res.body.data.order.delivery_status).toBe('placed');
 
       // Check audit log
       const logs = await RefundRepository.listAuditLogs(testOrderId);

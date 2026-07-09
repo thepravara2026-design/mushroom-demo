@@ -32,7 +32,7 @@ router.get("/dashboard", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = buildDateFilter(startDate, endDate);
-    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).limit(MAX_RECORDS);
+    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).range(0, MAX_RECORDS - 1);
     const { data: events } = await query;
 
     const pageViews = events?.filter(e => e.event_type === 'page_view').length || 0;
@@ -81,7 +81,7 @@ router.get("/funnel", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = buildDateFilter(startDate, endDate);
-    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).limit(MAX_RECORDS);
+    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).range(0, MAX_RECORDS - 1);
     const { data: events } = await query;
 
     const stageSessionMap = {};
@@ -116,7 +116,7 @@ router.get("/recovery", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = buildDateFilter(startDate, endDate);
-    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).limit(MAX_RECORDS);
+    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).range(0, MAX_RECORDS - 1);
     const { data: events } = await query;
 
     const checkoutSessions = new Set(events?.filter(e => e.event_type === 'begin_checkout').map(e => e.session_id) || []);
@@ -157,7 +157,7 @@ router.get("/top-products", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const { start, end } = buildDateFilter(startDate, endDate);
-    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).limit(MAX_RECORDS);
+    let query = db.from("analytics_events").select("*").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()).range(0, MAX_RECORDS - 1);
     const { data: events } = await query;
 
     const productMap = {};

@@ -258,15 +258,7 @@
       </div>
 
       <div class="topbar-actions">
-        <button class="btn btn-secondary-glow" id="btn-open-auth-top" style="margin-right:12px"
-          title="Admin access only">
-          <i class="fa-solid fa-user-shield"></i>
-          <span>Admin</span>
-        </button>
-        <a href="/admin.html" class="topbar-action-btn" id="btn-nav-admin" style="display: none">
-          <i class="fa-solid fa-user-shield"></i>
-          <span>Admin Console</span>
-        </a>
+        <!-- Admin entry removed; accessible via #admin hash only -->
         <div id="user-profile-section" style="display: flex; align-items: center"></div>
         <button class="cart-trigger topbar-action-btn" id="btn-open-cart">
           <i class="fa-solid fa-cart-shopping"></i>
@@ -339,9 +331,7 @@
         <div class="mobile-cat-nav-inner-overlay"></div>
       </div>
       <div class="mobile-actions">
-        <button class="btn btn-block" id="btn-open-auth-mobile">
-          Admin Login
-        </button>
+        <!-- Admin entry removed; accessible via #admin hash only -->
       </div>
     </div>
   </div>
@@ -1890,8 +1880,13 @@
   </div>
 
   <!-- ============================================================
+       ADMIN PAGE (lazy-loaded via #admin hash)
+   ============================================================ -->
+  <div id="admin-page" class="page-section" style="min-height: 100vh;"></div>
+
+  <!-- ============================================================
        MODALS (Auth, Cart, Invoice – kept functional)
-  ============================================================ -->
+   ============================================================ -->
 
   <!-- AUTHENTICATION MODAL (Multi-Method Login) -->
   <div class="modal-overlay" id="auth-modal">
@@ -1934,36 +1929,6 @@
           </div>
           <p class="auth-note">
             By continuing, you agree to our Terms & Privacy Policy
-          </p>
-          <p class="auth-admin-caution">
-            <a href="#" id="link-admin-password">Staff? Use admin login</a>
-          </p>
-        </div>
-
-        <!-- Admin OTP Login Panel -->
-        <div id="auth-admin-password-view" class="auth-form-panel hidden">
-          <div class="auth-logo"><i class="fa-solid fa-lock"></i></div>
-          <h3>Admin Access</h3>
-          <p class="auth-subtitle" id="admin-subtitle">Enter your admin email to receive OTP</p>
-          <form id="form-admin-login">
-            <div class="input-field" id="admin-email-field">
-              <label><i class="fa-solid fa-envelope"></i> Admin Email</label>
-              <input type="email" id="admin-email" required placeholder="admin@sporekart.com" />
-            </div>
-            <div class="input-field hidden" id="admin-otp-field">
-              <label><i class="fa-solid fa-shield-halved"></i> OTP Code</label>
-              <input type="text" id="admin-otp" maxlength="6" placeholder="Enter 6-digit OTP" inputmode="numeric"
-                pattern="[0-9]*" />
-              <div id="admin-otp-sent-to" class="auth-field-hint"></div>
-              <button type="button" class="auth-link-btn" id="admin-change-email">Change email</button>
-            </div>
-            <div class="auth-error-msg hidden" id="admin-login-error"></div>
-            <button type="submit" class="btn btn-primary btn-block" id="admin-login-btn">
-              Send OTP
-            </button>
-          </form>
-          <p class="auth-toggle-link">
-            <a href="#" id="link-back-admin">← Back to login options</a>
           </p>
         </div>
 

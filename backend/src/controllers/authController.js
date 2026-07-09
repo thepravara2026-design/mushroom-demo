@@ -12,6 +12,9 @@ const jwt = require("jsonwebtoken");
 const userRepo = require("../repositories/userRepository");
 const { JWT_SECRET, JWT_EXPIRES_IN } = require("../config/jwt");
 const logger = require("../utils/logger");
+const { isValidIndianPhone, normalizePhoneTo10Digit, normalizePhoneToE164 } = require("../utils/phoneValidation");
+
+const PHONE_REGEX = /^(\+91|91|0)?[6-9]\d{9}$/;
 
 const registerSchema = Joi.object({
   email: Joi.string().email().required().messages({
@@ -27,7 +30,19 @@ const registerSchema = Joi.object({
     "string.max": "Name must not exceed 100 characters.",
     "any.required": "Name is required.",
   }),
-  role: Joi.string().valid("buyer", "grower").optional(),
+  role: Joi.string().valid("buyer", "grower", "trainee").optional(),
+  roleType: Joi.string().trim().min(2).max(50).optional().allow("").messages({
+    "string.min": "Role type must be at least 2 characters.",
+  }),
+  city: Joi.string().trim().min(2).max(100).optional().allow(""),
+  state: Joi.string().trim().min(2).max(100).optional().allow(""),
+  phone: Joi.string()
+    .pattern(PHONE_REGEX)
+    .optional()
+    .allow("")
+    .messages({
+      "string.pattern.base": "Enter a valid Indian phone number (10 digits starting with 6-9).",
+    }),
 });
 
 /**
@@ -36,6 +51,67 @@ const registerSchema = Joi.object({
  * Returns { message, user: { id, email } }
  */
 router.post("/register", validateBody(registerSchema), async (req, res) => {
+  const { email, password, name, role = "buyer", roleType, city, state, phone } = req.body;
+
+  // Trainee signup uses phone-based flow (passwordless)
+  if (role === "trainee") {
+    try {
+      const emailLower = email.toLowerCase().trim();
+
+      const { data: existingUser } = await userRepo.findByEmail(emailLower);
+      if (existingUser) {
+        return respondError(res, "This email is already registered. Please login.", 409);
+      }
+
+      const cleanPhone = phone ? normalizePhoneTo10Digit(phone) : null;
+      if (cleanPhone) {
+        const { data: existingPhone } = await userRepo.findByPhone(cleanPhone);
+        if (existingPhone) {
+          return respondError(res, "This phone number is already registered. Please login.", 409);
+        }
+      }
+
+      const normalizedPhone = phone ? normalizePhoneToE164(phone) : null;
+      const insertPayload = {
+        email: emailLower,
+        full_name: name.trim(),
+        whatsapp_number: normalizedPhone,
+        role: "trainee",
+        city: (city || "").trim(),
+        state: (state || "").trim(),
+        role_type: (roleType || "").trim(),
+        login_method: "phone",
+      };
+
+      const { data: newUser, error } = await userRepo.create(insertPayload);
+      if (error) {
+        return respondError(res, error.message || "Failed to create account", 500);
+      }
+
+      // Auto-send OTP via SMS
+      const authService = require("../services/authService");
+      const otpResult = await authService.generateAndSendOTP(
+        emailLower, "trainee", name.trim(), normalizedPhone,
+      );
+
+      return success(res, {
+        id: newUser.id,
+        email: newUser.email,
+        fullName: newUser.full_name,
+        phone: newUser.whatsapp_number,
+        role: newUser.role,
+        city: newUser.city,
+        state: newUser.state,
+        roleType: newUser.role_type,
+        ...otpResult,
+        message: "Account created. Verify OTP to login.",
+      }, {}, 201);
+    } catch (err) {
+      return respondError(res, err.message || "Registration failed", 500);
+    }
+  }
+
+  // Buyer/grower signup uses Supabase Auth
   if (db.isMock || !supabaseAdmin) {
     return respondError(
       res,
@@ -43,8 +119,6 @@ router.post("/register", validateBody(registerSchema), async (req, res) => {
       503,
     );
   }
-
-  const { email, password, name, role = "buyer" } = req.body;
 
   try {
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -206,6 +280,55 @@ router.post(
   },
 );
 
+const requestPhoneOtpSchema = Joi.object({
+  phone: Joi.string()
+    .pattern(PHONE_REGEX)
+    .required()
+    .messages({
+      "string.pattern.base": "Enter a valid Indian phone number (10 digits starting with 6-9).",
+      "any.required": "Phone number is required.",
+    }),
+});
+
+/**
+ * POST /api/auth/request-phone-otp
+ * Phone-only login: checks if phone is registered, sends OTP via SMS if found.
+ * If not registered → returns { needsSignup: true, phone }.
+ */
+router.post("/request-phone-otp", validateBody(requestPhoneOtpSchema), async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
+    const { data: user } = await userRepo.findByPhone(cleanPhone);
+
+    if (!user || user.role !== "trainee") {
+      return success(res, {
+        needsSignup: true,
+        phone: phone.trim(),
+        message: "Phone number not registered. Please sign up first.",
+      });
+    }
+
+    const authService = require("../services/authService");
+    const normalizedPhone = user.whatsapp_number.includes('+')
+      ? user.whatsapp_number
+      : `+91${user.whatsapp_number}`;
+    const result = await authService.generateAndSendOTP(
+      user.email,
+      "trainee",
+      user.full_name,
+      normalizedPhone,
+    );
+
+    return success(res, {
+      ...result,
+      email: user.email,
+    });
+  } catch (err) {
+    return respondError(res, err.message || "Failed to send OTP", err.status || 500);
+  }
+});
+
 /**
  * GET /api/auth/lookup
  * Look up a registered user by email or phone (unauthenticated). Returns fullName if found.
@@ -235,6 +358,42 @@ const verifyOtpSchema = Joi.object({
     }),
   loginMethod: Joi.string().valid("email", "phone").optional(),
   whatsappNumber: Joi.string().allow("").optional(),
+});
+
+const verifyPhoneOtpSchema = Joi.object({
+  phone: Joi.string().required().messages({
+    "any.required": "Phone number is required.",
+  }),
+  otpCode: Joi.string().pattern(/^\d{6}$/).required().messages({
+    "string.pattern.base": "OTP must be a 6-digit code.",
+    "any.required": "OTP is required.",
+  }),
+});
+
+/**
+ * POST /api/auth/verify-phone-otp
+ * Phone-based OTP verification: looks up user by phone, verifies OTP, issues JWT.
+ */
+router.post("/verify-phone-otp", validateBody(verifyPhoneOtpSchema), async (req, res) => {
+  try {
+    const { phone, otpCode } = req.body;
+    const cleanPhone = phone.replace(/\s/g, "").trim().replace(/^\+91/, "");
+    const { data: user } = await userRepo.findByPhone(cleanPhone);
+
+    if (!user || user.role !== "trainee") {
+      return respondError(res, "Invalid OTP or phone number.", 401);
+    }
+
+    const authService = require("../services/authService");
+    const authResult = await authService.verifyOTP(user.email, otpCode, {
+      loginMethod: "phone",
+    });
+
+    if (authResult.token) setAuthCookie(res, authResult.token);
+    return success(res, authResult);
+  } catch (err) {
+    return respondError(res, err.message || "OTP verification failed", 400);
+  }
 });
 
 /**
@@ -414,7 +573,14 @@ router.post(
     try {
       const { email, otpCode } = req.body;
       const result = await authService.adminVerifyOTP(email, otpCode);
-      if (result.token) setAuthCookie(res, result.token);
+      if (result.token) {
+        const twoFAService = require("../modules/twofa/TwoFAService");
+        if (twoFAService.isTwoFAEnabled()) {
+          result.requires2fa = true;
+          result.methods = twoFAService.getEnabledMethods();
+        }
+        setAuthCookie(res, result.token);
+      }
       return success(res, result);
     } catch (err) {
       return respondError(
@@ -485,12 +651,13 @@ router.post("/google-login", validateBody(googleLoginSchema), async (req, res) =
 
     const { data: user } = await userRepo.findByEmail(email);
 
-    if (!user) {
-      return respondError(res, "No account found with this email. Please sign up first.", 404);
-    }
-
-    if (user.role !== "buyer" && user.role !== "grower") {
-      return respondError(res, "This account is not authorized for buyer/grower login.", 403);
+    if (!user || (user.role !== "buyer" && user.role !== "grower" && user.role !== "trainee")) {
+      return success(res, {
+        needsSignup: true,
+        email,
+        fullName: fullName || "",
+        message: "No account found. Please register first.",
+      });
     }
 
     const token = jwt.sign(
@@ -533,6 +700,7 @@ router.get("/me", authMiddleware, async (req, res) => {
       fullName: user.full_name,
       whatsappNumber: user.whatsapp_number || "",
       role: user.role,
+      roleType: user.role_type || "",
       avatarUrl: user.avatar_url || "",
       defaultAddress: user.default_address || "",
       defaultPincode: user.default_pincode || "",

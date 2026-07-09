@@ -28,6 +28,7 @@ const OrderStatus = {
   REFUND_COMPLETED: "REFUND_COMPLETED",
   REFUND_FAILED: "REFUND_FAILED",
   COMPLETED: "completed",
+  PENDING_DISPATCH: "pending_dispatch",
   SHIPMENT_FAILED: "shipment_failed",
   FAILED: "failed",
 

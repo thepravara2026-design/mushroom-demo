@@ -52,9 +52,11 @@ describe('Backend API integration tests', () => {
 
     // Read OTP from exposed test store (OTP is never in the response for security)
     const authService = require('../src/services/authService');
-    const otpRecord = authService.__adminOtpStore.get('admin@sporekart.com');
-    expect(otpRecord).toBeDefined();
-    const otpCode = otpRecord.otp;
+    const otpList = authService.__adminOtpStore.get('admin@sporekart.com');
+    expect(otpList).toBeDefined();
+    expect(Array.isArray(otpList)).toBe(true);
+    expect(otpList.length).toBeGreaterThanOrEqual(1);
+    const otpCode = otpList[0].otp;
 
     // Then verify with the OTP
     const verifyRes = await request(app)

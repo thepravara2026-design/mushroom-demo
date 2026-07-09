@@ -592,9 +592,10 @@ describe('Shiprocket Shipping Provider — Full Test Suite', () => {
       expect(updatedShipment.status).toBe('ndr');
       expect(updatedShipment.ndr_raised_at).toBeDefined();
 
-      // Order delivery_status should NOT change (NDR doesn't modify it)
+      // Order delivery_status was set to 'shipped' by shipment creation (dimension sync)
+      // NDR webhook does NOT change it
       const order = mockStore.orders.find(o => o.id === 'ord-webhook-ndr');
-      expect(order.delivery_status).toBe('pending');
+      expect(order.delivery_status).toBe('shipped');
     });
 
     test('10c. Webhook handles SHIPPED status', async () => {
@@ -719,11 +720,12 @@ describe('Shiprocket Shipping Provider — Full Test Suite', () => {
       expect(createdShipment.courier_name).toBe('Mock Courier');
       expect(createdShipment.status).toBe('pending');
 
-      // Verify order was updated to with_carrier
+      // Verify order was updated to pending_dispatch (not yet with carrier)
       const updatedOrder = mockStore.orders.find(o => o.id === order.id);
-      expect(updatedOrder.fulfillment_status).toBe('with_carrier');
+      expect(updatedOrder.fulfillment_status).toBe('pending_dispatch');
       expect(updatedOrder.shipment_id).toBe(createdShipment.id);
-      expect(updatedOrder.shipped_at).toBeDefined();
+      // shipped_at not set until confirm-dispatch
+      expect(updatedOrder.shipped_at).toBeUndefined();
     });
 
     test('11b. Setting fulfillment_status to delivered starts return window', async () => {
@@ -828,7 +830,7 @@ describe('Shiprocket Shipping Provider — Full Test Suite', () => {
       expect(step3.status).toBe(200);
 
       currentOrder = mockStore.orders.find(o => o.id === order.id);
-      expect(currentOrder.delivery_status).toBe('in_transit');
+      expect(currentOrder.delivery_status).toBe('shipped');
 
       // Step 4: Webhook simulates OUT FOR DELIVERY
       const step4 = await request(app)

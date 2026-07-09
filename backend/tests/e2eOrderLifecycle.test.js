@@ -34,7 +34,6 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
     mockStore.orders.length = 0;
     mockStore.refunds.length = 0;
     mockStore.refund_audits.length = 0;
-    mockStore.order_audit_logs.length = 0;
     mockStore.order_status_history.length = 0;
     mockStore.inventory_reservations.length = 0;
     mockStore.inventory_log.length = 0;
@@ -129,9 +128,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       const rzpOrderId = checkoutRes.body.data.order.razorpay_order_id;
       expect(rzpOrderId).toBeTruthy();
 
-      // Stock decremented 120 → 118
+      // Stock reserved but not decremented at checkout (new model)
       const { data: productAfterCheckout } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(productAfterCheckout.stock).toBe(seededStock - 2);
+      expect(productAfterCheckout.stock).toBe(seededStock);
 
       // ── Verify Payment ──
       const verifyRes = await request(app)
@@ -149,9 +148,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       expect(verifyRes.body.data.order.razorpay_payment_id).toMatch(/^pay_/);
       expect(verifyRes.body.data.order.admin_approval_status).toBe('pending');
 
-      // Stock unchanged from checkout (no double-deduct when INVENTORY_SERVICE off)
+      // Stock decremented by setImmediate during verify-payment: 120 → 118
       const { data: productAfterPayment } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(productAfterPayment.stock).toBe(productAfterCheckout.stock);
+      expect(productAfterPayment.stock).toBe(seededStock - 2);
 
       // ── Verify persisted order state ──
       const { data: persisted } = await db.from('orders').select('*').eq('id', orderId).single();
@@ -201,9 +200,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       expect(updated.delivery_status).toBe('cancelled');
       expect(updated.restocked).toBe(true);
 
-      // Stock restored: 120 + 2 = 122
+      // Stock unchanged (order was in cancellation_window, not paid; reservation released)
       const { data: product } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(product.stock).toBe(seededStock + 2);
+      expect(product.stock).toBe(seededStock);
 
       // Refund audit log created
       const logs = await RefundRepository.listAuditLogs(order.id);
@@ -302,9 +301,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       expect(approveRes.body.data.order.status).toBe(OrderStates.CANCELLED);
       expect(approveRes.body.data.refund.status).toBe('pending');
 
-      // Stock restored: 120 + 2 = 122
+      // Stock unchanged (order directly inserted; never went through checkout)
       const { data: product } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(product.stock).toBe(seededStock + 2);
+      expect(product.stock).toBe(seededStock);
 
       // Audit log
       logs = await RefundRepository.listAuditLogs(order.id);
@@ -329,7 +328,7 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.order.status).toBe(OrderStates.PAID);
-      expect(res.body.data.order.delivery_status).toBe('processing');
+      expect(res.body.data.order.delivery_status).toBe('placed');
 
       const logs = await RefundRepository.listAuditLogs(order.id);
       expect(logs.some(l => l.action === 'CANCEL_REJECTED')).toBe(true);
@@ -419,9 +418,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       expect(updated.status).toBe(OrderStatus.REFUND_INITIATED);
       expect(updated.delivery_status).toBe('rejected');
 
-      // Stock restocked
+      // Stock unchanged (order was admin_pending, payment_id exists but bypassed checkout)
       const { data: product } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(product.stock).toBe(seededStock + 1);
+      expect(product.stock).toBe(seededStock);
     });
 
     test('6b. Non-admin blocked from v3 reject', async () => {
@@ -674,9 +673,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       // No refund record created (no payment ID to refund)
       expect(res.body.data.refund).toBeNull();
 
-      // Stock restored
+      // Stock unchanged (no payment_id → wasPaid=false; only reservation released)
       const { data: product } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(product.stock).toBe(seededStock + 1);
+      expect(product.stock).toBe(seededStock);
     });
 
     test('9b. adminReject without payment ID → restocks', async () => {
@@ -697,7 +696,7 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       expect(res.status).toBe(200);
 
       const { data: product } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(product.stock).toBe(seededStock + 1);
+      expect(product.stock).toBe(seededStock);
     });
   });
 
@@ -870,9 +869,9 @@ describe('End-to-End Order Lifecycle & Refund Flow', () => {
       expect(checkoutRes.status).toBe(200);
       const rzpOrderId = checkoutRes.body.data.order.razorpay_order_id;
 
-      // Stock decremented
+      // Stock reserved but not decremented at checkout (new model)
       const { data: afterCheckout } = await db.from('products').select('stock').eq('id', seededProdId).single();
-      expect(afterCheckout.stock).toBe(seededStock - 1);
+      expect(afterCheckout.stock).toBe(seededStock);
 
       // This will fail with "no signature" when crypto.verify fails in mock mode
       // but let's try sending empty/non-matching signature

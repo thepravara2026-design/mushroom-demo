@@ -14,6 +14,28 @@ const { generateRefundIdempotencyKey, initiateRazorpayRefund } = require("../mod
 const { notify } = require("../services/notificationService");
 const logger = require("../utils/logger");
 
+/**
+ * Log audit actions for training operations (refunds, cancellations, etc.)
+ * Writes to admin_action_logs for consistency with other admin operations.
+ */
+async function logTrainingAction({ enrollmentId, action, performedBy, metadata }) {
+  try {
+    await db
+      .from("admin_action_logs")
+      .insert({
+        admin_id: performedBy || "system",
+        action,
+        target_type: "training_enrollment",
+        target_id: enrollmentId,
+        reason: metadata?.reason || null,
+        metadata: { ...metadata, timestamp: new Date().toISOString() },
+      })
+      .then(r => r.data || r);
+  } catch (err) {
+    logger.warn(`[trainings] Failed to log action ${action} for enrollment ${enrollmentId}: ${err.message}`);
+  }
+}
+
 const priceRatioValidator = (value, helpers) => {
   if (value.price_strikeout != null && value.price_actual != null) {
     if (value.price_strikeout < value.price_actual * 1.1) {
@@ -564,6 +586,13 @@ router.post("/verify-payment", authMiddleware, requireRole("grower", "trainee"),
             .update({ status: "refunded" })
             .then(r => r.data || r);
 
+          logTrainingAction({
+            enrollmentId: enrollment_id,
+            action: "AUTO_REFUND_BATCH_FULL",
+            performedBy: "system",
+            metadata: { amount: payment.amount, reason: "Batch full at payment verification", refundId: rzpRefund.id },
+          });
+
           return respondError(res, "Batch is now full. Your payment has been refunded automatically.", 409);
         } catch (refundErr) {
           logger.error(`[trainings] Auto-refund failed for batch-full enrollment ${enrollment_id}: ${refundErr.message}`);
@@ -727,6 +756,12 @@ router.post("/enrollments/:id/cancel", authMiddleware, requireRole("grower", "tr
       // DB is consistent (enrollment cancelled, seats freed, payment marked refunded)
       // Refund record exists with status "initiated" — admin can retry via manual refund
       logger.warn(`[trainings] Refund gateway call failed after DB updates for enrollment ${enrollmentId}: ${refundErr.message}`);
+      logTrainingAction({
+        enrollmentId,
+        action: "SELF_CANCEL_REFUND_FAILED",
+        performedBy: req.user.userId || "customer",
+        metadata: { amount: payment.amount, error: refundErr.message, reason: req.body.reason || "Self-cancellation" },
+      });
       notify("TRAINING_CANCELLED", enrollment, req.user, {
         batchTitle: batch.title,
         amount: payment.amount,
@@ -752,6 +787,14 @@ router.post("/enrollments/:id/cancel", authMiddleware, requireRole("grower", "tr
     } catch (updateErr) {
       logger.warn(`[trainings] Failed to update refund record with gateway ID for enrollment ${enrollmentId}: ${updateErr.message}`);
     }
+
+    // Audit log
+    logTrainingAction({
+      enrollmentId,
+      action: "SELF_CANCEL_REFUND",
+      performedBy: req.user.userId || "customer",
+      metadata: { amount: payment.amount, refundId: rzpRefund.id, reason: req.body.reason || "Self-cancellation" },
+    });
 
     // Broadcast SSE event
     sendSseEvent("training_enrollment:updated", {
@@ -1081,8 +1124,20 @@ router.post("/admin/batches/:id/force-cancel", authMiddleware, adminOnly, valida
             .update({ status: "refunded" })
             .then(r => r.data || r);
           refundResults.push({ enrollment_id: enrollment.id, status: "refund_initiated" });
+          logTrainingAction({
+            enrollmentId: enrollment.id,
+            action: "ADMIN_FORCE_CANCEL_REFUND",
+            performedBy: req.user.userId || "admin",
+            metadata: { amount: payment.amount, reason: "Admin force-cancelled batch", refundId: rzpRefund.id },
+          });
         } catch (refundErr) {
           refundResults.push({ enrollment_id: enrollment.id, status: "refund_failed", error: refundErr.message });
+          logTrainingAction({
+            enrollmentId: enrollment.id,
+            action: "ADMIN_FORCE_CANCEL_REFUND_FAILED",
+            performedBy: req.user.userId || "admin",
+            metadata: { amount: payment.amount, error: refundErr.message, reason: "Admin force-cancelled batch" },
+          });
           // Skip cancelling this enrollment since refund failed — admin must retry manually
           continue;
         }
@@ -1154,6 +1209,11 @@ router.post("/admin/enrollments/:id/manual-refund", authMiddleware, adminOnly, v
     }
     const enrollment = enrollmentRows[0];
 
+    // Guard: only allow manual refund for confirmed or previously cancelled-with-pending-refund enrollments
+    if (enrollment.status !== "confirmed" && enrollment.status !== "cancelled") {
+      return respondError(res, `Cannot refund enrollment with status "${enrollment.status}"`, 400);
+    }
+
     const paymentRows = await db
       .from("training_payments")
       .select("*")
@@ -1165,13 +1225,28 @@ router.post("/admin/enrollments/:id/manual-refund", authMiddleware, adminOnly, v
     }
     const payment = paymentRows[0];
 
-    // Initiate refund
+    // Check for duplicate refund on this payment
+    const existingRefunds = await db
+      .from("training_refunds")
+      .select("*")
+      .eq("payment_id", payment.id)
+      .then(r => r.data || r);
+    const hasPendingRefund = Array.isArray(existingRefunds)
+      ? existingRefunds.some(r => r.status === "initiated" || r.status === "processed")
+      : false;
+    if (hasPendingRefund) {
+      return respondError(res, "A refund has already been initiated for this enrollment", 409);
+    }
+
+    // Initiate refund with idempotency key
     let rzpRefund;
     try {
-      rzpRefund = await razorpay.payments.refund(payment.razorpay_payment_id, {
-        amount: Math.round(payment.amount * 100),
-        notes: { reason: `Manual refund: ${reason}` },
-      });
+      rzpRefund = await initiateRazorpayRefund(
+        payment.razorpay_payment_id,
+        Math.round(payment.amount * 100),
+        generateRefundIdempotencyKey(enrollmentId, payment.razorpay_payment_id, payment.amount, 0),
+        { reason: `Manual refund: ${reason}`, enrollment_id: enrollmentId },
+      );
     } catch (refundErr) {
       return respondError(res, `Refund failed: ${refundErr.message}`, 500);
     }

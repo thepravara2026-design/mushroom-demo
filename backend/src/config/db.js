@@ -473,7 +473,6 @@ const mockStore = {
 
   refunds: [],
   refund_audits: [],
-  order_audit_logs: [],
   notification_logs: [],
   refund_queue: [],
   coupons: [],

@@ -10,7 +10,6 @@ const SCHEMA_CACHE = {
   order_items: ["id", "order_id", "product_id", "product_name", "quantity", "price", "total", "created_at"],
   refunds: ["id", "order_id", "amount", "reason", "status", "refund_reason", "admin_note", "initiated_at", "processed_at", "failure_reason", "payment_mode", "payment_details", "refund_type", "transaction_reference", "bank_reference", "gateway_refund_id", "source", "timeline_communicated", "version", "created_at"],
   refund_audits: ["id", "refund_id", "order_id", "action", "performed_by", "timestamp", "metadata"],
-  order_audit_logs: ["id", "order_id", "action", "performed_by", "previous_state", "new_state", "metadata", "created_at"],
   order_status_history: ["id", "order_id", "field_name", "old_value", "new_value", "changed_by", "changed_at"],
   shipments: ["id", "order_id", "shipping_provider_id", "awb_code", "status", "tracking_url", "pickup_scheduled_at", "shipped_at", "delivered_at", "weight", "is_cod", "courier_name", "courier_id", "label_url", "manifest_url", "provider_response", "provider_shipment_id", "service_type", "rate", "estimated_delivery_date", "origin_address", "recipient_address_snapshot", "pickup_requested", "pickup_requested_at", "label_generated", "manifest_generated", "cancelled_at", "cancellation_reason", "ndr_raised_at", "direction", "return_shipment_id", "pickup_request_id", "created_at", "updated_at"],
   shipment_tracking_events: ["id", "shipment_id", "status", "location", "description", "occurred_at", "created_at"],
@@ -50,7 +49,7 @@ const SCHEMA_CACHE = {
 const TABLE_ORDER = [
   "users", "categories", "products", "settings", "blogs", "trainings",
   "shipping_providers", "coupons", "notification_triggers", "pincode_serviceability",
-  "training_batches", "training_offers", "orders", "order_items", "order_audit_logs",
+  "training_batches", "training_offers", "orders", "order_items",
   "order_status_history", "shipments", "shipment_tracking_events", "fulfillment_tasks",
   "refunds", "refund_audits", "refund_queue", "coupon_usage", "returns", "return_items",
   "return_evidence", "inventory_reservations", "inventory_log", "notify_me_requests",
@@ -61,8 +60,6 @@ const TABLE_ORDER = [
 ];
 
 const INDEX_DEFINITIONS = [
-  "CREATE INDEX IF NOT EXISTS idx_audit_logs_order ON order_audit_logs(order_id, created_at DESC);",
-  "CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON order_audit_logs(action);",
   "CREATE INDEX IF NOT EXISTS idx_notification_logs_order ON notification_logs(order_id, sent_at DESC);",
   "CREATE INDEX IF NOT EXISTS idx_shipments_order ON shipments(order_id);",
   "CREATE INDEX IF NOT EXISTS idx_shipments_awb ON shipments(awb_code);",

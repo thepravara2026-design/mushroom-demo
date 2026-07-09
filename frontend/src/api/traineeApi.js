@@ -1,25 +1,24 @@
 import { fetchWithAuth } from './client.js';
 
+// All trainee auth now consolidated under /api/auth (see authController.js)
 export const traineeApi = {
-    signup: (payload) => fetchWithAuth('/trainee/signup', {
+    signup: (payload) => fetchWithAuth('/auth/register', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, role: 'trainee' }),
     }),
 
-    requestPhoneOtp: (phone) => fetchWithAuth('/trainee/request-phone-otp', {
+    requestPhoneOtp: (phone) => fetchWithAuth('/auth/request-phone-otp', {
         method: 'POST',
         body: JSON.stringify({ phone }),
     }),
 
-    verifyPhoneOtp: (phone, otpCode) => fetchWithAuth('/trainee/verify-phone-otp', {
+    verifyPhoneOtp: (phone, otpCode) => fetchWithAuth('/auth/verify-phone-otp', {
         method: 'POST',
         body: JSON.stringify({ phone, otpCode }),
     }),
 
-    googleLogin: (credential) => fetchWithAuth('/trainee/google-login', {
+    googleLogin: (credential) => fetchWithAuth('/auth/google-login', {
         method: 'POST',
         body: JSON.stringify({ credential }),
     }),
-
-    checkAccess: () => fetchWithAuth('/trainee/check-access'),
 };

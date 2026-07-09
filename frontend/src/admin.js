@@ -1461,12 +1461,12 @@ function renderAdminOrders(orders) {
       <div class="aoc-prod-list">${itemRows}</div>
     `;
 
-      const fulfillmentSteps = ['pending_fulfillment', 'packing_required', 'packed', 'ready_to_ship', 'with_carrier', 'delivered'];
+      const fulfillmentSteps = ['pending_fulfillment', 'packing_required', 'packed', 'pending_dispatch', 'with_carrier', 'delivered'];
       const fulfillmentLabels = {
         pending_fulfillment: 'Pending',
         packing_required: 'Packing',
         packed: 'Packed',
-        ready_to_ship: 'Ready to Ship',
+        pending_dispatch: 'Pending Dispatch',
         with_carrier: 'With Carrier',
         delivered: 'Delivered',
       };
@@ -1563,6 +1563,8 @@ function renderAdminOrders(orders) {
         badgeHtml = `<span class="aoc-badge" style="background:#eff6ff;color:#3b82f6;border:1px solid #bfdbfe;">✅ Payment Verified</span>`;
       } else if (o.status === 'approved') {
         badgeHtml = `<span class="aoc-badge" style="background:#ecfdf5;color:#10b981;border:1px solid #a7f3d0;">✅ Approved</span>`;
+      } else if (o.status === 'pending_dispatch') {
+        badgeHtml = `<span class="aoc-badge" style="background:#fffbeb;color:#d97706;border:1px solid #fde68a;font-weight:700;">⏳ Pending Dispatch</span>`;
       } else {
         badgeHtml = `<span class="aoc-badge aoc-badge--${o.delivery_status === 'cancelled' ? 'cancelled' : o.delivery_status}">
              ${o.delivery_status === 'cancelled' ? '' : statusEmoji[o.delivery_status] || ''} ${o.delivery_status === 'cancelled' ? 'Cancelled' : o.delivery_status}
@@ -1747,7 +1749,7 @@ function renderAdminOrders(orders) {
                   <div class="aoc-fulfillment-pipeline">
                     <div class="aoc-fulfillment-label">Fulfillment Pipeline</div>
                     <div class="aoc-fulfillment-buttons">
-                      ${o.fulfillment_status === 'pending_fulfillment' ? `
+                      ${(!o.fulfillment_status || o.fulfillment_status === 'pending_fulfillment') ? `
                         <button class="aoc-ful-btn" onclick="globalThis.updateFulfillment('${o.id}','packing_required')" title="Start packing process">
                           <i class="fa-solid fa-box"></i> Start Packing
                         </button>
@@ -1758,9 +1760,34 @@ function renderAdminOrders(orders) {
                         </button>
                       ` : ''}
                       ${o.fulfillment_status === 'packed' ? `
-                        <button class="aoc-ful-btn aoc-ful-btn-primary" onclick="globalThis.updateFulfillment('${o.id}','ready_to_ship')" title="Create shipment with carrier">
+                        <button class="aoc-ful-btn aoc-ful-btn-primary" onclick="globalThis.updateFulfillment('${o.id}','ready_to_ship')" title="Create shipment draft with carrier">
                           <i class="fa-solid fa-truck"></i> Create Shipment
                         </button>
+                      ` : ''}
+                      ${o.fulfillment_status === 'pending_dispatch' ? `
+                        <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
+                          <div style="font-size:0.75rem;color:var(--color-text-muted);background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:8px 10px;">
+                            ${(function() {
+                              const s = (adminShipmentsCache || []).find(x => x.order_id === o.id || x.id === o.shipment_id);
+                              const awb = o.shipment_awb || (s ? s.awb_code : null) || '';
+                              const courier = o.shipment_courier || (s ? s.courier_name : null) || '';
+                              const labelUrl = o.shipment_label_url || (s ? s.label_url : null) || '';
+                              return `<div style="display:flex;gap:12px;flex-wrap:wrap;">
+                                ${awb ? `<span><strong>AWB:</strong> ${awb}</span>` : ''}
+                                ${courier ? `<span><strong>Courier:</strong> ${courier}</span>` : ''}
+                                ${labelUrl ? `<a href="${labelUrl}" target="_blank" style="color:#3b82f6;text-decoration:underline;font-size:0.72rem;"><i class="fa-solid fa-file-lines"></i> Label</a>` : ''}
+                              </div>`;
+                            })()}
+                          </div>
+                          <div style="display:flex;gap:6px;">
+                            <button class="aoc-ful-btn aoc-ful-btn-primary" onclick="globalThis.confirmDispatch('${o.id}')" title="Confirm and release to carrier — schedules pickup">
+                              <i class="fa-solid fa-check-circle"></i> Confirm & Release
+                            </button>
+                            <button class="aoc-ful-btn" style="color:#ef4444;border-color:#ef4444;" onclick="globalThis.cancelShipmentFromTab('${o.id}')" title="Cancel this shipment draft">
+                              <i class="fa-solid fa-ban"></i> Cancel
+                            </button>
+                          </div>
+                        </div>
                       ` : ''}
                       ${o.fulfillment_status === 'with_carrier' ? `
                         <button class="aoc-ful-btn aoc-ful-btn-active" disabled>
@@ -1833,25 +1860,47 @@ function renderAdminOrders(orders) {
 let currentSection = 'all';
 
 function getFulfillmentStageLabel(o) {
+  // Status is the source of truth for v3 states
+  const v3Labels = {
+    'approved': 'pending',
+    'packing': 'packing',
+    'packed': 'packed',
+    'ready_to_ship': 'shipping',
+    'with_carrier': 'shipping',
+    'out_for_delivery': 'shipping',
+    'ndr': 'shipping',
+    'delivered': 'delivered',
+    'return_window': 'delivered',
+    'rto': 'cancelled',
+    'self_cancelled': 'cancelled',
+    'admin_rejected': 'cancelled',
+    'shipment_failed': 'packing',
+  };
+  if (v3Labels[o.status]) return v3Labels[o.status];
+
   const fs = o.fulfillment_status || '';
   const ds = o.delivery_status || '';
   if (o.status === 'CANCEL_REQUESTED' || ds === 'CANCEL_REQUESTED') return 'cancel_requests';
-  if (ds === 'cancelled' || ds === 'rejected') return 'cancelled';
+  if (['cancelled', 'rejected'].includes(ds)) return 'cancelled';
   if (ds === 'delivered' || fs === 'delivered') return 'delivered';
   if (fs === 'packing_required') return 'packing';
   if (fs === 'packed') return 'packed';
-  if (fs === 'ready_to_ship' || fs === 'with_carrier' || ['shipped','in_transit'].includes(ds)) return 'shipping';
+  if (fs === 'pending_dispatch' || fs === 'ready_to_ship' || fs === 'with_carrier' || ['shipped','in_transit'].includes(ds)) return 'shipping';
   if (fs === 'pending_fulfillment' || ds === 'placed' || ds === 'admin_pending') return 'pending';
   return null;
 }
 
 function isFreshOrder(o) {
+  // Status-based checks take priority
+  const terminalStatuses = ['cancelled', 'self_cancelled', 'admin_rejected', 'rto', 'delivered', 'return_window', 'completed',
+    'CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED',
+    'REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED',
+    'packing', 'packed', 'pending_dispatch', 'ready_to_ship', 'with_carrier', 'out_for_delivery', 'ndr', 'shipment_failed'];
+  if (terminalStatuses.includes(o.status)) return false;
+
   const fs = o.fulfillment_status || '';
   const ds = o.delivery_status || '';
-  const refundExclude = ['CANCEL_REQUESTED','CANCEL_APPROVED','CANCEL_REJECTED','REFUND_PENDING','REFUND_INITIATED','REFUND_PROCESSING','REFUND_COMPLETED','REFUND_FAILED','MANUAL_REFUND_INITIATED','MANUAL_REFUND_COMPLETED'];
-  if (refundExclude.includes(o.status)) return false;
   if (['cancelled','rejected'].includes(ds)) return false;
-  if (o.status === 'CANCEL_REQUESTED') return false;
   return (fs === '' || fs === 'pending_fulfillment') && (ds === 'placed' || ds === '' || ds === 'admin_pending');
 }
 
@@ -1864,9 +1913,9 @@ function updateSectionCounts(orders) {
     packing: allOrders.filter(o => getFulfillmentStageLabel(o) === 'packing').length,
     packed: allOrders.filter(o => getFulfillmentStageLabel(o) === 'packed').length,
     shipping: allOrders.filter(o => getFulfillmentStageLabel(o) === 'shipping').length,
-    delivered: allOrders.filter(o => o.delivery_status === 'delivered').length,
+    delivered: allOrders.filter(o => o.delivery_status === 'delivered' || o.status === 'delivered' || o.status === 'return_window').length,
     cancel_requests: allOrders.filter(o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED').length,
-    cancelled: allOrders.filter(o => ['cancelled', 'rejected'].includes(o.delivery_status)).length,
+    cancelled: allOrders.filter(o => ['cancelled', 'rejected'].includes(o.delivery_status) || ['cancelled', 'self_cancelled', 'admin_rejected', 'rto'].includes(o.status)).length,
   };
   Object.entries(countMap).forEach(([key, count]) => {
     const el = document.getElementById(`sec-count-${key}`);
@@ -1887,9 +1936,9 @@ function renderCurrentSection() {
     packing: o => getFulfillmentStageLabel(o) === 'packing',
     packed: o => getFulfillmentStageLabel(o) === 'packed',
     shipping: o => getFulfillmentStageLabel(o) === 'shipping',
-    delivered: o => o.delivery_status === 'delivered',
+    delivered: o => o.delivery_status === 'delivered' || o.status === 'delivered' || o.status === 'return_window',
     cancel_requests: o => o.status === 'CANCEL_REQUESTED' || o.delivery_status === 'CANCEL_REQUESTED',
-    cancelled: o => ['cancelled', 'rejected'].includes(o.delivery_status),
+    cancelled: o => ['cancelled', 'rejected'].includes(o.delivery_status) || ['cancelled', 'self_cancelled', 'admin_rejected', 'rto'].includes(o.status),
   };
 
   const filterFn = sectionFilters[currentSection];
@@ -2127,7 +2176,10 @@ async function updateFulfillment(orderId, fulfillmentStatus) {
       throw new Error(errData.error || 'Failed to update fulfillment');
     }
     const statusLabel = fulfillmentStatus.replace(/_/g, ' ');
-    showSuccessToast(`✅ Fulfillment moved to "${statusLabel}"`);
+    const toastMsg = fulfillmentStatus === 'ready_to_ship'
+      ? '✅ Shipment draft created. Review AWB/details, then click "Confirm & Release" to dispatch.'
+      : `✅ Fulfillment moved to "${statusLabel}"`;
+    showSuccessToast(toastMsg);
     fetchAdminOrders();
   } catch (err) {
     console.error(err);
@@ -2135,6 +2187,29 @@ async function updateFulfillment(orderId, fulfillmentStatus) {
   }
 }
 globalThis.updateFulfillment = updateFulfillment;
+
+async function confirmDispatch(orderId) {
+  if (!confirm(`Confirm and release this shipment to the carrier? Pickup will be scheduled and the order will move to "With Carrier".`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/orders/${orderId}/confirm-dispatch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.token}`,
+      },
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to confirm dispatch');
+    }
+    showSuccessToast('✅ Shipment confirmed and released to carrier. Pickup scheduled.');
+    fetchAdminOrders();
+  } catch (err) {
+    console.error(err);
+    showErrorToast(err.message || 'Failed to confirm dispatch');
+  }
+}
+globalThis.confirmDispatch = confirmDispatch;
 
 function renderAdminHistoryFilterValueControl(filterType) {
   const container = document.getElementById('admin-history-filter-value');
@@ -3303,7 +3378,7 @@ async function adminDeleteCategory(catId) {
     }
 
     showSuccessToast('✅ Category removed successfully.');
-    window.location.href = '/';
+    globalThis.location.hash = '#shop';
   } catch (err) {
     showErrorToast(getApiErrorMessage(err) || 'Unable to delete category.');
   }
@@ -4746,9 +4821,11 @@ function activateAdminTab(tabName) {
   if (tabName === 'communication') {
     loadCommunicationTab();
   }
-}
   if (tabName === 'training-ops') {
     loadTrainingOpsTab();
+  }
+  if (tabName === 'security') {
+    loadSecurityTab();
   }
 }
 
@@ -5156,8 +5233,32 @@ function setupAdminEventHandlers() {
       const email = document.getElementById('admin-auth-email').value.trim();
       const otpField = document.getElementById('admin-auth-otp-field');
       const emailField = document.getElementById('admin-auth-email-field');
+      const faField = document.getElementById('admin-auth-2fa-field');
       const btn = document.getElementById('admin-auth-btn');
       const sentEl = document.getElementById('admin-auth-otp-sent');
+
+      // Step 3: Verify 2FA code
+      if (faField && !faField.classList.contains('hidden')) {
+        const code2fa = document.getElementById('admin-auth-2fa').value.trim();
+        if (!/^\d{6}$/.test(code2fa)) {
+          renderAuthError('Enter a valid 6-digit code from your authenticator app');
+          return;
+        }
+        if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+        try {
+          await authApi.adminVerify2fa(code2fa);
+          const rawUser = sessionStorage.getItem('_2fa_user');
+          if (rawUser) {
+            try { state.user = JSON.parse(rawUser); } catch (_) {}
+            sessionStorage.removeItem('_2fa_user');
+          }
+          showDashboard();
+        } catch (err) {
+          renderAuthError(err.message || '2FA verification failed');
+          if (btn) { btn.disabled = false; btn.textContent = 'Verify Code'; }
+        }
+        return;
+      }
 
       // Step 2: Verify OTP
       if (otpField && !otpField.classList.contains('hidden')) {
@@ -5169,8 +5270,18 @@ function setupAdminEventHandlers() {
         if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
         try {
           const data = await authApi.adminVerifyOtp(email, otpCode);
-          saveAuth(data.token, data.user);
-          showDashboard();
+          if (data.requires2fa) {
+            saveAuth(data.token, null);
+            sessionStorage.setItem('_2fa_user', JSON.stringify(data.user));
+            if (emailField) emailField.classList.add('hidden');
+            if (otpField) otpField.classList.add('hidden');
+            if (faField) faField.classList.remove('hidden');
+            if (btn) { btn.disabled = false; btn.textContent = 'Verify Code'; }
+            document.getElementById('admin-auth-2fa')?.focus();
+          } else {
+            saveAuth(data.token, data.user);
+            showDashboard();
+          }
         } catch (err) {
           renderAuthError(err.message || 'OTP verification failed');
           if (btn) { btn.disabled = false; btn.textContent = 'Verify & Login'; }
@@ -5216,9 +5327,21 @@ function setupAdminEventHandlers() {
     clearAuthError();
   });
 
+  // Back to OTP from 2FA step
+  document.getElementById('admin-auth-back-otp')?.addEventListener('click', () => {
+    const otpField = document.getElementById('admin-auth-otp-field');
+    const faField = document.getElementById('admin-auth-2fa-field');
+    const btn = document.getElementById('admin-auth-btn');
+    if (faField) faField.classList.add('hidden');
+    if (otpField) otpField.classList.remove('hidden');
+    if (btn) { btn.disabled = false; btn.textContent = 'Verify & Login'; }
+    sessionStorage.removeItem('_2fa_user');
+    clearAuthError();
+  });
+
   // Logout
   if (btnLogout) btnLogout.addEventListener('click', () => { clearAuth(); showLoginPanel(); });
-  if (btnViewShop) btnViewShop.addEventListener('click', () => (globalThis.location.href = '/'));
+  if (btnViewShop) btnViewShop.addEventListener('click', () => (globalThis.location.hash = '#shop'));
 
   // Admin action menu toggle
   if (adminActionMenuBtn && adminActionMenu) {
@@ -5845,6 +5968,9 @@ function setupAdminEventHandlers() {
 
   // Transform static weight selects into pill widgets
   wpwTransformStatic();
+
+  // Wire 2FA Security handlers
+  wireSecurityHandlers();
 }
 
 /* ── Training Ops Tab ── */
@@ -6338,8 +6464,165 @@ async function loadTrainingOpsTab() {
 
 globalThis.loadTrainingOpsTab = loadTrainingOpsTab;
 
-async function initAdminPage() {
+/* ── Security Tab (2FA) ── */
+
+async function loadSecurityTab() {
+  const notSetup = document.getElementById('security-2fa-not-setup');
+  const setupQr = document.getElementById('security-2fa-setup-qr');
+  const enabledDiv = document.getElementById('security-2fa-enabled');
+  const loading = document.getElementById('security-loading');
+  const setupErr = document.getElementById('security-setup-error');
+  const disableErr = document.getElementById('security-disable-error');
+
+  const resetUi = () => {
+    [notSetup, setupQr, enabledDiv].forEach(el => el?.classList.add('hidden'));
+    if (loading) loading.classList.remove('hidden');
+    if (setupErr) setupErr.classList.add('hidden');
+    if (disableErr) disableErr.classList.add('hidden');
+    if (setupErr) setupErr.textContent = '';
+    if (disableErr) disableErr.textContent = '';
+  };
+  resetUi();
+
+  try {
+    const res = await authApi.adminGet2faStatus();
+    if (!res?.success) throw new Error('Failed to get 2FA status');
+
+    if (loading) loading.classList.add('hidden');
+    const { enabled } = res.data;
+
+    if (enabled) {
+      if (enabledDiv) enabledDiv.classList.remove('hidden');
+    } else {
+      if (notSetup) notSetup.classList.remove('hidden');
+    }
+  } catch (err) {
+    if (loading) loading.textContent = 'Failed to load security settings: ' + (err.message || 'Unknown error');
+  }
+}
+
+function wireSecurityHandlers() {
+  const enableBtn = document.getElementById('btn-security-enable-2fa');
+  const verifyBtn = document.getElementById('btn-security-verify-setup');
+  const cancelBtn = document.getElementById('btn-security-cancel-setup');
+  const disableBtn = document.getElementById('btn-security-disable-2fa');
+  const notSetup = document.getElementById('security-2fa-not-setup');
+  const setupQr = document.getElementById('security-2fa-setup-qr');
+  const enabledDiv = document.getElementById('security-2fa-enabled');
+  const loading = document.getElementById('security-loading');
+  const setupErr = document.getElementById('security-setup-error');
+  const disableErr = document.getElementById('security-disable-error');
+
+  // Enable 2FA: Generate QR code
+  if (enableBtn) {
+    enableBtn.addEventListener('click', async () => {
+      enableBtn.disabled = true;
+      enableBtn.textContent = 'Generating…';
+      try {
+        const res = await authApi.adminSetup2fa();
+        if (!res?.success) throw new Error(res?.error || 'Failed to setup 2FA');
+        const qrImg = document.getElementById('security-qr-image');
+        const secretKey = document.getElementById('security-secret-key');
+        if (qrImg) qrImg.src = res.data.qr_code;
+        if (secretKey) secretKey.textContent = res.data.secret;
+        if (notSetup) notSetup.classList.add('hidden');
+        if (setupQr) setupQr.classList.remove('hidden');
+      } catch (err) {
+        if (setupErr) {
+          setupErr.textContent = err.message || 'Failed to generate QR code';
+          setupErr.classList.remove('hidden');
+        }
+      } finally {
+        enableBtn.disabled = false;
+        enableBtn.textContent = '<i class="fa-solid fa-qrcode"></i> Enable Two-Step Verification';
+      }
+    });
+  }
+
+  // Verify setup code
+  if (verifyBtn) {
+    verifyBtn.addEventListener('click', async () => {
+      const code = document.getElementById('security-setup-code')?.value?.trim();
+      if (!code || !/^\d{6}$/.test(code)) {
+        if (setupErr) {
+          setupErr.textContent = 'Enter a valid 6-digit code';
+          setupErr.classList.remove('hidden');
+        }
+        return;
+      }
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = 'Verifying…';
+      try {
+        const res = await authApi.adminVerifySetup2fa(code);
+        if (!res?.success) throw new Error(res?.error || 'Invalid code');
+        if (setupQr) setupQr.classList.add('hidden');
+        if (enabledDiv) enabledDiv.classList.remove('hidden');
+        showSuccessToast('Two-step verification enabled successfully');
+      } catch (err) {
+        if (setupErr) {
+          setupErr.textContent = err.message || 'Verification failed';
+          setupErr.classList.remove('hidden');
+        }
+      } finally {
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = '<i class="fa-solid fa-check"></i> Verify & Enable';
+      }
+    });
+  }
+
+  // Cancel setup
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', async () => {
+      if (setupQr) setupQr.classList.add('hidden');
+      if (loading) loading.classList.add('hidden');
+      if (notSetup) notSetup.classList.remove('hidden');
+      document.getElementById('security-setup-code').value = '';
+      if (setupErr) setupErr.classList.add('hidden');
+    });
+  }
+
+  // Disable 2FA
+  if (disableBtn) {
+    disableBtn.addEventListener('click', async () => {
+      const code = document.getElementById('security-disable-code')?.value?.trim();
+      if (!code || !/^\d{6}$/.test(code)) {
+        if (disableErr) {
+          disableErr.textContent = 'Enter your current 6-digit code to disable 2FA';
+          disableErr.classList.remove('hidden');
+        }
+        return;
+      }
+      disableBtn.disabled = true;
+      disableBtn.textContent = 'Disabling…';
+      try {
+        const res = await authApi.adminDisable2fa(code);
+        if (!res?.success) throw new Error(res?.error || 'Failed to disable 2FA');
+        if (enabledDiv) enabledDiv.classList.add('hidden');
+        if (loading) loading.classList.add('hidden');
+        if (notSetup) notSetup.classList.remove('hidden');
+        document.getElementById('security-disable-code').value = '';
+        showSuccessToast('Two-step verification disabled');
+      } catch (err) {
+        if (disableErr) {
+          disableErr.textContent = err.message || 'Failed to disable';
+          disableErr.classList.remove('hidden');
+        }
+      } finally {
+        disableBtn.disabled = false;
+        disableBtn.textContent = '<i class="fa-solid fa-xmark"></i> Disable 2FA';
+      }
+    });
+  }
+}
+
+async function initAdminPage(alreadyVerified = false) {
   setupAdminEventHandlers();
+  // When called from the SPA route guard, alreadyVerified is true —
+  // skip the redundant authApi.getMe() call and just show the dashboard.
+  if (alreadyVerified) {
+    showDashboard();
+    return;
+  }
   // Initialize UI state — only show dashboard if the logged-in user is an admin
   if (state.token && state.user && state.user.role === 'admin') {
     const tokenAtStart = state.token;
@@ -6365,4 +6648,4 @@ async function initAdminPage() {
   }
 }
 
-initAdminPage();
+export default initAdminPage;

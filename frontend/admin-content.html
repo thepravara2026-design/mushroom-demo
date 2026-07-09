@@ -1,0 +1,1529 @@
+  <div class="admin-shell">
+    <main class="admin-page-main">
+      <section id="admin-login-panel" class="admin-login-panel">
+        <div class="admin-login-card">
+          <div class="admin-login-grid">
+            <div class="admin-login-side">
+              <div>
+                <span class="admin-label">Secure Admin Access</span>
+                <h2>Welcome back, Sporekart Operator</h2>
+                <p>
+                  Manage live inventory, orders, categories, and store-level
+                  updates from a fast, modern control experience.
+                </p>
+              </div>
+              <ul class="login-features">
+                <li>
+                  <i class="fa-solid fa-check-circle"></i> Fast dashboard
+                  access with secure credentials
+                </li>
+                <li>
+                  <i class="fa-solid fa-sparkles"></i> Elegant responsive
+                  design for desktop and mobile
+                </li>
+                <li>
+                  <i class="fa-solid fa-shield-halved"></i> Admin-only
+                  controls for products, orders, categories
+                </li>
+              </ul>
+              <div class="admin-login-branding">
+                <span class="brand-pill">Sporekart</span>
+                <span class="brand-note">Powered by your mushroom e-commerce control center.</span>
+              </div>
+            </div>
+            <div class="admin-login-form-panel">
+              <div class="auth-form-panel">
+                <h2>Admin Sign In</h2>
+                <p>Enter your admin email to receive a secure OTP.</p>
+                <form id="form-admin-auth" class="admin-auth-form">
+                  <div class="input-field" id="admin-auth-email-field">
+                    <label>Admin Email</label>
+                    <input type="email" id="admin-auth-email" required placeholder="admin@example.com" />
+                  </div>
+                  <div class="input-field hidden" id="admin-auth-otp-field">
+                    <label>OTP Code</label>
+                    <input type="text" id="admin-auth-otp" maxlength="6" placeholder="Enter 6-digit OTP" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" />
+                    <div id="admin-auth-otp-sent" class="auth-field-hint"></div>
+                    <button type="button" class="auth-link-btn" id="admin-auth-change-email">Change email</button>
+                  </div>
+                  <div class="input-field hidden" id="admin-auth-2fa-field">
+                    <label>Two-Step Code</label>
+                    <input type="text" id="admin-auth-2fa" maxlength="6" placeholder="Enter 6-digit code from authenticator" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" />
+                    <div id="admin-auth-2fa-hint" class="auth-field-hint">Enter the code from your authenticator app.</div>
+                    <button type="button" class="auth-link-btn" id="admin-auth-back-otp">Back to OTP</button>
+                  </div>
+                  <div class="admin-error-msg hidden" id="admin-login-error"></div>
+                  <button type="submit" class="btn btn-primary btn-block" id="admin-auth-btn">
+                    Send OTP
+                  </button>
+                </form>
+                <p class="admin-login-footer">
+                  Not an admin? Head back to the
+                  <a href="/">shop homepage</a>.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-dashboard" class="admin-dashboard hidden">
+        <div class="admin-dashboard-topbar">
+          <a href="/" class="admin-topbar-logo">
+            <div class="admin-logo-icon-wrap">
+              <i class="fa-solid fa-seedling"></i>
+            </div>
+            <div class="admin-logo-text">
+              <span class="admin-logo-brand">Sporekart</span>
+              <span class="admin-logo-tagline">Admin Dashboard</span>
+            </div>
+          </a>
+          <div class="admin-dash-brand">
+            <div class="admin-dash-icon">
+              <i class="fa-solid fa-user-shield"></i>
+            </div>
+            <div>
+              <h2>Admin Control Panel</h2>
+              <span id="admin-dash-subtitle">Sporekart Inventory Management</span>
+            </div>
+          </div>
+          <div style="
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                flex-wrap: wrap;
+              ">
+            <div class="admin-dash-stats" id="admin-dash-stats">
+              <div class="admin-stat-chip">
+                <i class="fa-solid fa-box"></i>
+                <span id="admin-stat-products">0</span> Products
+              </div>
+              <div class="admin-stat-chip">
+                <i class="fa-solid fa-shopping-bag"></i>
+                <span id="admin-stat-orders">0</span> Orders
+              </div>
+            </div>
+            <div class="admin-top-actions">
+              <button class="btn btn-secondary-glow admin-action-menu-btn" id="admin-action-menu-btn">
+                <i class="fa-solid fa-ellipsis-vertical"></i> Admin Actions
+              </button>
+              <div class="admin-action-menu hidden" id="admin-action-menu">
+                <button type="button" class="admin-action-menu-item" id="btn-admin-view-shop">
+                  <i class="fa-solid fa-store"></i> View Shop
+                </button>
+                <button type="button" class="admin-action-menu-item danger" id="btn-admin-logout">
+                  <i class="fa-solid fa-right-from-bracket"></i> Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-bar">
+          <button class="admin-tab active" data-tab="products">
+            <i class="fa-solid fa-boxes-stacked"></i> Products
+          </button>
+          <button class="admin-tab" data-tab="orders">
+            <i class="fa-solid fa-truck-fast"></i> Orders &amp; Shipping
+            <span id="admin-orders-cancel-badge" class="admin-nav-badge hidden">0</span>
+          </button>
+
+          <button class="admin-tab" data-tab="training-ops">
+            <i class="fa-solid fa-chalkboard-user"></i> Training Ops
+          </button>
+          <button class="admin-tab" data-tab="blogs">
+            <i class="fa-solid fa-newspaper"></i> Blogs
+          </button>
+
+          <button class="admin-tab" data-tab="analytics">
+            <i class="fa-solid fa-chart-line"></i> Analytics
+          </button>
+          <button class="admin-tab" data-tab="communication" style="position:relative;">
+            <i class="fa-solid fa-tower-cell"></i> Communication
+            <span id="admin-comm-fail-badge" class="admin-nav-badge hidden" style="background:#dc2626;">!</span>
+          </button>
+          <button class="admin-tab" data-tab="security">
+            <i class="fa-solid fa-shield-halved"></i> Security
+          </button>
+        </div>
+
+        <div class="admin-tab-content active" id="admin-content-products">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-list"></i> Product Inventory</h3>
+              <div class="admin-capsules">
+                <button class="admin-capsule active" data-capsule="all" type="button"><i class="fa-solid fa-cubes"></i>
+                  All Products</button>
+                <button class="admin-capsule" data-capsule="recent" type="button"><i
+                    class="fa-solid fa-clock-rotate-left"></i> Recently Added</button>
+                <button class="admin-capsule" data-capsule="add-product" type="button"><i
+                    class="fa-solid fa-plus-circle"></i> Add / Edit Product</button>
+                <button class="admin-capsule" data-capsule="categories" type="button"><i
+                    class="fa-solid fa-tags"></i> Categories</button>
+                <button class="admin-capsule" data-capsule="inventory" type="button"><i
+                    class="fa-solid fa-warehouse"></i> Inventory</button>
+                <button class="admin-capsule" data-capsule="bulk-import" type="button"><i
+                    class="fa-solid fa-upload"></i> Bulk Import</button>
+              </div>
+            </div>
+            <div class="af-bar">
+              <div class="af-bar-inner">
+                <div class="af-search-wrap">
+                  <i class="fa-solid fa-search af-search-icon"></i>
+                  <input type="text" id="admin-search-prod" placeholder="Search products..." class="af-search-input" />
+                  <button class="af-search-clear hidden" id="af-search-clear" type="button" tabindex="-1"
+                    aria-label="Clear search"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="af-divider"></div>
+                <div class="af-select-group">
+                  <div class="af-select-wrap">
+                    <i class="fa-solid fa-tags af-select-icon"></i>
+                    <select id="admin-filter-cat" class="af-select">
+                      <option value="all">All Categories</option>
+                    </select>
+                  </div>
+                  <div class="af-select-wrap">
+                    <i class="fa-solid fa-arrow-down-wide-short af-select-icon"></i>
+                    <select id="admin-inventory-sort" class="af-select">
+                      <option value="name_asc">Name A–Z</option>
+                      <option value="name_desc">Name Z–A</option>
+                      <option value="price_asc">Price ↑</option>
+                      <option value="price_desc">Price ↓</option>
+                      <option value="stock_asc">Stock ↑</option>
+                      <option value="stock_desc">Stock ↓</option>
+                    </select>
+                  </div>
+                  <div class="af-select-wrap af-select-wrap--sm">
+                    <i class="fa-solid fa-list-ol af-select-icon"></i>
+                    <select id="admin-inventory-page-size" class="af-select">
+                      <option value="10" selected>10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="admin-inventory-grid" class="admin-product-table-wrap">
+            <div class="admin-loading">
+              <i class="fa-solid fa-spinner fa-spin"></i> Loading
+              products...
+            </div>
+          </div>
+          <div id="admin-capsule-add-form" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="admin-form-wrap">
+              <form id="form-admin-capsule-add" class="admin-product-form premium-add-form">
+                <input type="hidden" id="admin-capsule-edit-id" value="" />
+
+                <!-- Header -->
+                <div class="premium-form-header">
+                  <div class="premium-form-header-icon">
+                    <i class="fa-solid fa-leaf"></i>
+                  </div>
+                  <div>
+                    <h2 id="capsule-form-title">Publish New Product</h2>
+                    <p id="capsule-form-subtitle">Fill in the details below to list a new mushroom product</p>
+                  </div>
+                </div>
+
+                <!-- Section 1: Basic Info -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-info-circle"></i>
+                    <h3>Basic Information</h3>
+                    <span>Step 1 of 5</span>
+                  </div>
+                  <div class="premium-form-row">
+                    <div class="premium-field">
+                      <label>Category <span class="required-star">*</span></label>
+                      <select id="admin-capsule-prod-category"></select>
+                    </div>
+                    <div class="premium-field">
+                      <label>Product ID</label>
+                      <input type="text" id="admin-capsule-prod-id-display" readonly placeholder="Auto-generated" />
+                    </div>
+                    <div class="premium-field">
+                      <label>Product Name <span class="required-star">*</span></label>
+                      <input type="text" id="admin-capsule-prod-name" required
+                        placeholder="e.g. Golden Oyster Mushroom Kit" />
+                    </div>
+                    <div class="premium-field">
+                      <label>GST Slab</label>
+                      <select id="admin-capsule-prod-gst">
+                        <option value="0">0% (Exempt)</option>
+                        <option value="5" selected>5% (Food/Agri)</option>
+                        <option value="12">12% (Standard)</option>
+                        <option value="18">18% (Standard+)</option>
+                        <option value="28">28% (Luxury)</option>
+                      </select>
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Description <span class="required-star">*</span></label>
+                      <textarea id="admin-capsule-prod-desc" required
+                        placeholder="Product details, cultivation notes, taste profile..."
+                        style="min-height: 80px;"></textarea>
+                    </div>
+                    <div class="premium-field">
+                      <label>Scientific Name</label>
+                      <input type="text" id="admin-capsule-prod-sci-name"
+                        placeholder="e.g. Pleurotus ostreatus" />
+                    </div>
+                    <div class="premium-field">
+                      <label>Shelf Life</label>
+                      <input type="text" id="admin-capsule-prod-shelf-life"
+                        placeholder="e.g. 5–7 days under refrigeration" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Section 2: Pricing & Stock -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-cubes"></i>
+                    <h3>Pricing &amp; Inventory</h3>
+                    <span>Step 2 of 5</span>
+                  </div>
+                  <div class="premium-weight-section">
+                    <div class="pricing-type-toggle" style="margin-bottom:12px;">
+                      <button type="button" class="pricing-type-btn active" data-mode="weight">
+                        <i class="fa-solid fa-weight-scale"></i> Weight
+                      </button>
+                      <button type="button" class="pricing-type-btn" data-mode="litre">
+                        <i class="fa-solid fa-flask"></i> Volume
+                      </button>
+                    </div>
+                    <div id="admin-capsule-weight-container">
+                      <div class="premium-weight-row">
+                        <select class="admin-capsule-weight-select pw-select">
+                          <option value="">Select weight / volume</option>
+                          <optgroup label="— Weight —">
+                            <option value="100g">100 g</option>
+                            <option value="200g">200 g</option>
+                            <option value="250g">250 g</option>
+                            <option value="400g">400 g</option>
+                            <option value="500g">500 g</option>
+                            <option value="1kg">1 kg</option>
+                            <option value="2kg">2 kg</option>
+                            <option value="5kg">5 kg</option>
+                          </optgroup>
+                          <optgroup label="— Volume —">
+                            <option value="10ml">10 ml</option>
+                            <option value="20ml">20 ml</option>
+                            <option value="50ml">50 ml</option>
+                            <option value="100ml">100 ml</option>
+                            <option value="200ml">200 ml</option>
+                            <option value="500ml">500 ml</option>
+                            <option value="1l">1 l</option>
+                            <option value="2l">2 l</option>
+                            <option value="5l">5 l</option>
+                          </optgroup>
+                        </select>
+                        <div class="premium-weight-fields">
+                          <div class="pw-field">
+                            <label>Selling Price</label>
+                            <input type="number" step="0.01" class="admin-capsule-weight-price" placeholder="0.00" />
+                          </div>
+                          <div class="pw-field">
+                            <label>MRP</label>
+                            <input type="number" step="0.01" class="admin-capsule-weight-mrp" placeholder="0.00" />
+                          </div>
+                          <div class="pw-field">
+                            <label>Stock</label>
+                            <input type="number" class="admin-capsule-weight-stock" placeholder="0" min="0" />
+                          </div>
+                        </div>
+                        <button type="button" class="premium-weight-remove"><i class="fa-solid fa-xmark"></i></button>
+                      </div>
+                    </div>
+                    <button type="button" class="btn-premium-add-weight"><i class="fa-solid fa-plus"></i> Add
+                      Variant</button>
+                    <div class="premium-total-stock" id="admin-capsule-total-stock-wrap">
+                      <i class="fa-solid fa-cubes"></i>
+                      <span>Total Inventory:</span>
+                      <strong id="admin-capsule-total-stock">0</strong>
+                      <span>units</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Section 3: Media -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-image"></i>
+                    <h3>Product Media</h3>
+                    <span>Step 3 of 5</span>
+                  </div>
+                  <div class="premium-form-row">
+                    <div class="premium-field">
+                      <label>Main Image</label>
+                      <div class="premium-image-zone" id="capsule-image-zone">
+                        <div class="premium-img-preview" id="admin-capsule-img-preview">
+                          <i class="fa-solid fa-cloud-arrow-up"></i>
+                          <span>Drop an image here or click to browse</span>
+                          <small>Supports JPG, PNG, WebP</small>
+                        </div>
+                        <div class="premium-img-overlay" style="display:none;">
+                          <button type="button" class="capsule-image-change" title="Change image"><i
+                              class="fa-solid fa-rotate"></i></button>
+                          <button type="button" class="capsule-image-remove" title="Remove"><i
+                              class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        <input type="url" id="admin-capsule-prod-image-url" class="hidden" />
+                        <input type="file" class="admin-capsule-image-file hidden-file-input" accept="image/*" />
+                      </div>
+                    </div>
+                    <div class="premium-field">
+                      <label>&nbsp;</label>
+                      <div
+                        style="display:flex;flex-direction:column;gap:8px;justify-content:center;height:100%;padding:0 4px;">
+                        <span style="font-size:0.78rem;color:var(--text-soft);font-weight:500;">Or paste an image
+                          URL</span>
+                        <div style="display:flex;gap:6px;">
+                          <input type="text" id="capsule-image-url-input" placeholder="https://example.com/image.jpg"
+                            style="flex:1;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:0.85rem;outline:none;font-family:var(--font-body);" />
+                          <button type="button" id="capsule-apply-url-btn"
+                            style="padding:10px 18px;border:none;border-radius:10px;background:var(--green-mid);color:#fff;font-weight:600;font-size:0.82rem;cursor:pointer;font-family:var(--font-body);">Apply</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="margin-top:16px;">
+                    <div class="premium-form-section-title" style="margin-bottom:8px;">
+                      <i class="fa-regular fa-images"></i>
+                      <h3>Gallery Images</h3>
+                      <span class="premium-gallery-count" id="capsule-gallery-count-badge">0 / 3 min</span>
+                    </div>
+                    <div class="premium-gallery-grid" id="capsule-gallery-grid">
+                      <div class="premium-gallery-slot" data-slot="0">
+                        <div class="gallery-placeholder"><i class="fa-regular fa-image"></i><span>#1</span></div>
+                        <input type="url" class="gallery-url-input gallery-input-hidden" data-slot="0" />
+                        <button type="button" class="gallery-remove-overlay" data-slot="0" style="display:none;"><i
+                            class="fa-solid fa-xmark"></i></button>
+                      </div>
+                    </div>
+                    <div class="premium-gallery-actions">
+                      <button type="button" class="btn-premium-gallery btn-premium-gallery-upload"
+                        id="btn-gallery-upload-capsule"><i class="fa-solid fa-upload"></i> Upload Images</button>
+                      <button type="button" class="btn-premium-gallery btn-premium-gallery-add"
+                        id="btn-gallery-add-capsule"><i class="fa-solid fa-plus"></i> Add Slot</button>
+                      <input type="file" id="gallery-file-capsule" class="hidden-file-input" multiple
+                        accept="image/*" />
+                    </div>
+                    <small style="color:#94a3b8;font-size:0.72rem;display:block;margin-top:6px;">Add 3–8 images. First
+                      image becomes the main product image if none is set.</small>
+                  </div>
+                </div>
+
+                <!-- Section 4: Product Details -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <h3>Product Details</h3>
+                    <span>Step 4 of 5</span>
+                  </div>
+                  <div class="premium-form-row">
+                    <div class="premium-field span-full">
+                      <label>Highlights <small style="color:#94a3b8;font-weight:400;">(one per line)</small></label>
+                      <textarea id="admin-capsule-prod-highlights"
+                        placeholder="Hand-picked at peak freshness&#10;Cold-chain maintained throughout transit&#10;Shelf life: 5-7 days under refrigeration"
+                        style="min-height:90px;"></textarea>
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Storage &amp; Handling</label>
+                      <textarea id="admin-capsule-prod-storage"
+                        placeholder="Refrigerate immediately at 2-4°C. Consume within 5-7 days for best quality."
+                        style="min-height:70px;"></textarea>
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Warranty Policy</label>
+                      <input type="text" id="admin-capsule-prod-warranty"
+                        placeholder="e.g. 7-day freshness guarantee — replace if spoiled on arrival." />
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Return Policy</label>
+                      <textarea id="admin-capsule-prod-returns"
+                        placeholder="Perishable goods non-returnable. Replacement issued for quality issues reported within 24 hrs."
+                        style="min-height:60px;"></textarea>
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Shipping Info</label>
+                      <input type="text" id="admin-capsule-prod-shipping"
+                        placeholder="e.g. Free shipping on orders above ₹499. Dispatched in insulated boxes." />
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Regulatory Compliance</label>
+                      <textarea id="admin-capsule-prod-compliance"
+                        placeholder="Compliant with FSSAI regulations. Grown under Good Agricultural Practices (GAP)."
+                        style="min-height:60px;"></textarea>
+                    </div>
+                    <div class="premium-field span-full">
+                      <label>Certificates <small style="color:#94a3b8;font-weight:400;">(label per line; icon class
+                          prefix optional, e.g. &quot;fa-leaf:Organic&quot;)</small></label>
+                      <textarea id="admin-capsule-prod-certificates"
+                        placeholder="FSSAI Certified&#10;fa-leaf:Organic Produce&#10;Non-GMO"
+                        style="min-height:70px;"></textarea>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Section 5: Vendor & SEO -->
+                <div class="premium-form-section">
+                  <div class="premium-form-section-title">
+                    <i class="fa-solid fa-building"></i>
+                    <h3>Vendor &amp; SEO</h3>
+                    <span>Step 5 of 5</span>
+                  </div>
+                  <div class="premium-form-row">
+                    <div class="premium-field span-full">
+                      <label>Manufacturer / Supplier</label>
+                      <div style="position:relative;">
+                        <input type="text" id="admin-capsule-prod-manufacturer"
+                          value="Shriyap Enterprises, Basavura Village Davangere"
+                          placeholder="Manufacturer / Supplier name" />
+                        <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:0.7rem;color:#94a3b8;pointer-events:none;background:#fff;padding:0 4px;">
+                          <i class="fa-solid fa-check-circle" style="color:#16a34a;"></i>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="premium-field">
+                      <label>SEO Title</label>
+                      <input type="text" id="admin-capsule-prod-seo-title"
+                        placeholder="Auto-generated from product name" />
+                    </div>
+                    <div class="premium-field">
+                      <label>SEO Slug</label>
+                      <input type="text" id="admin-capsule-prod-seo-slug"
+                        placeholder="Auto-generated from product name" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="premium-feedback">
+                  <div class="admin-error-msg hidden" id="admin-capsule-add-feedback"></div>
+                </div>
+
+                <div class="premium-form-actions">
+                  <button type="button" class="btn-premium-reset btn-capsule-reset-form">Reset</button>
+                  <button type="submit" class="btn-premium-submit" id="capsule-form-submit-btn">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span id="capsule-submit-label">Publish Product</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- CATEGORIES CAPSULE PANEL -->
+          <div id="admin-capsule-categories" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="admin-categories-layout">
+              <div class="admin-categories-form-col">
+                <div class="admin-cat-form-wrap">
+                  <input type="hidden" id="admin-edit-cat-id" value="" />
+                  <div class="admin-cat-form-compact">
+                    <div class="admin-cat-form-fields">
+                      <div class="input-field" style="flex: 0.8">
+                        <label>Category UID</label>
+                        <input type="text" id="admin-cat-uid" readonly placeholder="spore-000001" />
+                      </div>
+                      <div class="input-field" style="flex: 1.2">
+                        <label>Category Slug *</label>
+                        <input type="text" id="admin-cat-id" placeholder="e.g. fresh-mushrooms" pattern="[a-z0-9\-]+"
+                          title="Lowercase letters, numbers and hyphens only" />
+                      </div>
+                      <div class="input-field span-2">
+                        <label>Category Name *</label>
+                        <input type="text" id="admin-cat-name" placeholder="e.g. Fresh Mushrooms" />
+                      </div>
+                      <div class="input-field span-2">
+                        <label>Description</label>
+                        <input type="text" id="admin-cat-desc" placeholder="Short description of this category..." />
+                      </div>
+                      <div class="input-field span-2">
+                        <label>Image</label>
+                        <div class="admin-cat-image-upload">
+                          <input type="url" id="admin-cat-image-url" placeholder="Image URL or click Browse" />
+                          <button type="button" id="admin-cat-image-browse" class="btn btn-secondary btn-image-browse">
+                            <i class="fa-solid fa-upload"></i> Browse
+                          </button>
+                          <input type="file" id="admin-cat-image-file" class="hidden-file-input" />
+                        </div>
+                      </div>
+                    </div>
+                    <div id="admin-cat-image-preview" class="admin-cat-image-preview-compact">
+                      <i class="fa-solid fa-image"></i>
+                      <span>Image</span>
+                    </div>
+                  </div>
+                  <div class="admin-cat-form-actions">
+                    <button type="button" id="btn-admin-save-cat" class="btn btn-primary">
+                      <i class="fa-solid fa-floppy-disk"></i> Save
+                    </button>
+                    <button type="button" id="btn-admin-reset-cat" class="btn btn-secondary">
+                      <i class="fa-solid fa-rotate-left"></i> Reset
+                    </button>
+                  </div>
+                  <div class="admin-error-msg hidden" id="admin-cat-feedback"></div>
+                </div>
+              </div>
+              <div class="admin-categories-list-col">
+                <div id="admin-categories-list" class="admin-categories-wrap">
+                  <div class="admin-loading">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Loading categories...
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- INVENTORY CAPSULE PANEL (stock-focused view) -->
+          <div id="admin-capsule-inventory" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="admin-section-header" style="margin-bottom:16px;">
+              <h3><i class="fa-solid fa-warehouse"></i> Inventory Overview</h3>
+              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                <input type="text" id="admin-inv-search" placeholder="Search product name..."
+                  class="admin-search-input" style="min-width:200px;" />
+                <select id="admin-inv-filter" class="admin-select-input" style="min-width:140px;">
+                  <option value="">All</option>
+                  <option value="low">Low Stock Only</option>
+                  <option value="out">Out of Stock</option>
+                  <option value="notify">Notify-Me Requests</option>
+                </select>
+                <button type="button" class="btn btn-secondary" onclick="loadInventoryTab()"
+                  style="white-space:nowrap;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;">
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Low Stock Items</div>
+                <div class="refund-stat-value refund-stat-value--amber" id="admin-inv-stat-low">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Out of Stock</div>
+                <div class="refund-stat-value refund-stat-value--red" id="admin-inv-stat-oos">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Notify-Me Pending</div>
+                <div class="refund-stat-value" id="admin-inv-stat-notify">0</div>
+              </div>
+            </div>
+
+            <div id="admin-inventory-list">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading inventory...</div>
+            </div>
+          </div>
+
+          <!-- ═══════════════════════════════════════════════════ -->
+          <!-- BULK IMPORT CAPSULE -->
+          <!-- ═══════════════════════════════════════════════════ -->
+          <div id="admin-capsule-bulk-import" class="admin-capsule-form-wrap" style="display:none;">
+            <div class="bulk-import-wrap">
+              <div class="bulk-import-header">
+                <div class="bulk-import-header-icon">
+                  <i class="fa-solid fa-cloud-arrow-up"></i>
+                </div>
+                <div>
+                  <h2>Bulk Import</h2>
+                  <p>Upload an Excel (.xlsx) or CSV file to create or update multiple records at once</p>
+                </div>
+              </div>
+
+              <div class="bulk-import-entity-select">
+                <label>Select entity type to import</label>
+                <select id="bulk-import-entity">
+                  <option value="">— Choose entity —</option>
+                  <option value="products">Products</option>
+                  <option value="categories">Categories</option>
+                  <option value="blogs">Blogs</option>
+                  <option value="trainings">Training Courses</option>
+                  <option value="training-batches">Training Batches</option>
+                </select>
+              </div>
+
+              <div class="bulk-import-dropzone" id="bulk-import-dropzone">
+                <div class="bulk-import-dropzone-inner" id="bulk-import-dropzone-inner">
+                  <i class="fa-solid fa-file-arrow-up"></i>
+                  <span class="bulk-import-drop-text">Drop your file here, or <strong>browse</strong></span>
+                  <small>Supports .xlsx and .csv files up to 10 MB</small>
+                </div>
+                <input type="file" id="bulk-import-file-input" accept=".xlsx,.csv" class="hidden-file-input" />
+              </div>
+
+              <div class="bulk-import-actions">
+                <button type="button" class="btn-premium-reset" id="bulk-import-download-template">
+                  <i class="fa-solid fa-download"></i> Download Template
+                </button>
+                <button type="button" class="btn-premium-submit" id="bulk-import-upload-btn" disabled>
+                  <i class="fa-solid fa-cloud-arrow-up"></i> <span>Upload &amp; Import</span>
+                </button>
+              </div>
+
+              <div class="bulk-import-progress hidden" id="bulk-import-progress">
+                <div class="bulk-import-progress-bar-track">
+                  <div class="bulk-import-progress-bar-fill" id="bulk-import-progress-fill"></div>
+                </div>
+                <span class="bulk-import-progress-label" id="bulk-import-progress-label">Processing...</span>
+              </div>
+
+              <div class="bulk-import-feedback hidden" id="bulk-import-feedback"></div>
+
+              <div class="bulk-import-results hidden" id="bulk-import-results">
+                <div class="bulk-import-results-header">
+                  <span class="bulk-import-results-title">Import Results</span>
+                  <div class="bulk-import-results-stats">
+                    <span class="bulk-stat total" id="bi-stat-total">0</span>
+                    <span class="bulk-stat success" id="bi-stat-success">0</span>
+                    <span class="bulk-stat failed" id="bi-stat-failed">0</span>
+                  </div>
+                </div>
+                <div class="bulk-import-results-body" id="bulk-import-results-body"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- update for admin ordershipping tabs-pravara -->
+        <div id="admin-content-orders" class="admin-tab-content">
+          <div class="admin-content-inner">
+
+            <!-- Sub-tab bar -->
+            <div class="ship-tab-bar">
+              <button class="ship-tab active" data-ship-tab="current">
+                <i class="fa-solid fa-box-open"></i> Current orders
+              </button>
+              <button class="ship-tab" data-ship-tab="recent">
+                <i class="fa-solid fa-clock-rotate-left"></i> Recent orders
+              </button>
+              <button class="ship-tab" data-ship-tab="shipments">
+                <i class="fa-solid fa-cubes"></i> Shipments
+              </button>
+              <button class="ship-tab" data-ship-tab="refunds">
+                <i class="fa-solid fa-hand-holding-dollar"></i> Refunds
+              </button>
+              <button class="ship-tab" data-ship-tab="returns">
+                <i class="fa-solid fa-rotate-left"></i> Returns
+              </button>
+            </div>
+
+            <!-- CURRENT ORDERS PANEL -->
+            <div class="ship-panel active" id="ship-panel-current">
+              <div class="ship-status-pills">
+                <button class="ship-status-pill active" data-status="all">All <span class="section-count zero" id="sec-count-all">0</span></button>
+                <button class="ship-status-pill" data-status="pending">
+                  <i class="fa-solid fa-box-open"></i> Pending <span class="section-count zero" id="sec-count-pending">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="packing">
+                  <i class="fa-solid fa-boxes-packing"></i> Packing <span class="section-count zero" id="sec-count-packing">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="packed">
+                  <i class="fa-solid fa-box-check"></i> Packed <span class="section-count zero" id="sec-count-packed">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="shipping">
+                  <i class="fa-solid fa-truck-fast"></i> Shipping <span class="section-count zero" id="sec-count-shipping">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="delivered">
+                  <i class="fa-solid fa-circle-check"></i> Delivered <span class="section-count zero" id="sec-count-delivered">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="cancelled">
+                  <i class="fa-solid fa-ban"></i> Cancelled <span class="section-count zero" id="sec-count-cancelled">0</span>
+                </button>
+                <button class="ship-status-pill" data-status="cancel_requests">
+                  <i class="fa-solid fa-triangle-exclamation"></i> Cancel Requests <span class="section-count zero" id="sec-count-cancel_requests">0</span>
+                </button>
+              </div>
+              <div id="admin-orders-list">
+                <div class="admin-loading">
+                  <i class="fa-solid fa-spinner fa-spin"></i> Loading orders...
+                </div>
+              </div>
+            </div>
+
+            <!-- RECENT ORDERS PANEL -->
+            <div class="ship-panel" id="ship-panel-recent">
+              <div class="admin-orders-filter-row" style="margin-bottom:18px;">
+                <div class="admin-filter-group">
+                  <label>Status</label>
+                  <select id="admin-history-status-filter" class="admin-filter-input">
+                    <option value="">All</option>
+                    <option value="delivered">Completed / Delivered</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group">
+                  <label>Filter by</label>
+                  <select id="admin-history-filter-type" class="admin-filter-input">
+                    <option value="">— Select —</option>
+                    <option value="order_id">Order ID</option>
+                    <option value="phone">Phone number</option>
+                    <option value="customer_id">User email / ID</option>
+                    <option value="date">Date</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group">
+                  <label>Value</label>
+                  <div id="admin-history-filter-value">
+                    <span class="admin-filter-hint">Select a filter above</span>
+                  </div>
+                </div>
+                <div class="admin-filter-group">
+                  <label>Sort</label>
+                  <select id="admin-history-sort" class="admin-filter-input">
+                    <option value="date_desc">Newest first</option>
+                    <option value="date_asc">Oldest first</option>
+                    <option value="order_id_asc">Order ID A–Z</option>
+                    <option value="order_id_desc">Order ID Z–A</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group">
+                  <label>Per page</label>
+                  <select id="admin-history-page-size" class="admin-filter-input">
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                  </select>
+                </div>
+                <div class="admin-filter-group admin-filter-actions">
+                  <button id="admin-history-clear" class="btn btn-secondary" style="width:100%;">
+                    <i class="fa-solid fa-xmark"></i> Clear filters
+                  </button>
+                </div>
+              </div>
+
+              <div class="admin-section-header" style="margin-bottom:12px;">
+                <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent orders</h3>
+                <span id="admin-history-summary" style="font-size:0.85rem;color:var(--text-soft);"></span>
+              </div>
+
+              <div id="admin-history-list">
+                <div class="admin-loading">
+                  <i class="fa-solid fa-spinner fa-spin"></i> Loading history...
+                </div>
+              </div>
+              <div id="admin-history-pagination"></div>
+            </div>
+
+            <!-- SHIPMENTS PANEL (merged into Orders) -->
+            <div class="ship-panel" id="ship-panel-shipments">
+              <div class="admin-section-header" style="margin-bottom:16px;">
+                <h3><i class="fa-solid fa-cubes"></i> Shipments</h3>
+                <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <input type="text" id="admin-shipments-search" placeholder="Search order ID, AWB, courier..."
+                    class="admin-search-input" style="min-width:200px;" />
+                  <select id="admin-shipments-filter-status" class="admin-select-input" style="min-width:140px;">
+                    <option value="">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="pickup_scheduled">Pickup Scheduled</option>
+                    <option value="shipped">Shipped</option>
+                    <option value="in_transit">In Transit</option>
+                    <option value="ndr">NDR (Attention)</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="refreshShipmentsCache();loadShipmentsTab()"
+                    style="white-space:nowrap;">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Shipments</div>
+                  <div class="refund-stat-value" id="admin-shipment-stat-total">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Pending</div>
+                  <div class="refund-stat-value refund-stat-value--amber" id="admin-shipment-stat-pending">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">In Transit</div>
+                  <div class="refund-stat-value refund-stat-value--blue" id="admin-shipment-stat-transit">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Delivered</div>
+                  <div class="refund-stat-value refund-stat-value--green" id="admin-shipment-stat-delivered">0</div>
+                </div>
+                <div class="refund-stat-card" style="border-color:#dc2626;">
+                  <div class="refund-stat-label" style="color:#dc2626;">NDR (Attention)</div>
+                  <div class="refund-stat-value" style="color:#dc2626;" id="admin-shipment-stat-ndr">0</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-list"></i> All Shipments
+                </div>
+                <div id="admin-shipments-table-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading shipments...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RETURNS PANEL (merged into Orders & Shipping) -->
+            <div class="ship-panel" id="ship-panel-returns">
+              <div class="admin-section-header" style="margin-bottom:16px;">
+                <h3><i class="fa-solid fa-rotate-left"></i> Returns &amp; Exchange Management</h3>
+                <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <input type="text" id="admin-returns-search" placeholder="Search order ID or email..."
+                    class="admin-search-input" style="min-width:200px;" />
+                  <select id="admin-returns-filter-status" class="admin-select-input" style="min-width:140px;">
+                    <option value="">All statuses</option>
+                    <option value="requested">Requested</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="pickup_scheduled">Pickup Scheduled</option>
+                    <option value="pickup_completed">Pickup Completed</option>
+                    <option value="warehouse_received">Warehouse Received</option>
+                    <option value="qc_passed">QC Passed</option>
+                    <option value="qc_failed">QC Failed</option>
+                    <option value="refund_pending">Refund Pending</option>
+                    <option value="refund_completed">Refunded</option>
+                    <option value="replacement_created">Replacement Created</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="loadReturnsDashboard()"
+                    style="white-space:nowrap;">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Pending Approval</div>
+                  <div class="refund-stat-value refund-stat-value--amber" id="admin-return-stat-pending">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Approved</div>
+                  <div class="refund-stat-value refund-stat-value--blue" id="admin-return-stat-approved">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Warehouse Received</div>
+                  <div class="refund-stat-value refund-stat-value--green" id="admin-return-stat-warehouse">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Returns</div>
+                  <div class="refund-stat-value" id="admin-return-stat-total">0</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-list"></i> Returns Queue
+                </div>
+                <div id="admin-returns-table-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading returns...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- REFUNDS PANEL (merged into Orders & Shipping) -->
+            <div class="ship-panel" id="ship-panel-refunds">
+              <div class="admin-section-header" style="margin-bottom:16px;">
+                <h3><i class="fa-solid fa-hand-holding-dollar"></i> Refunds &amp; Cancellations</h3>
+                <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <input type="text" id="admin-refunds-search" placeholder="Search order ID or email..."
+                    class="admin-search-input" style="min-width:200px;" />
+                  <select id="admin-refunds-filter-status" class="admin-select-input" style="min-width:140px;">
+                    <option value="">All statuses</option>
+                    <option value="initiated">Initiated</option>
+                    <option value="processing">Processing</option>
+                    <option value="processed">Processed</option>
+                    <option value="failed">Failed</option>
+                    <option value="pending">Pending</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" onclick="loadRefundsDashboard()"
+                    style="white-space:nowrap;">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Refunded</div>
+                  <div class="refund-stat-value refund-stat-value--green" id="admin-refund-stat-total">₹0.00</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Pending</div>
+                  <div class="refund-stat-value refund-stat-value--amber" id="admin-refund-stat-pending">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Failed</div>
+                  <div class="refund-stat-value refund-stat-value--red" id="admin-refund-stat-failed">0</div>
+                </div>
+                <div class="refund-stat-card">
+                  <div class="refund-stat-label">Total Requests</div>
+                  <div class="refund-stat-value" id="admin-refund-stat-count">0</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-list"></i> Refund Queue
+                </div>
+                <div id="admin-refunds-table-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading refund queue...</div>
+                </div>
+              </div>
+
+              <div class="refund-section-card" style="margin-top:20px;">
+                <div class="refund-section-header">
+                  <i class="fa-solid fa-clock-rotate-left"></i> Audit Trail
+                </div>
+                <div id="admin-refund-audits-container">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading audit trail...</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-training-ops">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-chalkboard-user"></i> Training Operations</h3>
+              <div class="admin-section-actions">
+                <button class="btn btn-secondary" id="btn-training-ops-refresh" style="font-size:0.85rem;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+
+            <!-- Course form (hidden by default, toggled by "New Course" button) -->
+            <div id="admin-train-form-collapse" style="display:none;max-height:0;opacity:0;overflow:hidden;transition:max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease;margin:0;">
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:16px;">
+                <form id="form-admin-add-training" class="admin-train-form-compact" novalidate>
+                  <input type="hidden" id="admin-train-edit-id" value="" />
+                  <div class="input-field">
+                    <label>Training ID</label>
+                    <input type="text" id="admin-train-id-display" readonly
+                      style="background:#f1f5f9;color:#475569;font-family:monospace;"
+                      placeholder="Auto-generated on save" />
+                  </div>
+                  <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="input-field">
+                      <label>Title *</label>
+                      <input type="text" id="admin-train-title" required />
+                    </div>
+                    <div class="input-field">
+                      <label>Category *</label>
+                      <select id="admin-train-category" required>
+                        <option value="">Select category</option>
+                        <option>Beginner</option>
+                        <option>Farmer</option>
+                        <option>Entrepreneur</option>
+                        <option>Certification</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="input-field">
+                    <label>Description *</label>
+                    <textarea id="admin-train-desc" class="admin-textarea-compact" required></textarea>
+                  </div>
+                  <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                    <div class="input-field">
+                      <label>Start Date *</label>
+                      <input type="date" id="admin-train-start-date" required />
+                    </div>
+                    <div class="input-field">
+                      <label>End Date *</label>
+                      <input type="date" id="admin-train-end-date" required />
+                    </div>
+                    <div class="input-field">
+                      <label>Duration (Days)</label>
+                      <input type="text" id="admin-train-duration" readonly
+                        style="background:#f1f5f9;color:#475569;font-weight:600;" placeholder="Auto-calculated" />
+                    </div>
+                  </div>
+                  <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="input-field">
+                      <label>Price (Strikeout) *</label>
+                      <input type="number" id="admin-train-price-strikeout" min="0" step="0.01" required
+                        placeholder="₹ 1,999" />
+                      <small style="color:#6b7280;font-size:0.75rem;">Must be at least 10% higher than actual price</small>
+                    </div>
+                    <div class="input-field">
+                      <label>Actual Price *</label>
+                      <input type="number" id="admin-train-price-actual" min="0" step="0.01" required
+                        placeholder="₹ 999" />
+                    </div>
+                  </div>
+                  <div class="input-field">
+                    <label>Training Image *</label>
+                    <div class="admin-cat-image-upload">
+                      <input type="url" id="admin-train-image-url" placeholder="Paste image URL or click Browse" />
+                      <button type="button" id="admin-train-image-browse" class="btn btn-secondary btn-image-browse">
+                        <i class="fa-solid fa-upload"></i> Browse
+                      </button>
+                      <input type="file" id="admin-train-image-file" class="hidden-file-input" accept="image/*" />
+                    </div>
+                    <div class="admin-form-preview-compact" id="admin-train-img-preview">
+                      <i class="fa-solid fa-image"></i>
+                      <span>Image preview</span>
+                    </div>
+                    <input type="hidden" id="admin-train-image" />
+                  </div>
+                  <div class="input-field">
+                    <label>Allowed Roles *</label>
+                    <div class="admin-train-roles-grid">
+                      <label><input type="checkbox" id="admin-train-role-trainee" value="trainee" /> Trainee</label>
+                      <label><input type="checkbox" id="admin-train-role-farmer" value="farmer" /> Farmer</label>
+                      <label><input type="checkbox" id="admin-train-role-entrepreneur" value="entrepreneur" /> Entrepreneur</label>
+                    </div>
+                  </div>
+                  <div class="input-field">
+                    <label>Content URL</label>
+                    <input type="url" id="admin-train-content" placeholder="https://..." />
+                  </div>
+                  <div class="admin-train-actions">
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save</button>
+                    <button type="button" id="btn-admin-reset-train" class="btn btn-secondary"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div id="training-ops-container" style="padding:0 4px;">
+              <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Training Ops…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-blogs">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-newspaper"></i> Blog Management</h3>
+              <div class="admin-section-actions">
+                <button type="button" class="btn btn-primary" id="btn-admin-create-blog">
+                  <i class="fa-solid fa-plus"></i> Create Blog
+                </button>
+              </div>
+            </div>
+
+            <div id="admin-blogs-list" class="admin-blogs-wrap">
+              <div class="admin-loading">
+                <i class="fa-solid fa-spinner fa-spin"></i> Loading blogs...
+              </div>
+            </div>
+
+            <!-- Blog Create/Edit Modal -->
+            <div id="admin-blog-modal" class="modal-overlay hidden blog-premium-overlay">
+              <div class="modal-content blog-premium-modal">
+                <!-- Decorative gradient top bar -->
+                <div class="blog-modal-accent-bar"></div>
+
+                <div class="blog-modal-header">
+                  <div class="blog-modal-header-left">
+                    <div class="blog-modal-icon-wrap">
+                      <i class="fa-solid fa-feather-pointed"></i>
+                    </div>
+                    <div>
+                      <h3 id="admin-blog-modal-title">Create New Blog Post</h3>
+                      <p class="blog-modal-subtitle">Share your insights with the world</p>
+                    </div>
+                  </div>
+                  <button type="button" class="blog-modal-close-btn" id="admin-blog-modal-close">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <form id="form-admin-blog" class="blog-premium-form">
+                  <input type="hidden" id="admin-blog-edit-id" value="" />
+
+                  <div class="blog-field-group">
+                    <label class="blog-field-label">
+                      <i class="fa-solid fa-hashtag"></i> Blog ID
+                    </label>
+                    <input type="text" id="admin-blog-id" placeholder="e.g. blog-001 (auto-generated if empty)"
+                      class="blog-input blog-input-sm" />
+                    <span class="blog-field-hint">Unique identifier for this blog post. Auto-generated if left
+                      empty.</span>
+                  </div>
+
+                  <div class="blog-form-grid">
+                    <!-- Left Column -->
+                    <div class="blog-form-left">
+                      <div class="blog-field-group">
+                        <label class="blog-field-label">
+                          <i class="fa-solid fa-heading"></i> Blog Title <span class="required-star">*</span>
+                        </label>
+                        <input type="text" id="admin-blog-title" required
+                          placeholder="e.g. How AI is Transforming E-Commerce" class="blog-input blog-input-lg" />
+                        <span class="blog-field-hint">A compelling title grabs readers' attention</span>
+                      </div>
+
+                      <div class="blog-field-row">
+                        <div class="blog-field-group">
+                          <label class="blog-field-label">
+                            <i class="fa-solid fa-link"></i> Slug
+                          </label>
+                          <input type="text" id="admin-blog-slug" readonly placeholder="auto-generated"
+                            class="blog-input blog-input-sm" />
+                          <span class="blog-field-hint">Auto-generated from title</span>
+                        </div>
+                        <div class="blog-field-group">
+                          <label class="blog-field-label">
+                            <i class="fa-solid fa-user-pen"></i> Author
+                          </label>
+                          <input type="text" id="admin-blog-author" value="Admin" readonly
+                            class="blog-input blog-input-sm" />
+                        </div>
+                      </div>
+
+                      <!-- Premium Image Upload Area -->
+                      <div class="blog-field-group">
+                        <label class="blog-field-label">
+                          <i class="fa-solid fa-image"></i> Featured Image
+                        </label>
+                        <div class="blog-image-upload-area" id="blog-image-dropzone">
+                          <div class="blog-image-drop-content">
+                            <div class="blog-image-upload-icon">
+                              <i class="fa-solid fa-cloud-arrow-up"></i>
+                            </div>
+                            <p class="blog-image-upload-text">Drag & drop or <span
+                                class="blog-image-browse-link">browse</span></p>
+                            <p class="blog-image-upload-hint">Supports: JPG, PNG, WebP &bull; Max 10MB</p>
+                          </div>
+                          <input type="url" id="admin-blog-image-url" placeholder="Or paste image URL here..."
+                            class="blog-input blog-image-url-input" />
+                          <div class="blog-image-url-row">
+                            <button type="button" id="admin-blog-image-browse" class="blog-btn-browse">
+                              <i class="fa-solid fa-folder-open"></i> Upload from Computer
+                            </button>
+                            <input type="file" id="admin-blog-image-file" class="hidden-file-input" accept="image/*" />
+                          </div>
+                        </div>
+                        <div class="blog-image-preview-area" id="admin-blog-img-preview">
+                          <div class="blog-image-preview-placeholder">
+                            <i class="fa-solid fa-image"></i>
+                            <span>Featured image preview</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Right Column - Content Editor -->
+                    <div class="blog-form-right">
+                      <div class="blog-field-group blog-field-group-full">
+                        <div class="blog-editor-header">
+                          <label class="blog-field-label">
+                            <i class="fa-solid fa-pen-fancy"></i> Blog Content <span class="required-star">*</span>
+                          </label>
+                          <div class="blog-editor-toolbar">
+                            <span class="blog-editor-toolbar-hint">HTML supported</span>
+                            <div class="blog-editor-badges">
+                              <span class="blog-editor-badge"><i class="fa-solid fa-bold"></i></span>
+                              <span class="blog-editor-badge"><i class="fa-solid fa-italic"></i></span>
+                              <span class="blog-editor-badge"><i class="fa-solid fa-list"></i></span>
+                              <span class="blog-editor-badge"><i class="fa-solid fa-link"></i></span>
+                              <span class="blog-editor-badge"><i class="fa-solid fa-code"></i></span>
+                            </div>
+                          </div>
+                        </div>
+                        <textarea id="admin-blog-content" required
+                          placeholder="<h2>Introduction</h2>&#10;<p>Write your blog content using HTML tags...</p>&#10;&#10;<h2>Key Points</h2>&#10;<ul>&#10;  <li>Point one</li>&#10;  <li>Point two</li>&#10;</ul>"
+                          class="blog-editor-textarea"></textarea>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Footer Actions -->
+                  <div class="blog-form-footer">
+                    <div class="blog-form-footer-left">
+                      <div class="blog-error-msg hidden" id="admin-blog-feedback">
+                        <i class="fa-solid fa-circle-exclamation"></i>
+                        <span id="admin-blog-feedback-text"></span>
+                      </div>
+                    </div>
+                    <div class="blog-form-footer-right">
+                      <button type="button" id="admin-blog-reset" class="blog-btn blog-btn-ghost">
+                        <i class="fa-solid fa-rotate-left"></i> Reset
+                      </button>
+                      <button type="submit" class="blog-btn blog-btn-primary" id="admin-blog-submit">
+                        <i class="fa-solid fa-feather-pointed"></i>
+                        <span id="admin-blog-submit-label">Publish Blog</span>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-communication">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-tower-cell"></i> Communication Management</h3>
+              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <span id="comm-provider-badge" class="badge badge-info" style="padding:4px 12px;border-radius:20px;font-size:0.75rem;background:#1e3a5f;color:#93c5fd;">Provider: mock</span>
+                <button type="button" class="btn btn-secondary" onclick="loadCommunicationTab()" style="white-space:nowrap;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:24px;">
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Total Messages</div>
+                <div class="refund-stat-value" id="comm-stat-total">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Sent</div>
+                <div class="refund-stat-value refund-stat-value--green" id="comm-stat-sent">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Delivered</div>
+                <div class="refund-stat-value refund-stat-value--green" id="comm-stat-delivered">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Failed</div>
+                <div class="refund-stat-value refund-stat-value--red" id="comm-stat-failed">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Queued</div>
+                <div class="refund-stat-value" id="comm-stat-queued">0</div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-chart-pie"></i> By Channel</div>
+                <div id="comm-channel-stats" style="padding:16px;display:flex;gap:16px;flex-wrap:wrap;">
+                  <span style="color:#94a3b8;">Loading...</span>
+                </div>
+              </div>
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-list-check"></i> Queue Status</div>
+                <div id="comm-queue-status" style="padding:16px;">
+                  <span style="color:#94a3b8;">Loading...</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="refund-section-card" style="margin-bottom:20px;">
+              <div class="refund-section-header">
+                <i class="fa-solid fa-filter"></i> Message History
+                <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;">
+                  <select id="comm-filter-channel" class="admin-search-input" style="width:auto;min-width:120px;">
+                    <option value="">All Channels</option>
+                    <option value="sms">SMS</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="email">Email</option>
+                    <option value="otp">OTP</option>
+                  </select>
+                  <select id="comm-filter-status" class="admin-search-input" style="width:auto;min-width:120px;">
+                    <option value="">All Status</option>
+                    <option value="queued">Queued</option>
+                    <option value="sent">Sent</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                  <input type="text" id="comm-search" class="admin-search-input" placeholder="Search by recipient..." style="width:auto;min-width:180px;" />
+                  <button type="button" class="btn btn-secondary" onclick="loadCommunicationTab()">
+                    <i class="fa-solid fa-search"></i> Search
+                  </button>
+                  <button type="button" class="btn btn-danger" onclick="retryAllFailedComm()" title="Retry all failed messages" style="background:#dc2626;border-color:#dc2626;">
+                    <i class="fa-solid fa-rotate"></i> Retry Failed
+                  </button>
+                </div>
+              </div>
+              <div id="comm-message-list" style="padding:12px;">
+                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading messages...</div>
+              </div>
+            </div>
+
+            <div class="refund-section-card">
+              <div class="refund-section-header">
+                <i class="fa-solid fa-book"></i> Templates Overview
+                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCommTemplates()">
+                  <i class="fa-solid fa-eye"></i> Toggle Templates
+                </button>
+              </div>
+              <div id="comm-templates-container" style="padding:12px;display:none;">
+                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading templates...</div>
+              </div>
+            </div>
+
+            <div id="comm-otp-dev-section" class="refund-section-card" style="margin-top:20px;display:none;">
+              <div class="refund-section-header">
+                <i class="fa-solid fa-key"></i> Development OTP Lookup
+                <span style="font-size:0.7rem;color:#f59e0b;margin-left:8px;">(Available in dev mode only)</span>
+              </div>
+              <div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <input type="text" id="comm-dev-otp-identifier" class="admin-search-input" placeholder="Phone or Email" style="width:auto;min-width:250px;" />
+                <button type="button" class="btn btn-secondary" onclick="lookupDevOtp()">
+                  <i class="fa-solid fa-key"></i> Lookup OTP
+                </button>
+                <span id="comm-dev-otp-result" style="color:#94a3b8;font-family:monospace;"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-tab-content" id="admin-content-analytics">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-chart-line"></i> Analytics Dashboard</h3>
+              <div class="admin-section-actions" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <input type="date" id="admin-analytics-start" class="admin-search-input" style="width:auto;min-width:150px;" />
+                <span style="color:#94a3b8;">to</span>
+                <input type="date" id="admin-analytics-end" class="admin-search-input" style="width:auto;min-width:150px;" />
+                <button type="button" class="btn btn-secondary" onclick="loadAnalyticsTab()" style="white-space:nowrap;">
+                  <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px;">
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Total Orders</div>
+                <div class="refund-stat-value" id="analytics-stat-orders">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Total Revenue</div>
+                <div class="refund-stat-value refund-stat-value--green" id="analytics-stat-revenue">₹0.00</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">AOV</div>
+                <div class="refund-stat-value" id="analytics-stat-aov">₹0.00</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Conversion Rate</div>
+                <div class="refund-stat-value" id="analytics-stat-conversion">0%</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Page Views</div>
+                <div class="refund-stat-value" id="analytics-stat-pageviews">0</div>
+              </div>
+              <div class="refund-stat-card">
+                <div class="refund-stat-label">Abandonment Rate</div>
+                <div class="refund-stat-value refund-stat-value--amber" id="analytics-stat-abandonment">0%</div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-filter"></i> Funnel Overview</div>
+                <div id="analytics-funnel-container" style="padding:16px;">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading funnel...</div>
+                </div>
+              </div>
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-chart-simple"></i> Stage Drop-off</div>
+                <div id="analytics-dropoff-container" style="padding:16px;">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading drop-off rates...</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-crown"></i> Top Products</div>
+                <div id="analytics-top-products-container" style="padding:16px;">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading top products...</div>
+                </div>
+              </div>
+              <div class="refund-section-card">
+                <div class="refund-section-header"><i class="fa-solid fa-arrow-trend-up"></i> Recovery &amp; Rates</div>
+                <div id="analytics-rates-container" style="padding:16px;">
+                  <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading rates...</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="refund-section-card">
+              <div class="refund-section-header"><i class="fa-solid fa-table"></i> Event Log <span style="font-size:0.75rem;color:#64748b;margin-left:8px;">(last 100 events)</span></div>
+              <div id="analytics-events-container" style="padding:16px;">
+                <div class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading events...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Security Tab -->
+        <div class="admin-tab-content" id="admin-content-security">
+          <div class="admin-content-inner">
+            <div class="admin-section-header">
+              <h3><i class="fa-solid fa-shield-halved"></i> Security Settings</h3>
+            </div>
+
+            <div id="admin-security-status" class="refund-section-card" style="margin-top:16px;">
+              <div id="security-loading" class="admin-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading security settings...</div>
+
+              <div id="security-2fa-not-setup" class="hidden">
+                <div class="refund-section-header"><i class="fa-solid fa-lock"></i> Two-Step Verification (2FA)</div>
+                <p style="color:#94a3b8;margin-bottom:16px;">
+                  Add an extra layer of security by requiring a one-time code from your authenticator app
+                  (Google Authenticator, Authy, etc.) when logging in.
+                </p>
+                <button id="btn-security-enable-2fa" class="btn btn-primary" style="background:#059669;">
+                  <i class="fa-solid fa-qrcode"></i> Enable Two-Step Verification
+                </button>
+              </div>
+
+              <div id="security-2fa-setup-qr" class="hidden">
+                <div class="refund-section-header"><i class="fa-solid fa-qrcode"></i> Scan QR Code</div>
+                <p style="color:#94a3b8;margin-bottom:12px;">
+                  1. Open your authenticator app and scan the QR code below.<br>
+                  2. Enter the 6-digit code from the app to verify.
+                </p>
+                <div id="security-qr-container" style="text-align:center;margin-bottom:16px;">
+                  <img id="security-qr-image" src="" alt="QR Code" style="width:200px;height:200px;border-radius:8px;background:#fff;padding:8px;">
+                </div>
+                <div id="security-qr-secret" style="text-align:center;margin-bottom:16px;">
+                  <span style="color:#94a3b8;font-size:0.85rem;">Or enter this key manually:</span>
+                  <code id="security-secret-key" style="display:block;font-size:1.1rem;color:#fbbf24;background:#1e293b;padding:8px 12px;border-radius:6px;margin-top:4px;word-break:break-all;"></code>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center;justify-content:center;">
+                  <input type="text" id="security-setup-code" maxlength="6" placeholder="000000" class="form-input" style="width:140px;text-align:center;font-size:1.3rem;letter-spacing:6px;">
+                  <button id="btn-security-verify-setup" class="btn btn-primary" style="background:#059669;">
+                    <i class="fa-solid fa-check"></i> Verify &amp; Enable
+                  </button>
+                  <button id="btn-security-cancel-setup" class="btn btn-secondary">
+                    Cancel
+                  </button>
+                </div>
+                <div id="security-setup-error" class="hidden" style="color:#ef4444;text-align:center;margin-top:12px;"></div>
+              </div>
+
+              <div id="security-2fa-enabled" class="hidden">
+                <div class="refund-section-header"><i class="fa-solid fa-lock"></i> Two-Step Verification (2FA)</div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+                  <span style="background:#059669;color:#fff;padding:4px 12px;border-radius:20px;font-size:0.85rem;">
+                    <i class="fa-solid fa-check-circle"></i> Enabled
+                  </span>
+                  <span style="color:#94a3b8;font-size:0.85rem;">via Authenticator App (TOTP)</span>
+                </div>
+                <p style="color:#94a3b8;margin-bottom:16px;">
+                  Every admin login will require a 6-digit code from your authenticator app.
+                </p>
+                <div style="display:flex;gap:12px;align-items:center;">
+                  <input type="text" id="security-disable-code" maxlength="6" placeholder="Enter current code" class="form-input" style="width:160px;text-align:center;font-size:1.1rem;letter-spacing:4px;">
+                  <button id="btn-security-disable-2fa" class="btn btn-danger" style="background:#dc2626;">
+                    <i class="fa-solid fa-xmark"></i> Disable 2FA
+                  </button>
+                </div>
+                <div id="security-disable-error" class="hidden" style="color:#ef4444;text-align:center;margin-top:12px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- WhatsApp Floating Icon -->
+  <a href="https://wa.me/+917204709870" target="_blank" rel="noopener noreferrer" class="whatsapp-float"
+    aria-label="Chat on WhatsApp">
+    <i class="fa-brands fa-whatsapp"></i>
+    <span class="whatsapp-tooltip">Chat with us!</span>
+  </a>
+

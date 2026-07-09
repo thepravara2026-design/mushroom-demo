@@ -15,7 +15,7 @@ const { supabaseAdmin } = require("../config/supabase");
 const { sendInvoiceWhatsApp } = require("../services/notificationService");
 const { JWT_SECRET } = require("../config/jwt");
 const refundService = require("../modules/refunds/RefundService");
-const { OrderStates, assertCancellable, resolveState, selfCancel, getCancelWindow, adminReject, adminApprove, startReturnWindow } = require("../modules/orders/OrderStateService");
+const { OrderStates, isValidTransition, assertCancellable, resolveState, selfCancel, getCancelWindow, adminReject, adminApprove, startReturnWindow, buildTrackingData, FULFILLMENT_STATUS_MAP, STATE_DIMENSION_MAP } = require("../modules/orders/OrderStateService");
 const { logAuditAction, AUDIT_ACTIONS } = require("../services/AuditLogService");
 const { notify } = require("../services/notificationService");
 const logger = require("../utils/logger");
@@ -508,8 +508,9 @@ router.post(
         return respondError(res, dbError?.message || 'Failed to create order', 500);
       }
 
-      // ── PHASE 2: Decrement stock for all validated items ──
-      // Use transactional stock decrement with row-level locks when enabled
+      // ── PHASE 2: Reserve stock by incrementing reserved_quantity ──
+      // Prevents concurrent checkout overselling before payment is verified.
+      // Actual stock deduction happens at payment verification (verify-payment).
       const decrementedProducts = [];
 
       if (FEATURE_FLAGS.ENABLE_TRANSACTIONS && !db.isMock) {
@@ -525,56 +526,24 @@ router.post(
               if (!product) throw new Error(`Product ${sd.productId} not found or locked`);
 
               if (sd.weight && sd.unit) {
-                // Variant-level stock decrement via JSONB
                 const variantIdx = (product.weight_pricing || []).findIndex(
-                  v => Number(v.weight) === sd.weight && v.unit === sd.unit && v.stock !== undefined
+                  v => Number(v.weight) === sd.weight && v.unit === sd.unit
                 );
-                if (variantIdx === -1) continue; // no variant stock field — skip
-                const variantStock = (product.weight_pricing[variantIdx].stock || 0);
-                if (sd.quantity > variantStock) {
-                  throw new Error(`Insufficient variant stock for ${sd.name}`);
-                }
-                const r = await client.query(
-                  `UPDATE products SET weight_pricing = (
-                    SELECT jsonb_agg(
-                      CASE
-                        WHEN (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5 AND elem ? 'stock'
-                        THEN jsonb_set(elem, '{stock}', to_jsonb(COALESCE((elem->>'stock')::int, 0) - $2))
-                        ELSE elem
-                      END
-                    )
-                    FROM jsonb_array_elements(weight_pricing) AS elem
-                    WHERE id = $3
-                  ), version = version + 1, updated_at = $6
-                  WHERE id = $3 AND (
-                    SELECT COALESCE((elem->>'stock')::int, 0)
-                    FROM jsonb_array_elements(weight_pricing) AS elem
-                    WHERE (elem->>'weight')::numeric = $4 AND elem->>'unit' = $5
-                    LIMIT 1
-                  ) >= $2`,
-                  [sd.quantity, sd.quantity, sd.productId, sd.weight, sd.unit, new Date().toISOString()]
-                );
-                if (r.rowCount === 0) {
-                  throw new Error(`Variant stock decrement failed for ${sd.name} — concurrent modification`);
-                }
-              } else {
-                const newStock = (product.stock || 0) - sd.quantity;
-                if (newStock < 0) {
-                  throw new Error(`Insufficient stock for ${sd.name}. Available: ${product.stock}, requested: ${sd.quantity}`);
-                }
-                const r = await client.query(
-                  `UPDATE products SET stock = stock - $1, version = version + 1, updated_at = $2 WHERE id = $3 AND stock >= $1`,
-                  [sd.quantity, new Date().toISOString(), sd.productId]
-                );
-                if (r.rowCount === 0) {
-                  throw new Error(`Stock decrement failed for ${sd.name} — concurrent modification`);
-                }
+                if (variantIdx === -1) continue;
+              }
+              // Increment reserved_quantity instead of decrementing stock
+              const r = await client.query(
+                `UPDATE products SET reserved_quantity = COALESCE(reserved_quantity, 0) + $1, version = version + 1, updated_at = $2 WHERE id = $3 AND (stock - COALESCE(reserved_quantity, 0)) >= $1`,
+                [sd.quantity, new Date().toISOString(), sd.productId]
+              );
+              if (r.rowCount === 0) {
+                throw new Error(`Stock reservation failed for ${sd.name} — insufficient stock or concurrent modification`);
               }
               decrementedProducts.push(sd);
             }
           });
         } catch (txErr) {
-          logger.error(`[checkout] Transactional stock decrement failed: ${txErr.message}. Rolling back order creation.`);
+          logger.error(`[checkout] Stock reservation failed: ${txErr.message}. Rolling back order creation.`);
           await db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
           return respondError(res, `Failed to reserve stock: ${txErr.message}`, 500);
         }
@@ -582,98 +551,46 @@ router.post(
         for (const sd of stockDeductions) {
           try {
             if (sd.weight && sd.unit) {
-              // Variant-level stock decrement
               const { data: freshProduct } = await db
                 .from("products")
-                .select("weight_pricing, version")
+                .select("stock, reserved_quantity, weight_pricing, version")
                 .eq("id", sd.productId)
                 .single();
-              if (freshProduct && Array.isArray(freshProduct.weight_pricing)) {
-                const variant = freshProduct.weight_pricing.find(
-                  v => Number(v.weight) === sd.weight && v.unit === sd.unit && v.stock !== undefined
-                );
-                if (variant) {
-                  const newStock = variant.stock - sd.quantity;
-                  if (newStock < 0) throw new Error(`Insufficient variant stock for ${sd.name}`);
-                  const updatedWp = freshProduct.weight_pricing.map(v => {
-                    if (Number(v.weight) === sd.weight && v.unit === sd.unit && v.stock !== undefined) {
-                      return { ...v, stock: newStock };
-                    }
-                    return v;
-                  });
-                  await db.from("products").update({
-                    weight_pricing: updatedWp,
-                    ...(!db.isMock ? { version: (freshProduct.version || 0) + 1 } : {}),
-                    updated_at: new Date().toISOString(),
-                  }).eq("id", sd.productId);
-                } else {
-                  // Variant has no stock field — fallback to top-level stock decrement
-                  if (!db.isMock) {
-                    await supabaseAdmin.rpc("decrement_stock", {
-                      p_product_id: sd.productId,
-                      p_quantity: sd.quantity,
-                    });
-                  } else {
-                    const { data: fp } = await db.from("products").select("stock").eq("id", sd.productId).single();
-                    const cur = fp ? (fp.stock || 0) : 0;
-                    await db.from("products").update({ stock: cur - sd.quantity }).eq("id", sd.productId);
-                  }
-                }
+              if (freshProduct) {
+                const available = (freshProduct.stock || 0) - (freshProduct.reserved_quantity || 0);
+                if (available < sd.quantity) throw new Error(`Insufficient stock for ${sd.name}. Available: ${Math.max(0, available)}`);
+                const newReserved = (freshProduct.reserved_quantity || 0) + sd.quantity;
+                await db.from("products").update({
+                  reserved_quantity: newReserved,
+                  ...(!db.isMock ? { version: (freshProduct.version || 0) + 1 } : {}),
+                  updated_at: new Date().toISOString(),
+                }).eq("id", sd.productId);
               }
-            } else if (!db.isMock) {
-              await supabaseAdmin.rpc("decrement_stock", {
-                p_product_id: sd.productId,
-                p_quantity: sd.quantity,
-              });
             } else {
               const { data: freshProduct } = await db
                 .from("products")
-                .select("stock")
+                .select("stock, reserved_quantity, version")
                 .eq("id", sd.productId)
                 .single();
-              const currentStock = freshProduct ? (freshProduct.stock || 0) : 0;
-              await db
-                .from("products")
-                .update({ stock: currentStock - sd.quantity })
-                .eq("id", sd.productId);
+              if (!freshProduct) throw new Error(`Product ${sd.productId} not found`);
+              const available = (freshProduct.stock || 0) - (freshProduct.reserved_quantity || 0);
+              if (available < sd.quantity) throw new Error(`Insufficient stock for ${sd.name}. Available: ${Math.max(0, available)}`);
+              const newReserved = (freshProduct.reserved_quantity || 0) + sd.quantity;
+              await db.from("products").update({
+                reserved_quantity: newReserved,
+                ...(!db.isMock ? { version: (freshProduct.version || 0) + 1 } : {}),
+                updated_at: new Date().toISOString(),
+              }).eq("id", sd.productId);
             }
             decrementedProducts.push(sd);
           } catch (dedErr) {
-            logger.error(`[checkout] Stock decrement failed for ${sd.productId}: ${dedErr.message}. Rolling back...`);
+            logger.error(`[checkout] Stock reservation failed for ${sd.productId}: ${dedErr.message}. Rolling back...`);
             for (const done of decrementedProducts) {
               try {
-                if (!db.isMock) {
-                  if (done.weight && done.unit) {
-                    const { data: pf } = await db.from("products").select("weight_pricing").eq("id", done.productId).single();
-                    if (pf && Array.isArray(pf.weight_pricing)) {
-                      const restoredWp = pf.weight_pricing.map(v => {
-                        if (Number(v.weight) === done.weight && v.unit === done.unit && v.stock !== undefined) {
-                          return { ...v, stock: (v.stock || 0) + done.quantity };
-                        }
-                        return v;
-                      });
-                      await db.from("products").update({ weight_pricing: restoredWp }).eq("id", done.productId);
-                    }
-                  } else {
-                    const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
-                    if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
-                  }
-                } else {
-                  if (done.weight && done.unit) {
-                    const { data: pf } = await db.from("products").select("weight_pricing").eq("id", done.productId).single();
-                    if (pf && Array.isArray(pf.weight_pricing)) {
-                      const restoredWp = pf.weight_pricing.map(v => {
-                        if (Number(v.weight) === done.weight && v.unit === done.unit && v.stock !== undefined) {
-                          return { ...v, stock: (v.stock || 0) + done.quantity };
-                        }
-                        return v;
-                      });
-                      await db.from("products").update({ weight_pricing: restoredWp }).eq("id", done.productId);
-                    }
-                  } else {
-                    const { data: pf } = await db.from("products").select("stock").eq("id", done.productId).single();
-                    if (pf) await db.from("products").update({ stock: (pf.stock || 0) + done.quantity }).eq("id", done.productId);
-                  }
+                const { data: pf } = await db.from("products").select("reserved_quantity").eq("id", done.productId).single();
+                if (pf) {
+                  const restored = Math.max(0, (pf.reserved_quantity || 0) - done.quantity);
+                  await db.from("products").update({ reserved_quantity: restored }).eq("id", done.productId);
                 }
               } catch (rollbackErr) {
                 logger.error(`[checkout] Rollback failed for ${done.productId}: ${rollbackErr.message}`);
@@ -684,9 +601,6 @@ router.post(
           }
         }
       }
-
-      // Store product IDs in order metadata for potential restock later
-      newOrder._decrementedProducts = decrementedProducts;
 
       // ── Fire-and-forget low-stock alert for admin ──
       setImmediate(async () => {
@@ -816,19 +730,26 @@ router.post(
       const invoiceToken =
         existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
 
+      // Validate v3 state machine transition
+      const { data: currentUpiOrder } = await db.from("orders").select("status").eq("razorpay_order_id", razorpay_order_id).single();
+      const upiTarget = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid";
+      if (!isValidTransition(currentUpiOrder?.status, upiTarget)) {
+        return respondError(res, `Invalid status transition from ${currentUpiOrder?.status} to ${upiTarget}`, 400);
+      }
+
+      const upiDims = STATE_DIMENSION_MAP[upiTarget] || { delivery_status: "placed", fulfillment_status: null };
       const upiUpdatePayload = {
-        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid",
-        delivery_status: "placed",
+        status: upiTarget,
+        delivery_status: upiDims.delivery_status,
+        fulfillment_status: upiDims.fulfillment_status,
         admin_approval_status: "pending",
+        cancel_window_expires: null,
         payment_method: "UPI QR",
         razorpay_payment_id: paymentId,
         transaction_id: transactionId,
         invoice_token: invoiceToken,
         updated_at: new Date().toISOString(),
       };
-      if (FEATURE_FLAGS.SELF_CANCEL_WINDOW) {
-        upiUpdatePayload.cancel_window_expires = null;
-      }
 
       const { data: updatedOrder, error } = await db
         .from("orders")
@@ -922,12 +843,17 @@ router.post(
       const invoiceToken =
         existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
 
+      const { data: currentCodOrder } = await db.from("orders").select("status, delivery_status, fulfillment_status").eq("razorpay_order_id", razorpay_order_id).single();
+      const codStatus = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? (currentCodOrder?.status || OrderStates.ORDER_CREATED) : "placed";
+      const codDims = STATE_DIMENSION_MAP[codStatus] || { delivery_status: "placed", fulfillment_status: null };
       const { data: updatedOrder, error } = await db
         .from("orders")
         .update({
-          status: "placed", // COD order is placed but unpaid yet
-          delivery_status: "placed",
+          status: codStatus,
+          delivery_status: codDims.delivery_status,
+          fulfillment_status: dims.fulfillment_status,
           admin_approval_status: "pending",
+          cancel_window_expires: null,
           payment_method: "COD",
           razorpay_payment_id: paymentId,
           transaction_id: transactionId,
@@ -1014,58 +940,6 @@ router.post(
       });
 
       if (isValid) {
-        // Re-check stock availability before confirming payment
-        const { data: pendingOrder } = await db
-          .from("orders")
-          .select("id, items, total")
-          .eq("razorpay_order_id", razorpay_order_id)
-          .single();
-
-        if (pendingOrder && Array.isArray(pendingOrder.items)) {
-          for (const item of pendingOrder.items) {
-            const qty = parseInt(item.quantity, 10) || 0;
-            if (qty <= 0 || !item.productId) continue;
-            const { data: prod } = await db
-              .from("products")
-              .select("stock, reserved_quantity, weight_pricing")
-              .eq("id", item.productId)
-              .single();
-
-            if (prod) {
-              let available;
-              let labelSuffix = '';
-
-              // Check variant-level stock if item has weight/unit
-              if (item.weight !== undefined && item.unit !== undefined && Array.isArray(prod.weight_pricing)) {
-                const variant = prod.weight_pricing.find(
-                  v => Number(v.weight) === Number(item.weight) && v.unit === item.unit && v.stock !== undefined
-                );
-                if (variant) {
-                  available = variant.stock;
-                  labelSuffix = ` (${item.weight}${item.unit})`;
-                }
-              }
-
-              if (available === undefined) {
-                available = prod.stock - (prod.reserved_quantity || 0);
-              }
-
-              if (available < qty) {
-                await db.from("orders").update({ status: "failed" }).eq("razorpay_order_id", razorpay_order_id);
-                try {
-                  await razorpay.payments.refund(razorpay_payment_id, {
-                    amount: Math.round(Number(pendingOrder.total || 0) * 100),
-                    notes: { reason: "Stock unavailable at payment confirmation", order_id: pendingOrder.id },
-                  });
-                } catch (refundErr) {
-                  logger.warn(`[verify-payment] Auto-refund failed for order ${pendingOrder.id}: ${refundErr.message}`);
-                }
-                return respondError(res, `Sorry, "${item.name || item.productId}${labelSuffix}" is now out of stock. Your payment will be refunded.`, 409);
-              }
-            }
-          }
-        }
-
         // Update order status to paid and record payment details
         const transactionId = `TXN-${razorpay_payment_id}`;
         const { data: existingOrder } = await db
@@ -1077,9 +951,12 @@ router.post(
           existingOrder && existingOrder.invoice_token
             ? existingOrder.invoice_token
             : crypto.randomBytes(12).toString("hex");
+        const payStatus = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid";
+        const payDims = STATE_DIMENSION_MAP[payStatus] || { delivery_status: "placed", fulfillment_status: null };
         const updatePayload = {
-          status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid",
-          delivery_status: "placed",
+          status: payStatus,
+          delivery_status: payDims.delivery_status,
+          fulfillment_status: payDims.fulfillment_status,
           admin_approval_status: "pending",
           payment_method: "Razorpay",
           razorpay_payment_id,
@@ -1105,24 +982,29 @@ router.post(
           );
         }
 
-        // Phase 4: Confirm reservation + hard-deduct stock
-        if (FEATURE_FLAGS.INVENTORY_SERVICE) {
+        // Deduct stock: release reserved_quantity and decrement actual stock
+        setImmediate(async () => {
           try {
-            const { data: reservations } = await db
-              .from("inventory_reservations")
-              .select("id, product_id, quantity")
-              .eq("order_id", updatedOrder.id)
-              .eq("status", "active");
-            if (reservations && reservations.length > 0) {
-              for (const res of reservations) {
-                await inventoryService.confirmReservation(res.id, updatedOrder.id);
-                await inventoryService.deductStock(res.product_id, res.quantity, updatedOrder.id);
+            if (updatedOrder && Array.isArray(updatedOrder.items)) {
+              for (const item of updatedOrder.items) {
+                const qty = parseInt(item.quantity, 10) || 0;
+                if (qty <= 0 || !item.productId) continue;
+                const { data: prod } = await db.from("products").select("stock, reserved_quantity").eq("id", item.productId).single();
+                if (prod) {
+                  const newStock = Math.max(0, (prod.stock || 0) - qty);
+                  const newReserved = Math.max(0, (prod.reserved_quantity || 0) - qty);
+                  await db.from("products").update({
+                    stock: newStock,
+                    reserved_quantity: newReserved,
+                    updated_at: new Date().toISOString(),
+                  }).eq("id", item.productId);
+                }
               }
             }
-          } catch (invErr) {
-            logger.warn(`[orders] Inventory reservation/deduction failed for order ${updatedOrder.id}: ${invErr.message}`);
+          } catch (dedErr) {
+            logger.error(`[verify-payment] Stock deduction failed for order ${updatedOrder.id}: ${dedErr.message}`);
           }
-        }
+        });
 
         // Emit SSE event for updated order (admins + order owner)
         try {
@@ -1167,20 +1049,21 @@ router.post(
         .single();
 
       if (currentOrder && ["pending", "pending_upi_verification"].includes(currentOrder.status)) {
-        // Restock items since stock was decremented during checkout but payment failed
+        // Release reserved_quantity since payment failed
         if (Array.isArray(currentOrder.items) && currentOrder.items.length > 0) {
           setImmediate(async () => {
             for (const item of currentOrder.items) {
               try {
                 const qty = parseInt(item.quantity, 10) || 0;
                 if (qty <= 0 || !item.productId) continue;
-                const { data: prod } = await db.from("products").select("stock").eq("id", item.productId).single();
+                const { data: prod } = await db.from("products").select("reserved_quantity").eq("id", item.productId).single();
                 if (prod) {
-                  await db.from("products").update({ stock: (prod.stock || 0) + qty }).eq("id", item.productId);
-                  logger.info(`[verify-payment] Restocked ${item.productId} x${qty} due to payment failure for order ${currentOrder.id}`);
+                  const newReserved = Math.max(0, (prod.reserved_quantity || 0) - qty);
+                  await db.from("products").update({ reserved_quantity: newReserved }).eq("id", item.productId);
+                  logger.info(`[verify-payment] Released reservation ${item.productId} x${qty} due to payment failure for order ${currentOrder.id}`);
                 }
-              } catch (restockErr) {
-                logger.error(`[verify-payment] Failed to restock ${item.productId}: ${restockErr.message}`);
+              } catch (releaseErr) {
+                logger.error(`[verify-payment] Failed to release reservation for ${item.productId}: ${releaseErr.message}`);
               }
             }
           });
@@ -1325,9 +1208,10 @@ router.get("/my-orders", authMiddleware, async (req, res) => {
     const enriched = (orders || []).map(o => ({
       ...o,
       resolved_state: resolveState(o),
-      cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
-        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
-      invoice_accessible: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)),
+      cancellable: !['shipped', 'in_transit', 'delivered', 'with_carrier', 'out_for_delivery', 'ndr', 'rto'].includes(o.delivery_status) &&
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED',
+          'with_carrier', 'out_for_delivery', 'ndr', 'delivered', 'rto', 'packing', 'packed', 'ready_to_ship', 'return_window', 'completed'].includes(o.status),
+      invoice_accessible: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) || ['with_carrier', 'delivered', 'return_window', 'completed'].includes(o.status)),
     }));
 
     return success(res, enriched);
@@ -1363,9 +1247,10 @@ router.get("/all-orders", authMiddleware, requireRole("admin"), async (req, res)
       ...o,
       user_email: userMap[o.user_id] || "unknown@sporekart.com",
       resolved_state: resolveState(o),
-      cancellable: !['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) &&
-        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED'].includes(o.status),
-      invoice_accessible_admin: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status)) ||
+      cancellable: !['shipped', 'in_transit', 'delivered', 'with_carrier', 'out_for_delivery', 'ndr', 'rto'].includes(o.delivery_status) &&
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED',
+          'with_carrier', 'out_for_delivery', 'ndr', 'delivered', 'rto', 'packing', 'packed', 'ready_to_ship', 'return_window', 'completed'].includes(o.status),
+      invoice_accessible_admin: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) || ['with_carrier', 'delivered', 'return_window', 'completed'].includes(o.status)) ||
         (o.delivery_status === 'cancelled' && o.status === 'paid'),
     }));
 
@@ -1393,7 +1278,7 @@ router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req,
       return respondError(res, "Fulfillment status is required.", 400);
     }
 
-    const validStatuses = ['pending_fulfillment', 'packing_required', 'packing', 'packed', 'awaiting_pickup', 'ready_to_ship', 'with_carrier', 'delivered', 'shipment_failed'];
+    const validStatuses = ['pending_fulfillment', 'packing_required', 'packing', 'packed', 'awaiting_pickup', 'ready_to_ship', 'pending_dispatch', 'with_carrier', 'delivered', 'shipment_failed'];
     if (!validStatuses.includes(fulfillment_status)) {
       return respondError(res, `Invalid fulfillment status. Must be one of: ${validStatuses.join(', ')}`, 400);
     }
@@ -1417,8 +1302,11 @@ router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req,
 
     const previousFulfillment = order.fulfillment_status;
 
+    // Derive canonical status + delivery_status from fulfillment status
+    const fulfillDims = FULFILLMENT_STATUS_MAP[fulfillment_status];
     const updatePayload = {
       fulfillment_status,
+      ...(fulfillDims ? { status: fulfillDims.status, delivery_status: fulfillDims.delivery_status } : {}),
       updated_at: new Date().toISOString(),
     };
 
@@ -1491,13 +1379,16 @@ router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req,
 
             const shipmentResult = await provider.adapter.createShipment(shipmentPayload);
             let awbResult = null;
+            let labelResult = null;
             if (shipmentResult.shipment_id) {
               awbResult = await provider.adapter.assignCourier(shipmentResult.shipment_id);
-              await provider.adapter.schedulePickup(shipmentResult.shipment_id);
-              await provider.adapter.generateLabel(shipmentResult.shipment_id);
+              // Label generated here; pickup scheduled on confirm-dispatch
+              labelResult = await provider.adapter.generateLabel(shipmentResult.shipment_id);
             }
 
             const providerShipmentId = shipmentResult.shipment_id ? String(shipmentResult.shipment_id) : null;
+            const labelUrl = labelResult?.label_url || null;
+            const trackingUrl = awbResult?.awb_code ? `https://shiprocket.co/tracking/${awbResult.awb_code}` : null;
 
             const { data: newShipment } = await db.from("shipments").insert({
               order_id: order.id,
@@ -1510,9 +1401,10 @@ router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req,
               provider_shipment_id: providerShipmentId,
               service_type: awbResult?.courier_name ? 'standard' : null,
               provider_response: shipmentResult,
-              pickup_requested: true,
-              pickup_requested_at: new Date().toISOString(),
+              pickup_requested: false,
               label_generated: true,
+              label_url: labelUrl,
+              tracking_url: trackingUrl,
               origin_address: process.env.SHOP_ADDRESS || 'Primary Warehouse',
               recipient_address_snapshot: JSON.parse(JSON.stringify({
                 name: order.customer_name,
@@ -1521,12 +1413,18 @@ router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req,
               })),
             }).single();
 
-            // Link shipment to order and advance to with_carrier
+            // Link shipment to order and advance to pending_dispatch (not yet with carrier)
             if (newShipment) {
+              const pdDims = FULFILLMENT_STATUS_MAP['pending_dispatch'];
               const { data: linkedOrder } = await db.from("orders").update({
                 shipment_id: newShipment.id,
-                fulfillment_status: "with_carrier",
-                shipped_at: order.shipped_at || new Date().toISOString(),
+                shipment_awb: newShipment.awb_code,
+                shipment_courier: newShipment.courier_name,
+                shipment_label_url: labelUrl,
+                shipment_tracking_url: trackingUrl,
+                status: pdDims?.status || "pending_dispatch",
+                delivery_status: pdDims?.delivery_status || "processing",
+                fulfillment_status: pdDims?.fulfillment_status || "pending_dispatch",
                 updated_at: new Date().toISOString(),
               }).eq("id", order.id).single();
 
@@ -1578,12 +1476,108 @@ router.put("/:id/fulfillment", authMiddleware, requireRole("admin"), async (req,
 
     return success(res, {
       message: fulfillment_status === 'ready_to_ship'
-        ? "Shipment created. Order moved to With Carrier."
+        ? "Shipment draft created. Review and confirm dispatch to release to carrier."
         : "Fulfillment status updated successfully.",
       order: finalOrder,
     });
   } catch (error) {
     return respondError(res, error.message || "Fulfillment update failed", 500);
+  }
+});
+
+// POST /api/orders/:id/confirm-dispatch
+// Admin confirms shipment dispatch — schedules pickup with carrier, advances to with_carrier
+router.post("/:id/confirm-dispatch", authMiddleware, requireRole("admin"), async (req, res) => {
+  try {
+    const { data: order, error: orderErr } = await db
+      .from("orders")
+      .select("*")
+      .eq("id", req.params.id)
+      .single();
+    if (orderErr || !order) {
+      return respondError(res, "Order not found.", 404);
+    }
+
+    if (order.fulfillment_status !== 'pending_dispatch') {
+      return respondError(res, "Order is not in pending_dispatch state. Cannot confirm dispatch.", 400);
+    }
+
+    if (!order.shipment_id) {
+      return respondError(res, "No shipment found for this order. Create a shipment first.", 400);
+    }
+
+    const { data: shipment, error: shipErr } = await db
+      .from("shipments")
+      .select("*")
+      .eq("id", order.shipment_id)
+      .single();
+    if (shipErr || !shipment) {
+      return respondError(res, "Shipment record not found.", 404);
+    }
+
+    if (shipment.pickup_requested) {
+      return respondError(res, "Pickup has already been requested for this shipment.", 400);
+    }
+
+    // Schedule pickup with the carrier provider
+    let pickupResult = null;
+    if (shipment.provider_shipment_id) {
+      try {
+        const { getDefaultProvider } = require("../services/shipping/ProviderRegistry");
+        const provider = await getDefaultProvider();
+        if (provider) {
+          pickupResult = await provider.adapter.schedulePickup(shipment.provider_shipment_id);
+        }
+      } catch (pickupErr) {
+        logger.error(`[confirm-dispatch] Pickup scheduling failed for order ${order.id}: ${pickupErr.message}`);
+        return respondError(res, `Failed to schedule pickup with carrier: ${pickupErr.message}`, 500);
+      }
+    }
+
+    // Mark shipment as pickup requested
+    await db.from("shipments").update({
+      pickup_requested: true,
+      pickup_requested_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", shipment.id);
+
+    // Advance order to with_carrier
+    const wcDims = FULFILLMENT_STATUS_MAP['with_carrier'];
+    const { data: updatedOrder } = await db.from("orders").update({
+      status: wcDims?.status || "with_carrier",
+      delivery_status: wcDims?.delivery_status || "shipped",
+      fulfillment_status: wcDims?.fulfillment_status || "with_carrier",
+      shipped_at: order.shipped_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", order.id).single();
+
+    if (!updatedOrder) {
+      return respondError(res, "Failed to update order status.", 500);
+    }
+
+    // Log to order_status_history
+    await db.from("order_status_history").insert({
+      order_id: order.id,
+      field_name: "fulfillment_status",
+      old_value: "pending_dispatch",
+      new_value: "with_carrier",
+      changed_by: req.user.userId || req.user.id || "admin",
+      changed_at: new Date().toISOString(),
+    });
+
+    // SSE broadcast
+    try {
+      sendSseEvent("order:updated", { order: updatedOrder },
+        (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === updatedOrder.user_id));
+    } catch (e) { /* ignore */ }
+
+    return success(res, {
+      message: "Shipment confirmed and released to carrier. Pickup scheduled.",
+      order: updatedOrder,
+      pickup: pickupResult,
+    });
+  } catch (error) {
+    return respondError(res, error.message || "Confirm dispatch failed.", 500);
   }
 });
 
@@ -1966,57 +1960,17 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       return respondError(res, "Order not found.", 404);
     }
 
-    // Ownership check: user must own the order or be admin
     const isOwner =
       String(order.user_id) === String(req.user.userId || req.user.id);
     const isAdmin = req.user.role === "admin";
     if (!isOwner && !isAdmin) {
-      return respondError(
-        res,
-        "Access denied. You do not have permission to track this order.",
-        403,
-      );
+      return respondError(res, "Access denied. You do not have permission to track this order.", 403);
     }
 
-    // Admins bypass RLS for shipments/events
     const trackDb = isAdmin ? db : req.db;
-
-    // Try to fetch real shipment tracking data
-    const { data: shipment } = await trackDb
-      .from("shipments")
-      .select("*, shipping_provider_id")
-      .eq("order_id", order.id)
-      .single();
+    const { shipment, timeline: baseTimeline } = await buildTrackingData(order, trackDb);
 
     if (shipment) {
-      // Real shipment exists — build tracking from events
-      const { data: events } = await trackDb
-        .from("shipment_tracking_events")
-        .select("*")
-        .eq("shipment_id", shipment.id)
-        .order("occurred_at", { ascending: true });
-
-      const timeline = [
-        {
-          status: "placed",
-          label: "Order Placed",
-          done: true,
-          time: order.created_at,
-        },
-      ];
-
-      if (events && events.length > 0) {
-        for (const ev of events) {
-          timeline.push({
-            status: ev.status,
-            label: ev.description || ev.status,
-            done: true,
-            time: ev.occurred_at,
-            location: ev.location,
-          });
-        }
-      }
-
       const progressMap = {
         pending: 10,
         pickup_scheduled: 25,
@@ -2049,7 +2003,7 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
         cancelWindowExpires: order.cancel_window_expires || null,
         returnWindowExpires: order.return_window_expires || null,
         timestamp: new Date().toISOString(),
-        timeline,
+        timeline: baseTimeline,
         hasRealTracking: true,
       });
     }
@@ -2091,8 +2045,6 @@ router.get("/:id/track", authMiddleware, async (req, res) => {
       simulatedIdx > currentIdx
     ) {
       responseStatus = statusResult;
-      // NOTE: Simulated tracking no longer writes to DB.
-      // Real tracking is driven by carrier webhooks.
     }
 
     const getStatusDetails = (statusVal) => {
@@ -2336,6 +2288,44 @@ router.post(
 
 // Webhook consolidated in RefundController.js at POST /api/refunds/webhook
 
+// GET /api/orders/admin
+// Fetch all orders (admin only) — placed before /:id wildcard to prevent capture
+router.get("/admin", authMiddleware, requireRole("admin"), async (req, res) => {
+  try {
+    const { data: orders, error: ordersErr } = await db
+      .from("orders")
+      .select("*");
+    if (ordersErr) {
+      return respondError(res, ordersErr.message || "Failed to fetch orders", 500);
+    }
+
+    const { data: users } = await db.from("users").select("*");
+    const userMap = {};
+    if (users) {
+      users.forEach((u) => {
+        userMap[u.id] = u.email;
+      });
+    }
+
+    const enrichedOrders = orders.map((o) => ({
+      ...o,
+      user_email: userMap[o.user_id] || "unknown@sporekart.com",
+      resolved_state: resolveState(o),
+      cancellable: !['shipped', 'in_transit', 'delivered', 'with_carrier', 'out_for_delivery', 'ndr', 'rto'].includes(o.delivery_status) &&
+        !['cancelled', 'refunded', 'CANCEL_REQUESTED', 'REFUND_FAILED', 'REFUND_COMPLETED', 'MANUAL_REFUND_INITIATED', 'MANUAL_REFUND_COMPLETED',
+          'with_carrier', 'out_for_delivery', 'ndr', 'delivered', 'rto', 'packing', 'packed', 'ready_to_ship', 'return_window', 'completed'].includes(o.status),
+      invoice_accessible_admin: (['shipped', 'in_transit', 'delivered'].includes(o.delivery_status) || ['with_carrier', 'delivered', 'return_window', 'completed'].includes(o.status)) ||
+        (o.delivery_status === 'cancelled' && o.status === 'paid'),
+    }));
+
+    enrichedOrders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return success(res, enrichedOrders);
+  } catch (error) {
+    return respondError(res, error.message || "Failed to fetch all orders", 500);
+  }
+});
+
 // GET /api/orders/:id
 // Fetch a single order by ID (owner or admin)
 router.get("/:id", authMiddleware, async (req, res) => {
@@ -2383,12 +2373,15 @@ router.post("/admin/approve/:id", authMiddleware, requireRole("admin"), async (r
       return respondError(res, "Order is not pending approval.", 400);
     }
 
+    const approveStatus = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.APPROVED : "paid";
+    const approveDims = STATE_DIMENSION_MAP[approveStatus] || { delivery_status: "placed", fulfillment_status: "pending_fulfillment" };
     const { data: updatedOrder, error: updateError } = await db
       .from("orders")
       .update({
-        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.APPROVED : "paid",
+        status: approveStatus,
+        delivery_status: approveDims.delivery_status,
+        fulfillment_status: approveDims.fulfillment_status,
         admin_approval_status: "approved",
-        fulfillment_status: "pending_fulfillment",
         version: (order.version || 0) + 1,
         updated_at: new Date().toISOString()
       })
@@ -2485,11 +2478,14 @@ router.post("/admin/reject/:id", authMiddleware, requireRole("admin"), validateB
     const paidStatuses = ["paid", OrderStates.PAYMENT_VERIFIED, OrderStates.APPROVED].filter(Boolean);
     const isPaid = paidStatuses.includes(order.status) && (order.razorpay_payment_id || order.payment_method === "UPI QR");
 
+    const rejectStatus = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.ADMIN_REJECTED : "cancelled";
+    const rejectDims = STATE_DIMENSION_MAP[rejectStatus] || { delivery_status: "cancelled", fulfillment_status: null };
     const { data: updatedOrder, error: updateError } = await db
       .from("orders")
       .update({
-        status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.ADMIN_REJECTED : "cancelled",
-        delivery_status: FEATURE_FLAGS.SELF_CANCEL_WINDOW ? "rejected" : "cancelled",
+        status: rejectStatus,
+        delivery_status: rejectDims.delivery_status,
+        fulfillment_status: rejectDims.fulfillment_status,
         admin_approval_status: "rejected",
         cancel_reason: reason,
         cancelled_by: "admin",
@@ -2597,7 +2593,12 @@ router.post("/verify-cod-otp", authMiddleware, async (req, res) => {
     // OTP verified — confirm the order
     const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
     if (order && order.payment_method === "cod") {
-      await db.from("orders").update({ status: "confirmed", delivery_status: "placed" }).eq("id", orderId);
+      const codPaidTarget = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : OrderStates.PAID;
+      if (!isValidTransition(order.status, codPaidTarget)) {
+        return respondError(res, `Invalid status transition from ${order.status} to ${codPaidTarget}`, 400);
+      }
+      const paidDims = STATE_DIMENSION_MAP[codPaidTarget] || { delivery_status: "placed", fulfillment_status: null };
+      await db.from("orders").update({ status: codPaidTarget, delivery_status: paidDims.delivery_status, fulfillment_status: paidDims.fulfillment_status }).eq("id", orderId);
     }
     return success(res, { verified: true, message: "Order confirmed!" });
   } catch (err) {
@@ -2771,8 +2772,11 @@ router.post("/:id/request-return", authMiddleware, async (req, res) => {
     if (order.return_window_expires && new Date(order.return_window_expires) < new Date()) {
       return respondError(res, "Return window has expired.", 400);
     }
+    const retDims = STATE_DIMENSION_MAP[OrderStates.RETURN_REQUESTED] || { delivery_status: "delivered", fulfillment_status: "delivered" };
     await db.from("orders").update({
       status: OrderStates.RETURN_REQUESTED,
+      delivery_status: retDims.delivery_status,
+      fulfillment_status: retDims.fulfillment_status,
       return_requested_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("id", req.params.id);

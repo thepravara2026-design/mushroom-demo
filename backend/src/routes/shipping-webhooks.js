@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/db');
 const logger = require('../utils/logger');
 const { getProvider } = require('../services/shipping/ProviderRegistry');
+const { WEBHOOK_STATUS_MAP, STATE_DIMENSION_MAP, REFUND_STATES, getCancelWindow } = require('../modules/orders/OrderStateService');
 
 const SHIPMENT_STATUS_MAP = {
   'NEW': 'pending',
@@ -95,16 +96,7 @@ router.post('/webhooks/:providerKey', async (req, res) => {
         occurred_at: payload.occurredAt || new Date().toISOString(),
       });
 
-    const deliveryStatusMap = {
-      'shipped': 'shipped',
-      'in_transit': 'in_transit',
-      'out_for_delivery': 'in_transit',
-      'delivered': 'delivered',
-      'cancelled': 'cancelled',
-      'returned': 'cancelled',
-    };
-
-    // NDR does NOT change order delivery_status — only notifies admin
+    // NDR does NOT change order status — only notifies admin
     if (NDR_STATUSES.has(newStatus)) {
       logger.info(`[shipping-webhook] NDR raised for Order ${shipment.order_id}, AWB ${payload.awbCode}`);
 
@@ -132,16 +124,23 @@ router.post('/webhooks/:providerKey', async (req, res) => {
       return res.status(200).json({ received: true });
     }
 
-    if (deliveryStatusMap[newStatus]) {
-      const mappedStatus = deliveryStatusMap[newStatus];
+    // Map shipment status to canonical order status + all three dimensions
+    const orderStatus = WEBHOOK_STATUS_MAP[newStatus];
+    if (orderStatus) {
+      const dims = STATE_DIMENSION_MAP[orderStatus] || { delivery_status: "placed", fulfillment_status: null };
       const orderUpdate = {
-        delivery_status: mappedStatus,
+        status: orderStatus,
+        delivery_status: dims.delivery_status,
+        fulfillment_status: dims.fulfillment_status,
         updated_at: new Date().toISOString(),
       };
       if (newStatus === 'delivered') {
         orderUpdate.delivered_at = new Date().toISOString();
-        orderUpdate.fulfillment_status = 'delivered';
       }
+      if (newStatus === 'cancelled' || newStatus === 'returned') {
+        orderUpdate.cancelled_at = new Date().toISOString();
+      }
+
       await db
         .from('orders')
         .update(orderUpdate)
@@ -150,9 +149,9 @@ router.post('/webhooks/:providerKey', async (req, res) => {
       // Log to order_status_history
       await db.from('order_status_history').insert({
         order_id: shipment.order_id,
-        field_name: 'delivery_status',
+        field_name: 'status',
         old_value: shipment.status || 'unknown',
-        new_value: mappedStatus,
+        new_value: orderStatus,
         changed_by: 'webhook:' + newStatus,
         changed_at: new Date().toISOString(),
       }).catch(() => {});
@@ -173,7 +172,6 @@ router.post('/webhooks/:providerKey', async (req, res) => {
         try {
           const { cancelCarrierShipment, executeRefundProcess } = require('../modules/refunds/RefundService');
           await cancelCarrierShipment(shipment.order_id, 'RTO: Shipment returned to sender');
-          // Also trigger payment gateway refund if order was paid
           const { data: rtoOrder } = await db.from('orders').select('*').eq('id', shipment.order_id).single();
           if (rtoOrder && rtoOrder.razorpay_payment_id) {
             await executeRefundProcess(rtoOrder, rtoOrder.total, 'system', 'RTO: Shipment returned to sender');

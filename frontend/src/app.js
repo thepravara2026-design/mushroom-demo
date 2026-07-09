@@ -20,6 +20,7 @@ import { isValidIndianPhone } from './utils/validation.js';
 import { createEventSourceWithAuth } from './utils/auth.js';
 import { renderReturnPage } from './components/ReturnPage.js';
 import { initDeliveryCheck } from './shipping/deliveryCheck.js';
+import { requireAdmin, verifyAdminSession, createLoadingScreen, showForbidden, showLoginPrompt } from './utils/routeGuard.js';
 
 // Attach state to window for existing global functions to work during incremental migration
 window.state = state;
@@ -53,6 +54,7 @@ let _productRetryTimer = null;
 let _productRetryCount = 0;
 const MAX_PRODUCT_RETRIES = 5;
 let tgCurrentPage = 0;
+let _checkoutAuthPromptInFlight = false;
 let tgAutoplayTimer = null;
 let carouselIndex = 0;
 let carouselTimer = null;
@@ -112,9 +114,9 @@ function _getRecentlyReadBlogs() {
 function _saveRecentlyReadBlog(slug) {
   try {
     let list = _getRecentlyReadBlogs();
-    // Remove existing entry for this slug (to move it to top)
+    // Remove existing entry for this slug (to move it to the top)
     list = list.filter(item => item.slug !== slug);
-    // Add to the beginning with current timestamp
+    // Add to the beginning with the current timestamp
     list.unshift({ slug, timestamp: Date.now() });
     // Cap the list size
     if (list.length > MAX_RECENTLY_READ) {
@@ -124,6 +126,26 @@ function _saveRecentlyReadBlog(slug) {
   } catch {
     // Ignore localStorage errors
   }
+}
+
+function resetCheckoutAuthGuard() {
+  _checkoutAuthPromptInFlight = false;
+}
+
+function promptCheckoutAuthOnce() {
+  const authModalEl = document.getElementById('auth-modal');
+  if (_checkoutAuthPromptInFlight || (authModalEl && authModalEl.classList.contains('open'))) {
+    return false;
+  }
+
+  _checkoutAuthPromptInFlight = true;
+  authModal.open('buyer', () => {
+    resetCheckoutAuthGuard();
+    if (window.location.hash === '#checkout') {
+      renderCheckoutPage();
+    }
+  });
+  return true;
 }
 
 function getShopInventorySortValue() {
@@ -348,7 +370,7 @@ function renderCategoryGrid(categories) {
     grid.querySelectorAll('.category-admin-edit-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const catId = btn.getAttribute('data-edit-category');
-        window.location.href = `/admin.html#categories?edit=${encodeURIComponent(catId)}`;
+        window.location.hash = `#admin?editCategory=${encodeURIComponent(catId)}`;
       });
     });
   }
@@ -372,7 +394,7 @@ function handleRouting(opts = {}) {
   // Deactivate all nav links & sections
   navShop.classList.remove('active');
   navTrack.classList.remove('active');
-  navAdmin.classList.remove('active');
+  if (navAdmin) navAdmin.classList.remove('active');
 
   pageShop.classList.remove('active');
   if (pageCheckout) pageCheckout.classList.remove('active');
@@ -469,6 +491,12 @@ function handleRouting(opts = {}) {
     fetchOrders().then(() => {
       renderReturnPage(orderId);
     });
+  } else if (hash === '#admin' || hash.startsWith('#admin?')) {
+    if (pageAdmin) {
+      pageAdmin.classList.add('active');
+      if (heroSection) heroSection.classList.add('hidden');
+      initAdminRoute();
+    }
   } else {
     navShop.classList.add('active');
     pageShop.classList.add('active');
@@ -800,11 +828,23 @@ function initEventListeners() {
     });
   });
 
+  window.addEventListener('auth:modal-closed', () => {
+    resetCheckoutAuthGuard();
+  });
+
   // Listen for global auth changes from new modules
   window.addEventListener('auth:changed', () => {
     updateAuthHeaderUI();
     updateCartUI();
     toggleCartDrawer(false);
+    if (state.token && state.user) {
+      resetCheckoutAuthGuard();
+    }
+    // If auth modal is open, user is mid-login — skip routing re-entry.
+    // Prevents loop where clearAuth() + saveAuth() each dispatch auth:changed
+    // causing renderCheckoutPage() to re-trigger authModal.open().
+    const authModalEl = document.getElementById('auth-modal');
+    if (authModalEl && authModalEl.classList.contains('open')) return;
     handleRouting({ fromAuthChanged: true });
   });
 
@@ -1072,27 +1112,7 @@ function initEventListeners() {
     });
   }
 
-  // Admin inline modal triggers (desktop + mobile)
-  // Admin buttons removed - admin login now integrated in auth modal via "Staff? Use admin login" link
-
-  // Mobile regular login button
-  const mobileAuthBtn = document.getElementById('btn-open-auth-mobile');
-  if (mobileAuthBtn) {
-    mobileAuthBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      mobileNav.classList.add('hidden');
-      authModal.open('admin');
-    });
-  }
-
-  // Topbar admin login button (buyer login is at checkout only)
-  const topbarAuthBtn = document.getElementById('btn-open-auth-top');
-  if (topbarAuthBtn) {
-    topbarAuthBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      authModal.open('admin');
-    });
-  }
+  // Admin buttons removed from HTML; admin accessible via #admin hash only
 
   // Initialize training register handlers (if present)
   try {
@@ -1236,7 +1256,7 @@ function updateAuthHeaderUI() {
       .getElementById('btn-open-admin-console')
       ?.addEventListener('click', () => {
         closeUserProfileDropdown();
-        window.location.href = '/admin.html';
+        window.location.hash = '#admin';
       });
     document
       .getElementById('btn-open-track-orders')
@@ -1299,10 +1319,8 @@ function updateAuthHeaderUI() {
   } else {
     profileSection.innerHTML = '';
     navTrack.style.display = 'none';
-    navAdmin.style.display = 'none';
+    if (navAdmin) navAdmin.style.display = 'none';
     if (navAdminEntry) navAdminEntry.style.display = 'inline-flex';
-    const topbarAuth = document.getElementById('btn-open-auth-top');
-    if (topbarAuth) topbarAuth.style.display = 'inline-flex';
   }
 
   // Hide topbar login when user is logged in
@@ -4086,6 +4104,43 @@ async function handleCheckoutInitiation() {
   window.location.hash = '#checkout';
 }
 
+async function initAdminRoute() {
+  const pageAdmin = document.getElementById('admin-page');
+  if (!pageAdmin) return;
+
+  if (!requireAdmin()) {
+    pageAdmin.innerHTML = createLoadingScreen();
+    const verified = await verifyAdminSession();
+    if (!verified) {
+      if (state.token && state.user) {
+        showForbidden(pageAdmin);
+      } else {
+        showLoginPrompt(pageAdmin, '#admin');
+      }
+      return;
+    }
+  }
+
+  try {
+    if (!pageAdmin.dataset.adminLoaded) {
+      pageAdmin.innerHTML = createLoadingScreen();
+      const res = await fetch('/admin-content.html');
+      if (!res.ok) throw new Error(`Failed to load admin UI (${res.status})`);
+      const html = await res.text();
+      pageAdmin.innerHTML = html;
+      pageAdmin.dataset.adminLoaded = 'true';
+    }
+    const adminModule = await import('./admin.js');
+    pageAdmin.style.opacity = '0';
+    await adminModule.default(true);
+    pageAdmin.style.opacity = '';
+  } catch (err) {
+    pageAdmin.style.opacity = '';
+    pageAdmin.innerHTML = `<div style="color:#e74c3c;padding:40px;text-align:center;"><h3>Failed to load admin panel</h3><p>${err.message}</p></div>`;
+    console.error('[Admin] initAdminRoute error:', err);
+  }
+}
+
 function renderCheckoutPage() {
   const summaryContainer = document.getElementById('checkout-order-summary');
   if (!summaryContainer) return;
@@ -4107,10 +4162,17 @@ function renderCheckoutPage() {
     if (formPanel) {
       formPanel.innerHTML = `<div class="grid-skeleton" style="padding:2rem;"><i class="fa-solid fa-spinner fa-spin loader-icon"></i><p>Please sign in to continue…</p></div>`;
     }
-    setTimeout(() => authModal.open('buyer', () => {
-      const fp = document.querySelector('.checkout-form-panel');
-      if (fp) renderCheckoutDeliveryForm();
-    }), 300);
+
+    if (!promptCheckoutAuthOnce()) {
+      return;
+    }
+
+    setTimeout(() => {
+      if (state.token && state.user && state.user.role === 'buyer') {
+        const fp = document.querySelector('.checkout-form-panel');
+        if (fp) renderCheckoutDeliveryForm();
+      }
+    }, 300);
   } else {
     renderCheckoutDeliveryForm();
   }
@@ -6697,6 +6759,51 @@ function getStatusBadgeHTML(status) {
       color = "#10b981";
       label = "Approved";
       break;
+    case "packing":
+      bg = "rgba(59,130,246,0.12)";
+      color = "#3b82f6";
+      label = "Packing";
+      break;
+    case "packed":
+      bg = "rgba(139,92,246,0.12)";
+      color = "#8b5cf6";
+      label = "Packed";
+      break;
+    case "ready_to_ship":
+      bg = "rgba(16,185,129,0.12)";
+      color = "#10b981";
+      label = "Ready to Ship";
+      break;
+    case "pending_dispatch":
+      bg = "rgba(245,158,11,0.15)";
+      color = "#f59e0b";
+      label = "Pending Dispatch";
+      break;
+    case "out_for_delivery":
+      bg = "rgba(245,158,11,0.12)";
+      color = "#f59e0b";
+      label = "Out for Delivery";
+      break;
+    case "ndr":
+      bg = "rgba(239,68,68,0.12)";
+      color = "#ef4444";
+      label = "NDR";
+      break;
+    case "rto":
+      bg = "rgba(239,68,68,0.15)";
+      color = "#dc2626";
+      label = "Returned to Sender";
+      break;
+    case "shipment_failed":
+      bg = "rgba(239,68,68,0.12)";
+      color = "#ef4444";
+      label = "Shipment Failed";
+      break;
+    case "completed":
+      bg = "rgba(16,185,129,0.15)";
+      color = "#059669";
+      label = "Completed";
+      break;
   }
 
   return `<span class="order-status-badge" style="background:${bg}; color:${color}; padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:600; text-transform:uppercase;">${label}</span>`;
@@ -6757,12 +6864,13 @@ function renderOrdersSidebar() {
         year: 'numeric',
       });
       const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
-      const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved"];
+      const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved", "packing", "packed", "pending_dispatch", "ready_to_ship", "with_carrier", "out_for_delivery", "ndr", "delivered", "rto", "shipment_failed", "completed"];
       // Handle new manual refund flow via refundStatus field
-      const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,ready_to_ship:3,with_carrier:4,delivered:5};
+      const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,pending_dispatch:3,ready_to_ship:4,with_carrier:5,delivered:6};
       const deliveryToFulfillment = {
         placed:'pending_fulfillment', processing:'packing_required', inoculating:'packing_required',
         pending:'pending_fulfillment', pickup_scheduled:'packed', picked_up:'ready_to_ship',
+        pending_dispatch:'ready_to_ship',
         shipped:'with_carrier', in_transit:'with_carrier', out_for_delivery:'with_carrier',
         delivered:'delivered', cancelled:null, returned:null
       };
@@ -6770,6 +6878,7 @@ function renderOrdersSidebar() {
         ? order.fulfillment_status
         : (deliveryToFulfillment[order.delivery_status] || 'pending_fulfillment');
       const hasRefundStatus = order.status === 'cancelled' && order.refund_status && order.refund_status !== 'none';
+      // Status is source of truth for v3 states; fall back to dimensions for legacy
       const displayStatus = hasRefundStatus ? `REFUND_${order.refund_status.toUpperCase()}` : (refundStates.includes(order.status) ? order.status : (v3States.includes(order.status) ? order.status : (fulfillmentOrder[effectiveFulfillment] !== undefined ? effectiveFulfillment : order.delivery_status)));
       const badgeHTML = getStatusBadgeHTML(displayStatus);
 
@@ -6874,13 +6983,14 @@ function renderTrackingDetails(track) {
     .join('');
 
   const refundStates = ["CANCEL_REQUESTED", "CANCEL_APPROVED", "CANCEL_REJECTED", "REFUND_PENDING", "REFUND_INITIATED", "REFUND_PROCESSING", "REFUND_COMPLETED", "REFUND_FAILED", "MANUAL_REFUND_INITIATED", "MANUAL_REFUND_COMPLETED"];
-  const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved"];
+  const v3States = ["order_created", "cancellation_window", "window_closed", "self_cancelled", "payment_verified", "admin_pending", "admin_rejected", "return_window", "approved", "packing", "packed", "pending_dispatch", "ready_to_ship", "with_carrier", "out_for_delivery", "ndr", "delivered", "rto", "shipment_failed", "completed"];
   const hasRefundStatus = track.paymentStatus === 'cancelled' && track.refundStatus && track.refundStatus !== 'none';
 
-  const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,ready_to_ship:3,with_carrier:4,delivered:5};
+  const fulfillmentOrder = {pending_fulfillment:0,packing_required:1,packed:2,pending_dispatch:3,ready_to_ship:4,with_carrier:5,delivered:6};
   const deliveryToFulfillment = {
     placed:'pending_fulfillment', processing:'packing_required', inoculating:'packing_required',
     pending:'pending_fulfillment', pickup_scheduled:'packed', picked_up:'ready_to_ship',
+    pending_dispatch:'ready_to_ship',
     shipped:'with_carrier', in_transit:'with_carrier', out_for_delivery:'with_carrier',
     delivered:'delivered', cancelled:null, returned:null
   };
@@ -6891,10 +7001,9 @@ function renderTrackingDetails(track) {
   const displayStatus = hasRefundStatus ? `REFUND_${track.refundStatus.toUpperCase()}` : (refundStates.includes(track.paymentStatus) ? track.paymentStatus : (v3States.includes(track.paymentStatus) ? track.paymentStatus : (fulfillmentOrder[effectiveFulfillment] !== undefined ? effectiveFulfillment : track.deliveryStatus)));
   const badgeHTML = getStatusBadgeHTML(displayStatus);
 
-  const nonCancellableStatuses = ["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED", "SELF_CANCELLED", "ADMIN_REJECTED"];
-  const nonCancellableFulfillment = ["with_carrier", "delivered"];
-  const canCancel = fulfillmentOrder[effectiveFulfillment] < fulfillmentOrder.ready_to_ship && ["pending", "paid", "pending_upi_verification"].includes(track.paymentStatus) && !nonCancellableStatuses.includes(track.paymentStatus);
-  const hasCancelWindow = track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !nonCancellableFulfillment.includes(effectiveFulfillment) && !["cancelled", "self_cancelled", "window_closed", "SELF_CANCELLED", "ADMIN_REJECTED", "CANCEL_REQUESTED", "CANCEL_APPROVED"].includes(track.paymentStatus);
+  const nonCancellableStatuses = ["cancelled", "CANCEL_REQUESTED", "CANCEL_APPROVED", "REFUND_FAILED", "REFUND_COMPLETED", "SELF_CANCELLED", "ADMIN_REJECTED", "with_carrier", "out_for_delivery", "ndr", "delivered", "rto", "packing", "packed", "pending_dispatch", "ready_to_ship", "completed", "return_window"];
+  const canCancel = !nonCancellableStatuses.includes(track.paymentStatus) && ["pending", "paid", "payment_verified", "admin_pending", "pending_upi_verification", "order_created", "cancellation_window"].includes(track.paymentStatus);
+  const hasCancelWindow = track.cancelWindowExpires && new Date(track.cancelWindowExpires) > new Date() && !["with_carrier", "delivered"].includes(track.fulfillmentStatus || track.deliveryStatus) && !["cancelled", "self_cancelled", "window_closed", "SELF_CANCELLED", "ADMIN_REJECTED", "CANCEL_REQUESTED", "CANCEL_APPROVED", "rto", "delivered", "with_carrier", "out_for_delivery", "ndr"].includes(track.paymentStatus);
   const cancelReason = track.cancelReason || "";
 
   container.innerHTML = `
@@ -6937,8 +7046,8 @@ function renderTrackingDetails(track) {
     <div class="fulfillment-strip">
       <div class="fulfillment-strip-header"><i class="fa-solid fa-boxes-stacked"></i> Fulfillment Pipeline</div>
       <div class="fulfillment-strip-steps">
-        ${['pending_fulfillment','packing_required','packed','ready_to_ship','with_carrier','delivered'].map((step) => {
-          const stepLabels = {'pending_fulfillment':'Pending','packing_required':'Packing','packed':'Packed','ready_to_ship':'Ready','with_carrier':'Shipped','delivered':'Delivered'};
+        ${['pending_fulfillment','packing_required','packed','pending_dispatch','ready_to_ship','with_carrier','delivered'].map((step) => {
+          const stepLabels = {'pending_fulfillment':'Pending','packing_required':'Packing','packed':'Packed','pending_dispatch':'Dispatch','ready_to_ship':'Ready','with_carrier':'Shipped','delivered':'Delivered'};
           const currentIdx = fulfillmentOrder[effectiveFulfillment] ?? 0;
           const idx = fulfillmentOrder[step] ?? 0;
           const done = idx < currentIdx;

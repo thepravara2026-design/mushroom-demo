@@ -14,7 +14,6 @@ const productRoutes = require("./routes/products");
 const orderRoutes = require("./routes/orders");
 const categoryRoutes = require("./routes/categories");
 const trainingRoutes = require("./routes/trainings");
-const traineeRoutes = require("./routes/trainee");
 const blogRoutes = require("./routes/blogs");
 const searchRoutes = require("./routes/search");
 const promoRoutes = require("./routes/promo");
@@ -125,11 +124,12 @@ app.use(selectDb);
 
 // Routes
 app.use("/api/auth", authRoutes);
+const twoFARoutes = require("./modules/twofa/TwoFAController");
+app.use("/api/auth", twoFARoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/trainings", trainingRoutes);
-app.use("/api/trainee", traineeRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/promo", promoRoutes);
@@ -260,19 +260,6 @@ async function runMigrations() {
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_type VARCHAR(20)`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_initiated_at TIMESTAMP WITH TIME ZONE`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_completed_at TIMESTAMP WITH TIME ZONE`,
-      // ── order_audit_logs (immutable audit trail) ──
-      `CREATE TABLE IF NOT EXISTS order_audit_logs (
-        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-        order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-        action VARCHAR(50) NOT NULL,
-        performed_by VARCHAR(255) NOT NULL,
-        previous_state JSONB,
-        new_state JSONB,
-        metadata JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-      )`,
-      `CREATE INDEX IF NOT EXISTS idx_audit_logs_order ON order_audit_logs(order_id, created_at DESC)`,
-      `CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON order_audit_logs(action)`,
       // ── notification_logs (delivery tracking) ──
       `CREATE TABLE IF NOT EXISTS notification_logs (
         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -700,9 +687,19 @@ function startServer(port, attempts = 0) {
     const { runCancelWindowCleanup } = require("./jobs/cancelWindowCleanup");
     setInterval(() => runCancelWindowCleanup().catch(() => {}), 60 * 1000);
 
+    // Phase 5 — Complete refunded orders (REFUND_COMPLETED → COMPLETED, 5 min)
+    const { completeRefundedOrders, closeCompletedWindows } = require("./modules/orders/OrderStateService");
+    setInterval(() => completeRefundedOrders().catch(() => {}), 5 * 60 * 1000);
+    // Phase 5 — Close expired return windows (RETURN_WINDOW → COMPLETED, 5 min)
+    setInterval(() => closeCompletedWindows().catch(() => {}), 5 * 60 * 1000);
+
     // Phase 7 — Notification retry cron
     const { runNotificationRetry } = require("./jobs/notificationRetry");
     setInterval(() => runNotificationRetry().catch(() => {}), 5 * 60 * 1000);
+
+    // Phase 7 — Expire stale pending_payment training enrollments (30 min timeout)
+    const { runTrainingPendingPaymentCleanup } = require("./jobs/trainingPendingPaymentCleanup");
+    setInterval(() => runTrainingPendingPaymentCleanup().catch(() => {}), 5 * 60 * 1000);
 
     // Phase 8 — Analytics aggregation (every 6 hours)
     const { runAnalyticsAggregation } = require("./jobs/analyticsAggregation");

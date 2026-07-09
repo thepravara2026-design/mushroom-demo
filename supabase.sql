@@ -276,17 +276,6 @@ CREATE TABLE IF NOT EXISTS fulfillment_tasks (
 -- ============================================================
 -- 12. ORDER AUDIT LOGS
 -- ============================================================
-CREATE TABLE IF NOT EXISTS order_audit_logs (
-  id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  order_id       TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  action         VARCHAR(50) NOT NULL,
-  performed_by   VARCHAR(255) NOT NULL,
-  previous_state JSONB,
-  new_state      JSONB,
-  metadata       JSONB DEFAULT '{}'::jsonb,
-  created_at     TIMESTAMPTZ DEFAULT NOW() NOT NULL
-);
-
 -- ============================================================
 -- 13. REFUND QUEUE
 -- ============================================================
@@ -790,8 +779,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_shipments_awb_unique ON shipments(awb_code
 CREATE INDEX IF NOT EXISTS idx_tracking_events_shipment ON shipment_tracking_events(shipment_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_id, changed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fulfillment_tasks_order ON fulfillment_tasks(order_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_order ON order_audit_logs(order_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON order_audit_logs(action);
+
 CREATE INDEX IF NOT EXISTS idx_notification_logs_order ON notification_logs(order_id, sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_refund_queue_status ON refund_queue(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shipping_providers_default ON shipping_providers(is_default) WHERE is_default = true;
@@ -854,7 +842,6 @@ ALTER TABLE shipments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shipment_tracking_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_status_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fulfillment_tasks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE order_audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE refund_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_batches ENABLE ROW LEVEL SECURITY;
@@ -973,10 +960,6 @@ CREATE POLICY "Admins manage order status history" ON order_status_history FOR A
 -- ── FULFILLMENT TASKS ──
 DROP POLICY IF EXISTS "Admins manage fulfillment tasks" ON fulfillment_tasks;
 CREATE POLICY "Admins manage fulfillment tasks" ON fulfillment_tasks FOR ALL USING (auth.jwt() ->> 'role' = 'admin');
-
--- ── ORDER AUDIT LOGS ──
-DROP POLICY IF EXISTS "Admins manage order audit logs" ON order_audit_logs;
-CREATE POLICY "Admins manage order audit logs" ON order_audit_logs FOR ALL USING (auth.jwt() ->> 'role' = 'admin');
 
 -- ── REFUND QUEUE ──
 DROP POLICY IF EXISTS "Admins manage refund queue" ON refund_queue;
