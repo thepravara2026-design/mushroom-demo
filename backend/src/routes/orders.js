@@ -196,7 +196,7 @@ router.post(
       const { items, promoCode, pincode } = req.body;
       if (!items || !items.length) return respondError(res, "Cart is empty.", 400);
 
-      const { data: dbProducts } = await db.from("products").select("*");
+      const { data: dbProducts } = await req.db.from("products").select("*");
       let subtotal = 0;
       let gstAmount = 0;
       let discountPercent = 0;
@@ -237,7 +237,7 @@ router.post(
 
       let deliveryEstimate = null;
       if (pincode) {
-        const { data: pinData } = await db.from("pincode_serviceability").select("*").eq("pincode", pincode).single().catch(() => ({}));
+        const { data: pinData } = await req.db.from("pincode_serviceability").select("*").eq("pincode", pincode).single().catch(() => ({}));
         if (pinData) {
           deliveryEstimate = { min: pinData.estimated_days_min, max: pinData.estimated_days_max };
         }
@@ -323,7 +323,7 @@ router.post(
       }
 
       // ── PHASE 1: Fetch products & validate stock for ALL items upfront ──
-      const { data: dbProducts } = await db.from("products").select("*");
+      const { data: dbProducts } = await req.db.from("products").select("*");
 
       // Determine discount percentage
       let discountPercent = 0;
@@ -470,7 +470,7 @@ router.post(
       let newOrder, dbError;
 
       // First attempt: insert with customer_email
-      ({ data: newOrder, error: dbError } = await db
+      ({ data: newOrder, error: dbError } = await req.db
         .from("orders")
         .insert(insertPayload)
         .single());
@@ -482,7 +482,7 @@ router.post(
 
         // Retry without the missing column
         const { customer_email: _omit, ...payloadWithoutEmail } = insertPayload;
-        ({ data: newOrder, error: dbError } = await db
+        ({ data: newOrder, error: dbError } = await req.db
           .from("orders")
           .insert(payloadWithoutEmail)
           .single());
@@ -507,6 +507,8 @@ router.post(
         logger.error('[checkout] DB insert failed:', { dbError: dbError?.message, insertPayload });
         return respondError(res, dbError?.message || 'Failed to create order', 500);
       }
+
+      // ── PHASE 2: Reserve stock by incrementing reserved_quantity ──
 
       // ── PHASE 2: Reserve stock by incrementing reserved_quantity ──
       // Prevents concurrent checkout overselling before payment is verified.
@@ -544,14 +546,14 @@ router.post(
           });
         } catch (txErr) {
           logger.error(`[checkout] Stock reservation failed: ${txErr.message}. Rolling back order creation.`);
-          await db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
+          await req.db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
           return respondError(res, `Failed to reserve stock: ${txErr.message}`, 500);
         }
       } else {
         for (const sd of stockDeductions) {
           try {
             if (sd.weight && sd.unit) {
-              const { data: freshProduct } = await db
+              const { data: freshProduct } = await req.db
                 .from("products")
                 .select("stock, reserved_quantity, weight_pricing, version")
                 .eq("id", sd.productId)
@@ -560,14 +562,14 @@ router.post(
                 const available = (freshProduct.stock || 0) - (freshProduct.reserved_quantity || 0);
                 if (available < sd.quantity) throw new Error(`Insufficient stock for ${sd.name}. Available: ${Math.max(0, available)}`);
                 const newReserved = (freshProduct.reserved_quantity || 0) + sd.quantity;
-                await db.from("products").update({
+                await req.db.from("products").update({
                   reserved_quantity: newReserved,
                   ...(!db.isMock ? { version: (freshProduct.version || 0) + 1 } : {}),
                   updated_at: new Date().toISOString(),
                 }).eq("id", sd.productId);
               }
             } else {
-              const { data: freshProduct } = await db
+              const { data: freshProduct } = await req.db
                 .from("products")
                 .select("stock, reserved_quantity, version")
                 .eq("id", sd.productId)
@@ -576,7 +578,7 @@ router.post(
               const available = (freshProduct.stock || 0) - (freshProduct.reserved_quantity || 0);
               if (available < sd.quantity) throw new Error(`Insufficient stock for ${sd.name}. Available: ${Math.max(0, available)}`);
               const newReserved = (freshProduct.reserved_quantity || 0) + sd.quantity;
-              await db.from("products").update({
+              await req.db.from("products").update({
                 reserved_quantity: newReserved,
                 ...(!db.isMock ? { version: (freshProduct.version || 0) + 1 } : {}),
                 updated_at: new Date().toISOString(),
@@ -587,16 +589,16 @@ router.post(
             logger.error(`[checkout] Stock reservation failed for ${sd.productId}: ${dedErr.message}. Rolling back...`);
             for (const done of decrementedProducts) {
               try {
-                const { data: pf } = await db.from("products").select("reserved_quantity").eq("id", done.productId).single();
+                const { data: pf } = await req.db.from("products").select("reserved_quantity").eq("id", done.productId).single();
                 if (pf) {
                   const restored = Math.max(0, (pf.reserved_quantity || 0) - done.quantity);
-                  await db.from("products").update({ reserved_quantity: restored }).eq("id", done.productId);
+                  await req.db.from("products").update({ reserved_quantity: restored }).eq("id", done.productId);
                 }
               } catch (rollbackErr) {
                 logger.error(`[checkout] Rollback failed for ${done.productId}: ${rollbackErr.message}`);
               }
             }
-            await db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
+            await req.db.from("orders").delete().eq("id", generatedOrderId).catch(() => {});
             return respondError(res, `Failed to reserve stock for ${sd.name}. Please try again.`, 500);
           }
         }
@@ -606,7 +608,7 @@ router.post(
       setImmediate(async () => {
         try {
           for (const sd of stockDeductions) {
-            const { data: p } = await db.from("products").select("stock, low_stock_threshold, name").eq("id", sd.productId).single();
+            const { data: p } = await req.db.from("products").select("stock, low_stock_threshold, name").eq("id", sd.productId).single();
             if (p && p.stock <= (p.low_stock_threshold || 10)) {
               const adminMsg = `⚠️ Low Stock Alert: "${p.name}" has only ${p.stock} unit(s) left (threshold: ${p.low_stock_threshold || 10}).`;
               logger.warn(`[Inventory] ${adminMsg}`);
@@ -632,7 +634,7 @@ router.post(
 
       // Backfill customer_email via an immediate UPDATE if the column now exists
       if (customerEmail && newOrder && newOrder.id) {
-        db.from("orders")
+        req.db.from("orders")
           .update({ customer_email: customerEmail })
           .eq("id", newOrder.id)
           .then(() => { })
@@ -653,7 +655,7 @@ router.post(
       });
 
       // Update order with Razorpay Order ID
-      await db
+      await req.db
         .from("orders")
         .update({ razorpay_order_id: rzpOrder.id })
         .eq("id", newOrder.id);
@@ -670,7 +672,7 @@ router.post(
         if (state) addressUpdates.state = state;
         if (pincode) addressUpdates.default_pincode = pincode;
 
-        await db.from("users").update(addressUpdates).eq("id", req.user.userId);
+        await req.db.from("users").update(addressUpdates).eq("id", req.user.userId);
       }
 
       return success(res, {
@@ -721,7 +723,7 @@ router.post(
       const paymentId = upi_ref || `UPI-${Date.now()}`;
       const transactionId = `TXN-${paymentId}`;
 
-      const { data: existingOrder } = await db
+      const { data: existingOrder } = await req.db
         .from("orders")
         .select("invoice_token")
         .eq("razorpay_order_id", razorpay_order_id)
@@ -731,7 +733,7 @@ router.post(
         existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
 
       // Validate v3 state machine transition
-      const { data: currentUpiOrder } = await db.from("orders").select("status").eq("razorpay_order_id", razorpay_order_id).single();
+      const { data: currentUpiOrder } = await req.db.from("orders").select("status").eq("razorpay_order_id", razorpay_order_id).single();
       const upiTarget = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : "paid";
       if (!isValidTransition(currentUpiOrder?.status, upiTarget)) {
         return respondError(res, `Invalid status transition from ${currentUpiOrder?.status} to ${upiTarget}`, 400);
@@ -751,7 +753,7 @@ router.post(
         updated_at: new Date().toISOString(),
       };
 
-      const { data: updatedOrder, error } = await db
+      const { data: updatedOrder, error } = await req.db
         .from("orders")
         .update(upiUpdatePayload)
         .eq("razorpay_order_id", razorpay_order_id)
@@ -764,7 +766,7 @@ router.post(
       // Phase 4: Deduct inventory for UPI orders
       if (FEATURE_FLAGS.INVENTORY_SERVICE) {
         try {
-          const { data: reservations } = await db
+          const { data: reservations } = await req.db
             .from("inventory_reservations")
             .select("id, product_id, quantity")
             .eq("order_id", updatedOrder.id)
@@ -791,24 +793,24 @@ router.post(
       } catch (e) { /* ignore SSE errors */ }
 
       // Send WhatsApp invoice on order placement
-      try {
-        const { data: user } = await db
-          .from("users")
-          .select("*")
-          .eq("id", updatedOrder.user_id)
-          .single();
-        if (user) {
-          sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
+        try {
+          const { data: user } = await req.db
+            .from("users")
+            .select("*")
+            .eq("id", updatedOrder.user_id)
+            .single();
+          if (user) {
+            sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
+          }
+        } catch (e) {
+          // ignore WhatsApp errors
         }
-      } catch (e) {
-        // ignore WhatsApp errors
-      }
 
-      return success(res, {
-        message: "UPI payment confirmed successfully.",
-        status: "paid",
-        order: updatedOrder,
-      });
+        return success(res, {
+          message: "UPI payment confirmed successfully.",
+          status: "paid",
+          order: updatedOrder,
+        });
     } catch (err) {
       return respondError(res, err.message || "Failed to confirm UPI payment", 500);
     }
@@ -834,7 +836,7 @@ router.post(
       const paymentId = `COD-${Date.now()}`;
       const transactionId = `TXN-${paymentId}`;
 
-      const { data: existingOrder } = await db
+      const { data: existingOrder } = await req.db
         .from("orders")
         .select("invoice_token")
         .eq("razorpay_order_id", razorpay_order_id)
@@ -843,15 +845,15 @@ router.post(
       const invoiceToken =
         existingOrder?.invoice_token || crypto.randomBytes(12).toString("hex");
 
-      const { data: currentCodOrder } = await db.from("orders").select("status, delivery_status, fulfillment_status").eq("razorpay_order_id", razorpay_order_id).single();
+      const { data: currentCodOrder } = await req.db.from("orders").select("status, delivery_status, fulfillment_status").eq("razorpay_order_id", razorpay_order_id).single();
       const codStatus = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? (currentCodOrder?.status || OrderStates.ORDER_CREATED) : "placed";
       const codDims = STATE_DIMENSION_MAP[codStatus] || { delivery_status: "placed", fulfillment_status: null };
-      const { data: updatedOrder, error } = await db
+      const { data: updatedOrder, error } = await req.db
         .from("orders")
         .update({
           status: codStatus,
           delivery_status: codDims.delivery_status,
-          fulfillment_status: dims.fulfillment_status,
+          fulfillment_status: codDims.fulfillment_status,
           admin_approval_status: "pending",
           cancel_window_expires: null,
           payment_method: "COD",
@@ -870,7 +872,7 @@ router.post(
       // Phase 4: Deduct inventory for COD orders
       if (FEATURE_FLAGS.INVENTORY_SERVICE) {
         try {
-          const { data: reservations } = await db
+          const { data: reservations } = await req.db
             .from("inventory_reservations")
             .select("id, product_id, quantity")
             .eq("order_id", updatedOrder.id)
@@ -897,24 +899,24 @@ router.post(
       } catch (e) { /* ignore SSE errors */ }
 
       // Send WhatsApp invoice on order placement
-      try {
-        const { data: user } = await db
-          .from("users")
-          .select("*")
-          .eq("id", updatedOrder.user_id)
-          .single();
+        try {
+          const { data: user } = await req.db
+            .from("users")
+            .select("*")
+            .eq("id", updatedOrder.user_id)
+            .single();
         if (user) {
           sendInvoiceWhatsApp(updatedOrder, user, req).catch(() => { });
         }
-      } catch (e) {
-        // ignore WhatsApp errors
-      }
+        } catch (e) {
+          // ignore WhatsApp errors
+        }
 
-      return success(res, {
-        message: "COD order confirmed successfully.",
-        status: "placed",
-        order: updatedOrder,
-      });
+        return success(res, {
+          message: "COD order confirmed successfully.",
+          status: "placed",
+          order: updatedOrder,
+        });
     } catch (err) {
       return respondError(res, err.message || "Failed to confirm COD payment", 500);
     }
@@ -942,7 +944,7 @@ router.post(
       if (isValid) {
         // Update order status to paid and record payment details
         const transactionId = `TXN-${razorpay_payment_id}`;
-        const { data: existingOrder } = await db
+        const { data: existingOrder } = await req.db
           .from("orders")
           .select("invoice_token")
           .eq("razorpay_order_id", razorpay_order_id)
@@ -968,7 +970,7 @@ router.post(
           updatePayload.cancel_window_expires = null;
         }
 
-        const { data: updatedOrder, error } = await db
+        const { data: updatedOrder, error } = await req.db
           .from("orders")
           .update(updatePayload)
           .eq("razorpay_order_id", razorpay_order_id)
@@ -989,11 +991,11 @@ router.post(
               for (const item of updatedOrder.items) {
                 const qty = parseInt(item.quantity, 10) || 0;
                 if (qty <= 0 || !item.productId) continue;
-                const { data: prod } = await db.from("products").select("stock, reserved_quantity").eq("id", item.productId).single();
+                const { data: prod } = await req.db.from("products").select("stock, reserved_quantity").eq("id", item.productId).single();
                 if (prod) {
                   const newStock = Math.max(0, (prod.stock || 0) - qty);
                   const newReserved = Math.max(0, (prod.reserved_quantity || 0) - qty);
-                  await db.from("products").update({
+                  await req.db.from("products").update({
                     stock: newStock,
                     reserved_quantity: newReserved,
                     updated_at: new Date().toISOString(),
@@ -1021,7 +1023,7 @@ router.post(
 
         // Send WhatsApp invoice on order placement
         try {
-          const { data: user } = await db
+          const { data: user } = await req.db
             .from("users")
             .select("*")
             .eq("id", updatedOrder.user_id)
@@ -1056,10 +1058,10 @@ router.post(
               try {
                 const qty = parseInt(item.quantity, 10) || 0;
                 if (qty <= 0 || !item.productId) continue;
-                const { data: prod } = await db.from("products").select("reserved_quantity").eq("id", item.productId).single();
+                const { data: prod } = await req.db.from("products").select("reserved_quantity").eq("id", item.productId).single();
                 if (prod) {
                   const newReserved = Math.max(0, (prod.reserved_quantity || 0) - qty);
-                  await db.from("products").update({ reserved_quantity: newReserved }).eq("id", item.productId);
+                  await req.db.from("products").update({ reserved_quantity: newReserved }).eq("id", item.productId);
                   logger.info(`[verify-payment] Released reservation ${item.productId} x${qty} due to payment failure for order ${currentOrder.id}`);
                 }
               } catch (releaseErr) {
@@ -1071,7 +1073,7 @@ router.post(
 
         // Use version-based optimistic update to prevent overwriting concurrent status changes
         const version = Number(currentOrder.version || 0);
-        const { data: failedOrder } = await db
+        const { data: failedOrder } = await req.db
           .from("orders")
           .update({ status: "failed", version: version + 1 })
           .eq("razorpay_order_id", razorpay_order_id)
@@ -1766,7 +1768,7 @@ router.get("/:id/invoice", authMiddleware, async (req, res) => {
     }
 
     // Fetch user details for invoice billing info
-    const { data: user } = await db
+    const { data: user } = await req.db
       .from("users")
       .select("*")
       .eq("id", order.user_id)
@@ -2251,7 +2253,7 @@ router.post(
       const { reason } = req.body;
 
       // Lock check: cannot cancel shipped orders
-      const { data: order } = await db
+      const { data: order } = await req.db
         .from("orders")
         .select("*")
         .eq("id", req.params.id)
@@ -2591,14 +2593,14 @@ router.post("/verify-cod-otp", authMiddleware, async (req, res) => {
     const result = await otpService.verifyCodOtp(orderId, otp);
     if (result.error) return respondError(res, result.error.message, 400, { ...result });
     // OTP verified — confirm the order
-    const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+    const { data: order } = await req.db.from("orders").select("*").eq("id", orderId).single();
     if (order && order.payment_method === "cod") {
       const codPaidTarget = FEATURE_FLAGS.SELF_CANCEL_WINDOW ? OrderStates.PAYMENT_VERIFIED : OrderStates.PAID;
       if (!isValidTransition(order.status, codPaidTarget)) {
         return respondError(res, `Invalid status transition from ${order.status} to ${codPaidTarget}`, 400);
       }
       const paidDims = STATE_DIMENSION_MAP[codPaidTarget] || { delivery_status: "placed", fulfillment_status: null };
-      await db.from("orders").update({ status: codPaidTarget, delivery_status: paidDims.delivery_status, fulfillment_status: paidDims.fulfillment_status }).eq("id", orderId);
+      await req.db.from("orders").update({ status: codPaidTarget, delivery_status: paidDims.delivery_status, fulfillment_status: paidDims.fulfillment_status }).eq("id", orderId);
     }
     return success(res, { verified: true, message: "Order confirmed!" });
   } catch (err) {
@@ -2613,17 +2615,17 @@ router.post("/retry-payment", authMiddleware, requireRole("buyer"), async (req, 
     const { orderId, method } = req.body;
     if (!orderId) return respondError(res, "orderId is required", 400);
 
-    const { data: order } = await db.from("orders").select("*").eq("id", orderId).single();
+    const { data: order } = await req.db.from("orders").select("*").eq("id", orderId).single();
     if (!order) return respondError(res, "Order not found", 404);
     if (order.status === "paid" || order.status === "confirmed") return respondError(res, "Order is already paid", 400);
 
     // Mark old payment attempt as failed
     if (order.razorpay_order_id) {
-      await db.from("orders").update({ payment_status: OrderStates.FAILED }).eq("id", orderId);
+      await req.db.from("orders").update({ payment_status: OrderStates.FAILED }).eq("id", orderId);
     }
 
     if (method === "cod") {
-      await db.from("orders").update({ payment_method: "cod", status: "pending" }).eq("id", orderId);
+      await req.db.from("orders").update({ payment_method: "cod", status: "pending" }).eq("id", orderId);
       return success(res, { method: "cod", message: "Switched to COD. Please proceed." });
     }
 
@@ -2637,7 +2639,7 @@ router.post("/retry-payment", authMiddleware, requireRole("buyer"), async (req, 
       notes: { orderId },
     });
 
-    await db.from("orders").update({
+    await req.db.from("orders").update({
       razorpay_order_id: rzpOrder.id,
       payment_method: method || "online",
       payment_status: "pending",
@@ -2665,7 +2667,7 @@ router.post("/:id/self-cancel", authMiddleware, async (req, res) => {
   try {
     const result = await selfCancel(req.params.id, req.user.userId);
     try {
-      const { data: updated } = await db.from("orders").select("*").eq("id", req.params.id).single();
+      const { data: updated } = await req.db.from("orders").select("*").eq("id", req.params.id).single();
       if (updated) {
         sendSseEvent("order:updated", { order: updated },
           (sub) => (sub.user && sub.user.role === "admin") || (sub.user && sub.user.userId === updated.user_id));
@@ -2773,7 +2775,7 @@ router.post("/:id/request-return", authMiddleware, async (req, res) => {
       return respondError(res, "Return window has expired.", 400);
     }
     const retDims = STATE_DIMENSION_MAP[OrderStates.RETURN_REQUESTED] || { delivery_status: "delivered", fulfillment_status: "delivered" };
-    await db.from("orders").update({
+    await req.db.from("orders").update({
       status: OrderStates.RETURN_REQUESTED,
       delivery_status: retDims.delivery_status,
       fulfillment_status: retDims.fulfillment_status,

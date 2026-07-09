@@ -1481,7 +1481,7 @@ function renderAdminOrders(orders) {
         .join('');
 
       const invoiceLink = o.invoice_token
-        ? `${globalThis.location.origin}/api/orders/share/${o.invoice_token}`
+        ? `${API_BASE}/orders/share/${o.invoice_token}`
         : '';
 
       const statusEmoji = {
@@ -3390,7 +3390,7 @@ async function adminDeleteCategory(catId) {
 
 function copyInvoiceLink(token) {
   if (!token) return;
-  const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${token}`;
+  const invoiceUrl = `${API_BASE}/orders/share/${token}`;
   if (navigator.clipboard?.writeText) {
     navigator.clipboard
       .writeText(invoiceUrl)
@@ -4635,7 +4635,7 @@ function renderBulkImportTab() {
         if (feedback) { feedback.textContent = 'Please select an entity type first.'; feedback.className = 'bulk-import-feedback error'; feedback.classList.remove('hidden'); }
         return;
       }
-      window.open(`/api/bulk-import/template/${entity}`, '_blank');
+      window.open(`${API_BASE}/bulk-import/template/${entity}`, '_blank');
     };
   }
 }
@@ -4689,7 +4689,7 @@ async function handleBulkUpload(uploadBtn, progress, progressFill, progressLabel
     if (progressFill) progressFill.style.width = '60%';
     if (progressLabel) progressLabel.textContent = 'Importing...';
 
-    const res = await fetch(`/api/bulk-import/${entity}`, {
+    const res = await fetch(`${API_BASE}/bulk-import/${entity}`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -5802,7 +5802,7 @@ function setupAdminEventHandlers() {
       ? `Expected delivery: ${new Date(order.expected_delivery_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${order.delivery_days_text ? ` (${order.delivery_days_text})` : ''}`
       : '';
 
-    const invoiceUrl = `${globalThis.location.origin}/api/orders/share/${order.invoice_token}`;
+    const invoiceUrl = `${API_BASE}/orders/share/${order.invoice_token}`;
 
     const lines = [
       `🧾 *Invoice from Sporekart*`,

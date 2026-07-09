@@ -28,9 +28,9 @@ class OtpService {
     otpStore.set(OtpService._storeKey(identifier), record);
 
     if (config.isDev) {
-      commLogger.info(`[OtpService] OTP for ${OtpService.maskIdentifier(identifier)}: ${otp}`);
+      commLogger.info(`[OtpService] OTP generated for ${OtpService.maskIdentifier(identifier)}`);
       if (process.stdout.isTTY) {
-        console.log(`\n[MOCK OTP] ${otp} (valid ${config.otp.expiryMinutes} min for ${OtpService.maskIdentifier(identifier)})\n`);
+        console.log(`\n[MOCK OTP] ${otp[0]}***${otp[otp.length - 1]} (valid ${config.otp.expiryMinutes} min for ${OtpService.maskIdentifier(identifier)})\n`);
       }
     } else {
       commLogger.info(`[OtpService] OTP generated for ${OtpService.maskIdentifier(identifier)}`);

@@ -416,7 +416,7 @@ class ProfileModal {
     const total = Number(totalValue).toFixed(2);
     const trackingHtml = this.renderTrackingTimeline(o);
     const shareLink = o.invoice_token
-      ? `${window.location.origin}/api/orders/share/${o.invoice_token}`
+      ? `${API_BASE}/orders/share/${o.invoice_token}`
       : '';
     const cancelNote = o.delivery_status === 'cancelled' && o.cancel_reason
       ? `<div class="pm-cancel-note"><strong>Cancellation reason:</strong> ${o.cancel_reason}</div>`

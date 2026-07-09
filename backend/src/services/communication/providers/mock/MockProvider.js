@@ -38,8 +38,7 @@ class MockProvider extends ProviderInterface {
     });
 
     if (process.stdout.isTTY) {
-      console.log(`\n[MOCK SMS] To: ${recipient}`);
-      console.log(`   Message: ${(finalMessage || "").substring(0, 200)}`);
+      console.log(`\n[MOCK SMS] To: ${LogService.maskRecipient(recipient)}`);
       if (template) console.log(`   Template: ${template}`);
       console.log();
     }
@@ -68,8 +67,9 @@ class MockProvider extends ProviderInterface {
     commLogger.info(`[MockProvider:OTP] Sent to ${OtpService.maskIdentifier(recipient)} via ${channel}`);
 
     if (process.stdout.isTTY) {
-      console.log(`\n[MOCK OTP] To: ${recipient} (via ${channel})`);
-      console.log(`   OTP: ${otp}`);
+      const masked = otp[0] + "***" + otp[otp.length - 1];
+      console.log(`\n[MOCK OTP] To: ${LogService.maskRecipient(recipient)} (via ${channel})`);
+      console.log(`   OTP: ${masked}`);
       console.log(`   Valid for ${config.otp.expiryMinutes} minutes`);
       console.log();
     }
@@ -117,10 +117,7 @@ class MockProvider extends ProviderInterface {
     });
 
     if (process.stdout.isTTY) {
-      console.log(`\n[MOCK WhatsApp] To: ${recipient}`);
-      console.log(`   Message: ${(finalMessage || "").substring(0, 200)}`);
-      if (template) console.log(`   Template: ${template}`);
-      console.log();
+      LogService.maskRecipient(recipient);
     }
 
     LogService.markSent(logId);
@@ -166,9 +163,8 @@ class MockProvider extends ProviderInterface {
     });
 
     if (process.stdout.isTTY) {
-      console.log(`\n[MOCK EMAIL] To: ${recipient}`);
+      console.log(`\n[MOCK EMAIL] To: ${LogService.maskRecipient(recipient)}`);
       console.log(`   Subject: ${finalSubject}`);
-      console.log(`   Body: ${(finalBody || "").substring(0, 200)}`);
       if (template) console.log(`   Template: ${template}`);
       console.log();
     }

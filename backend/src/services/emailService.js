@@ -28,11 +28,7 @@ async function sendEmail({ to, subject, body, html }) {
   const transporter = getTransporter();
 
   if (!transporter || process.env.FORCE_MOCK === 'true') {
-    logger.info(`[EMAIL:MOCK] To: ${to} | Subject: ${subject} | Body: ${(body || html || '').substring(0, 120)}`);
-    console.log(`\n📧 [MOCK EMAIL] To: ${to}`);
-    console.log(`   Subject: ${subject}`);
-    if (body) console.log(`   Body: ${body.substring(0, 200)}`);
-    console.log();
+    logger.info(`[EMAIL:MOCK] To: ${(to || '').replace(/(?<=.{3}).(?=.*@)/g, '*')} | Subject: ${subject}`);
     return { success: true, mock: true };
   }
 
@@ -59,10 +55,8 @@ async function sendOtpEmail(toEmail, otp) {
   const isPlaceholder = host.includes('xxxx') || host.includes('your-') || !host || process.env.FORCE_MOCK === 'true';
 
   if (isPlaceholder) {
-    logger.info(`[MOCK EMAIL] To: ${toEmail} — Your OTP is ${otp}`);
-    console.log(`\n📧 [MOCK EMAIL] To: ${toEmail}`);
-    console.log(`   OTP: ${otp}`);
-    console.log(`   Valid for 10 minutes.\n`);
+    const maskedOtp = otp[0] + "***" + otp[otp.length - 1];
+    logger.info(`[MOCK EMAIL] To: ${(toEmail || '').replace(/(?<=.{3}).(?=.*@)/g, '*')} — Your OTP is ${maskedOtp}`);
     return;
   }
 

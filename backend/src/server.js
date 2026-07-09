@@ -123,6 +123,10 @@ const selectDb = require("./middleware/selectDb");
 app.use(selectDb);
 
 // Routes
+app.use("/api/auth", (req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  next();
+});
 app.use("/api/auth", authRoutes);
 const twoFARoutes = require("./modules/twofa/TwoFAController");
 app.use("/api/auth", twoFARoutes);

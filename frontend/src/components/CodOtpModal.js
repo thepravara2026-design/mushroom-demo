@@ -1,3 +1,5 @@
+import { API_BASE } from '../api/client.js';
+
 let otpTimer = null;
 
 export function renderCodOtpScreen(container, { orderId, phone, onVerified, onSwitchToOnline }) {
@@ -120,7 +122,7 @@ export function renderCodOtpScreen(container, { orderId, phone, onVerified, onSw
     statusEl.innerHTML = '';
 
     try {
-      const res = await fetch(`/api/orders/${orderId}/verify-cod-otp`, {
+      const res = await fetch(`${API_BASE}/orders/${orderId}/verify-cod-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ otp })

@@ -1,4 +1,5 @@
 import { state } from '../utils/state.js';
+import { API_BASE } from '../api/client.js';
 
 export function renderCouponSection(container, { subtotal, onApply, onRemove }) {
   const isApplied = !!state.activePromo;
@@ -72,7 +73,7 @@ export function renderCouponSection(container, { subtotal, onApply, onRemove }) 
       applyBtn.textContent = 'Checking...';
 
       try {
-        const res = await fetch(`/api/orders/validate-coupon?code=${encodeURIComponent(code)}&subtotal=${subtotal}`);
+        const res = await fetch(`${API_BASE}/orders/validate-coupon?code=${encodeURIComponent(code)}&subtotal=${subtotal}`);
         const json = await res.json();
 
         if (json.success && json.data.valid) {

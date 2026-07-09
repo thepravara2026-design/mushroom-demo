@@ -2692,7 +2692,7 @@ async function openProductDetails(id) {
         if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
         try {
           const token = state.token ? `Bearer ${state.token}` : '';
-          const resp = await fetch(`/api/notify-me/${product.id}`, {
+          const resp = await fetch(`${API_BASE}/notify-me/${product.id}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: token } : {}) },
             body: JSON.stringify({ email }),
@@ -4087,7 +4087,7 @@ async function handleCheckoutInitiation() {
 
   // Reserve inventory for cart items (Phase 2)
   try {
-    const invResp = await fetch('/api/inventory/reserve', {
+    const invResp = await fetch(`${API_BASE}/inventory/reserve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -8107,7 +8107,7 @@ function initScrollReveal() {
 // Window functions for global access
 function copyInvoiceLink(token) {
   if (!token) return;
-  const invoiceUrl = `${window.location.origin}/api/orders/share/${token}`;
+  const invoiceUrl = `${API_BASE}/orders/share/${token}`;
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard
       .writeText(invoiceUrl)
@@ -8769,7 +8769,7 @@ async function renderBlogDetail(slug) {
 
 async function checkPincode(pincode) {
   try {
-    const resp = await fetch(`/api/pincode/${pincode}`)
+    const resp = await fetch(`${API_BASE}/pincode/${pincode}`)
     return await resp.json()
   } catch {
     return { serviceable: false, codAvailable: false, estimatedDays: null }
@@ -8836,7 +8836,7 @@ async function trackCartAbandonment() {
       email: state.user?.email || '',
       phone: state.user?.whatsappNumber || state.user?.whatsapp_number || '',
     }
-    await fetch('/api/abandonment/track', {
+    await fetch(`${API_BASE}/abandonment/track`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, cartData }),
@@ -8866,7 +8866,7 @@ async function showPaymentRetryScreen(rzpDetails, method) {
     amount: amt,
     onRetry: async (selectedMethod) => {
       try {
-        const resp = await fetch('/api/orders/retry-payment', {
+        const resp = await fetch(`${API_BASE}/orders/retry-payment`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

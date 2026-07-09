@@ -1,3 +1,5 @@
+import { API_BASE } from '../api/client.js';
+
 export function initDeliveryCheck(container, options = {}) {
   if (!container) return;
 

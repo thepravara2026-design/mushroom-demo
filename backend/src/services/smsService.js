@@ -19,9 +19,7 @@ async function sendSms({ to, message }) {
   const isPlaceholder = sid.startsWith('ACxxxxxxxx') || sid.includes('xxxx') || from.includes('xxxx') || !sid || !token || !from;
 
   if (isPlaceholder || process.env.FORCE_MOCK === 'true') {
-    logger.info(`[SMS:MOCK] To: ${to} | Message: ${message.substring(0, 120)}`);
-    console.log(`\n📱 [MOCK SMS] To: ${to}`);
-    console.log(`   Message: ${message.substring(0, 200)}\n`);
+    logger.info(`[SMS:MOCK] To: ${to.slice(0, 2)}****${to.slice(-2)} | Message length: ${message.length} chars`);
     return { success: true, mock: true };
   }
 
@@ -45,10 +43,8 @@ async function sendOtpSms(toPhone, otp) {
   const isPlaceholder = sid.startsWith('ACxxxxxxxx') || sid.includes('xxxx') || from.includes('xxxx') || process.env.FORCE_MOCK === 'true';
 
   if (isPlaceholder || !sid || !token || !from) {
-    logger.info(`[MOCK SMS] To: ${toPhone} — Your OTP is ${otp}`);
-    console.log(`\n📱 [MOCK SMS] To: ${toPhone}`);
-    console.log(`   OTP: ${otp}`);
-    console.log(`   Valid for 10 minutes.\n`);
+    const maskedOtp = otp[0] + "***" + otp[otp.length - 1];
+    logger.info(`[MOCK SMS] To: ${toPhone.slice(0, 2)}****${toPhone.slice(-2)} — Your OTP is ${maskedOtp}`);
     return;
   }
 

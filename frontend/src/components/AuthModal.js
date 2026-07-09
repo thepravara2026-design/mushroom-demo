@@ -1,4 +1,5 @@
 import { authApi } from '../api/authApi.js';
+import { API_BASE } from '../api/client.js';
 import { saveAuth, clearAuth, saveCart, state } from '../utils/state.js';
 import { showErrorToast, showPopupModal } from '../utils/notify.js';
 import { isValidIndianPhone, isValidEmail, isValidOtp, getFieldError } from '../utils/validation.js';
@@ -604,7 +605,6 @@ export class AuthModal {
       this.close();
       if (this.onSuccessCallback) this.onSuccessCallback();
       const userName = data.user?.fullName || data.user?.full_name || 'Valued Cultivator';
-      const { showPopupModal } = await import('../utils/notify.js');
       showPopupModal({
         title: '🎉 Welcome!',
         message: `Hello ${userName}, welcome back!`,
@@ -638,7 +638,7 @@ export class AuthModal {
       : this.nameInput;
     if (!nameField || nameField.value.trim().length >= 2) return;
     try {
-      const res = await fetch(`/api/auth/lookup?q=${encodeURIComponent(value)}`);
+      const res = await fetch(`${API_BASE}/auth/lookup?q=${encodeURIComponent(value)}`);
       if (!res.ok) return;
       const body = await res.json();
       const data = body && body.data ? body.data : body;

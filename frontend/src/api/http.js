@@ -2,8 +2,10 @@ import { state, clearAuth } from '../utils/state.js';
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
-console.log("VITE_API_BASE_URL =", import.meta.env.VITE_API_BASE_URL);
-console.log("API_BASE =", API_BASE);
+if (import.meta.env.DEV) {
+  console.log("VITE_API_BASE_URL =", import.meta.env.VITE_API_BASE_URL);
+  console.log("API_BASE =", API_BASE);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,7 +37,7 @@ export async function fetchWithAuth(
   let attempt = 0;
   while (true) {
     try {
-      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', ...options, headers });
 
       if (res.status === 401) {
         // clear auth and surface a specific error to caller
