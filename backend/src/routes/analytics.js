@@ -26,6 +26,45 @@ function buildDateFilter(startDate, endDate) {
 
 router.get("/health", (req, res) => res.json({ status: "ok" }));
 
+// Temporary GET test route to verify deployment and make browser testing easy.
+// Returns simple diagnostic JSON including deploy timestamp and optional commit SHA if set in env.
+router.get("/track", (req, res) => {
+  const commit = process.env.DEPLOY_COMMIT_SHA || process.env.COMMIT_SHA || null;
+  const deployedAt = new Date().toISOString();
+  return res.json({ ok: true, service: "analytics", deployedAt, commit });
+});
+
+// Public ingest endpoint for client-side tracking (accepts optional auth)
+router.post("/track", authMiddleware.optional, async (req, res) => {
+  try {
+    const { eventType, metadata, page } = req.body || {};
+    if (!eventType) return respondError(res, 'eventType is required', 400);
+
+    const payload = {
+      event_type: eventType,
+      user_id: req.user && req.user.userId ? req.user.userId : null,
+      guest_token: (metadata && metadata.guestToken) || req.headers['x-guest-token'] || null,
+      session_id: (metadata && metadata.sessionId) || req.headers['x-session-id'] || null,
+      page: page || (req.body && req.body.page) || null,
+      metadata: metadata || null,
+    };
+
+    // Log incoming tracking events for debugging / verification
+    try {
+      logger.info(`[Analytics] Track ingest: event="${String(eventType)}" user="${String(payload.user_id)}" guest="${String(payload.guest_token)}" session="${String(payload.session_id)}" page="${String(payload.page)}" ip="${req.ip || req.connection?.remoteAddress || 'unknown'}"`);
+    } catch (logErr) {
+      // don't fail the request if logging fails
+      console.warn('[Analytics] Failed to log track event:', logErr && logErr.message);
+    }
+
+    await db.from('analytics_events').insert(payload).then();
+    return success(res, { ok: true });
+  } catch (err) {
+    logger.error('[Analytics] Track ingest error: ' + (err && err.message));
+    return respondError(res, err.message || 'Failed to record analytics event', 500);
+  }
+});
+
 router.use(authMiddleware, adminOnly);
 
 router.get("/dashboard", async (req, res) => {
